@@ -4,4 +4,6 @@
 
 ## Q-Learning Model-Free
 
-TBD, have already implemented previously.
+Best Explanation about DQN usage is:
+
+https://pylessons.com/Beyond-DQN

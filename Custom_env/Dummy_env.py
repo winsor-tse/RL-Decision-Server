@@ -2,17 +2,30 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 
+
+"""
+TODO: Fast API's hosting of Server
+
+Server start up will run the app, listening for states
+
+Step will receive state (parsed into digestable format) and respond with an action
+
+getreward() -> function will determine reward based on game heuristics
+
+"""
+
+
 class CustomBlankEnv(gym.Env):
     def __init__(self):
         super().__init__()
-        # Define action and observation space
-        self.action_space = spaces.Discrete(2)
-        self.observation_space = spaces.Box(low=0, high=1, shape=(4,), dtype=np.float32)
-
-        # Initialize environment state variables
+        #TODO: Can make actions configurable
+        self.Actions = ('up','down','left','right','attack')
+        self.single_action_space = spaces.Discrete(len(self.Actions))
+        self.single_observation_space = spaces.Box(low=0, high=1, shape=(4,), dtype=np.float32)
         self.current_state = np.zeros(4, dtype=np.float32)
         self.current_step = 0
         self.max_steps = 100
+
 
     def _get_obs(self):
         # This method should return the current observation based on the environment's state
@@ -23,9 +36,9 @@ class CustomBlankEnv(gym.Env):
         return {"current_step": self.current_step}
 
     def reset(self, seed=None, options=None):
-        super().reset(seed=seed) # Important for seeding the environment's PRNG
-
+        #super().reset(seed=seed) # Important for seeding the environment's PRNG
         # Reset environment to an initial state
+        # Reset intial state can just be np.zeros(State Space)
         self.current_state = self.np_random.uniform(low=0, high=1, size=(4,)).astype(np.float32)
         self.current_step = 0
 
@@ -34,21 +47,17 @@ class CustomBlankEnv(gym.Env):
         return observation, info
 
     def step(self, action):
-        # Apply the action and update the environment's state
-        # In this blank example, we just increment a counter and slightly change the state
         self.current_step += 1
         self.current_state += self.np_random.uniform(low=-0.1, high=0.1, size=(4,)).astype(np.float32)
         self.current_state = np.clip(self.current_state, 0, 1) # Keep state within bounds
-        # Calculate reward (e.g., a small negative reward for each step)
         reward = -0.01
-        # Determine if the episode is terminated or truncated
-        terminated = False # No specific termination condition in this blank example
-        truncated = self.current_step >= self.max_steps # Truncate after max_steps
-
+        terminated = False
+        truncated = self.current_step >= self.max_steps
         observation = self._get_obs()
         info = self._get_info()
         return observation, reward, terminated, truncated, info
 
+    #Useless?
     def render(self):
         # Implement rendering logic here (e.g., print state, visualize with Matplotlib)
         if self.render_mode == "human":

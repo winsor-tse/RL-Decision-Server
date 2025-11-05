@@ -46,7 +46,6 @@ newlogprob -> New Policy comes from current Model of get_action_and_value.
 ### CleanRL PPO: Glossary with Equations and Code Mapping
 
 
-
 | Term / Equation                                            | Description                                  | CleanRL Variable / Code                       |
 | ------------------------------------------------------------ | ---------------------------------------------- | ----------------------------------------------- |
 | `s_t`                                                      | State at timestep*t*                         | `obs`, `next_obs`                             |
@@ -134,7 +133,7 @@ CleanRL uses a standard **mean squared error (MSE)** loss between predicted valu
 v_loss = 0.5 * ((newvalue - b_returns) ** 2).mean()
 ```
 
-### Extra Commentary about PPO inside LLMs
+### Extra Commentary about PPO for RLHF using LLMs
 
 1. Example usage of KL divergence:
    1. Between the current policy and a reference policy (e.g., the SFT model) when training LLMs with PPO to avoid the policy becoming too different from the reference. We compute KL divergence per token by comparing token probability distributions from the two LLMs for each token in the sequence. This can be added as a penalty to the PPO loss or directly subtracted from the reward.
