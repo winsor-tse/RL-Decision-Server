@@ -8,10 +8,10 @@ Considered to be stable, its able to limit or constraint the policy updates so t
 
 Brief explanation of TRPO, it uses the trust region between two Policies, in this case it would be the old and new actor.
 
-1.  Normalizes action -> This forms a policy ratio.
-2.  Constrains average KL divergence between new and old policies to be less than a defined constant.
-3.  TRPO is guaranteed to improve monotonically, but it is is complicated to solve practically.
-4.  **From TRPO to PPO.** We want an algorithm with the benefits of TRPO—**e.g., stability, data efficiency, and reliability**—but without its complexity. PPO’s objective is inspired by the TRPO but replaces the hard KL constraint with a clipping mechanism to enforce a trust region in a simpler way.
+1. Normalizes action -> This forms a policy ratio.
+2. Constrains average KL divergence between new and old policies to be less than a defined constant.
+3. TRPO is guaranteed to improve monotonically, but it is is complicated to solve practically.
+4. **From TRPO to PPO.** We want an algorithm with the benefits of TRPO—**e.g., stability, data efficiency, and reliability**—but without its complexity. PPO’s objective is inspired by the TRPO but replaces the hard KL constraint with a clipping mechanism to enforce a trust region in a simpler way.
 
 ## PPO training process
 
@@ -27,166 +27,50 @@ b_logprobs -> Old Policy stored at data collection time.
 
 newlogprob -> New Policy comes from current Model of get_action_and_value.
 
-1.  Sampling new data or trajectories from the policy.
-2.  Performing several policy updates over the sampled data.
+1. Sampling new data or trajectories from the policy.
+2. Performing several policy updates over the sampled data.
 
 #### Training Process Visualized:
 
--   **Collect rollout** using old policy: store `logprobs`, `rewards`, `values`
-    
--   **Compute GAE advantages** and **returns**
-    
--   **Recompute new logprobs, values** for minibatches
-    
--   Compute:
-    
-    -   `pg_loss`: clipped policy gradient loss
-    -   `v_loss`: critic regression loss
-    -   `entropy`: exploration bonus
--   Combine and backpropagate using loss.
-    
--   One `loss.backward()` Updates Both Actor and Critic.
-    
+- **Collect rollout** using old policy: store `logprobs`, `rewards`, `values`
+- **Compute GAE advantages** and **returns**
+- **Recompute new logprobs, values** for minibatches
+- Compute:
+
+  - `pg_loss`: clipped policy gradient loss
+  - `v_loss`: critic regression loss
+  - `entropy`: exploration bonus
+- Combine and backpropagate using loss.
+- One `loss.backward()` Updates Both Actor and Critic.
 
 ### CleanRL PPO: Glossary with Equations and Code Mapping
 
-Term / Equation
 
-Description
 
-CleanRL Variable / Code
-
-`s_t`
-
-State at timestep*t*
-
-`obs`, `next_obs`
-
-`a_t`
-
-Action taken at timestep*t*
-
-`actions`
-
-`r_t`
-
-Reward received at timestep*t*
-
-`rewards`
-
-`π(a_t‖s_t)`
-
-Current policy probability
-
-Computed in`agent.get_action_and_value()`
-
-`π_old(a_t‖s_t)`
-
-Policy used during rollout
-
-Stored as`logprobs`
-
-`log π(a_t‖s_t)`
-
-Log-probability under current policy
-
-`newlogprob`
-
-`log π_old(a_t‖s_t)`
-
-Log-probability under old policy
-
-`logprobs`
-
-`r_t(θ) = π(a_t‖s_t) / π_old(a_t‖s_t)`
-
-Probability ratio between new and old policy
-
-`ratio = exp(newlogprob - b_logprobs)`
-
-`δ_t = r_t + γ V(s_{t+1}) - V(s_t)`
-
-Temporal difference error
-
-`delta` in GAE loop
-
-`A_t = δ_t + (γλ)δ_t+1 + ....`
-
-Advantage estimate from GAE
-
-`advantages`
-
-`V(s_t)`
-
-Value function estimate (critic)
-
-`values`, `newvalue`
-
-`R_t = A_t + V(s_t)`
-
-Return used as target for value loss
-
-`returns`
-
-`L_clip = min(r_t * A_t, clip(r_t, 1 - ε, 1 + ε) * A_t)`
-
-PPO clipped surrogate loss
-
-`pg_loss = max(pg_loss1, pg_loss2)`
-
-`H[π]`
-
-Entropy of policy (exploration bonus)
-
-`entropy.mean()`
-
-`L_V = 0.5 * (V(s_t) - R_t)^2`
-
-Critic (value function) loss using MSE
-
-`v_loss`
-
-`L_total = L_clip - c₂ * H[π] + c₁ * L_V`
-
-Combined PPO loss
-
-`loss = pg - ent + vf * v`
-
-`KL ≈ (r_t - 1) - log(r_t)`
-
-Approximate KL divergence
-
-`approx_kl = ((ratio - 1) - logratio).mean()`
-
-`γ`
-
-Discount factor
-
-`args.gamma`
-
-`λ`
-
-GAE smoothing factor
-
-`args.gae_lambda`
-
-`ε`
-
-PPO clip coefficient
-
-`args.clip_coef`
-
-`loss.backward()`
-
-Computes gradients
-
-PyTorch autograd
-
-`optimizer.step()`
-
-Updates model parameters
-
-PyTorch optimizer
+| Term / Equation                                            | Description                                  | CleanRL Variable / Code                       |
+| ------------------------------------------------------------ | ---------------------------------------------- | ----------------------------------------------- |
+| `s_t`                                                      | State at timestep*t*                         | `obs`, `next_obs`                             |
+| `a_t`                                                      | Action taken at timestep*t*                  | `actions`                                     |
+| `r_t`                                                      | Reward received at timestep*t*               | `rewards`                                     |
+| `π(a_t‖s_t)`                                             | Current policy probability                   | Computed in`agent.get_action_and_value()`     |
+| `π_old(a_t‖s_t)`                                         | Policy used during rollout                   | Stored as`logprobs`                           |
+| `log π(a_t‖s_t)`                                         | Log-probability under current policy         | `newlogprob`                                  |
+| `log π_old(a_t‖s_t)`                                     | Log-probability under old policy             | `logprobs`                                    |
+| `r_t(θ) = π(a_t‖s_t) / π_old(a_t‖s_t)`                | Probability ratio between new and old policy | `ratio = exp(newlogprob - b_logprobs)`        |
+| `δ_t = r_t + γ V(s_{t+1}) - V(s_t)`                      | Temporal difference error                    | `delta` in GAE loop                           |
+| `A_t = δ_t + (γλ)δ_t+1 + ....`                         | Advantage estimate from GAE                  | `advantages`                                  |
+| `V(s_t)`                                                   | Value function estimate (critic)             | `values`, `newvalue`                          |
+| `R_t = A_t + V(s_t)`                                       | Return used as target for value loss         | `returns`                                     |
+| `L_clip = min(r_t * A_t, clip(r_t, 1 - ε, 1 + ε) * A_t)` | PPO clipped surrogate loss                   | `pg_loss = max(pg_loss1, pg_loss2)`           |
+| `H[π]`                                                    | Entropy of policy (exploration bonus)        | `entropy.mean()`                              |
+| `L_V = 0.5 * (V(s_t) - R_t)^2`                             | Critic (value function) loss using MSE       | `v_loss`                                      |
+| `L_total = L_clip - c₂ * H[π] + c₁ * L_V`               | Combined PPO loss                            | `loss = pg - ent + vf * v`                    |
+| `KL ≈ (r_t - 1) - log(r_t)`                               | Approximate KL divergence                    | `approx_kl = ((ratio - 1) - logratio).mean()` |
+| `γ`                                                       | Discount factor                              | `args.gamma`                                  |
+| `λ`                                                       | GAE smoothing factor                         | `args.gae_lambda`                             |
+| `ε`                                                       | PPO clip coefficient                         | `args.clip_coef`                              |
+| `loss.backward()`                                          | Computes gradients                           | PyTorch autograd                              |
+| `optimizer.step()`                                         | Updates model parameters                     | PyTorch optimizer                             |
 
 ### **Clipped objective.**
 
@@ -202,8 +86,8 @@ logratio = newlogprob - old_logprobsratio = logratio.exp()# r_t(θ) = π(a_t‖s
 
 After which we calculate
 
--   **Unclipped** : `-A_t * r_t`
--   **Clipped** : `-A_t * clip(r_t, 1 - ε, 1 + ε)`
+- **Unclipped** : `-A_t * r_t`
+- **Clipped** : `-A_t * clip(r_t, 1 - ε, 1 + ε)`
 
 ```
 pg_loss1 = -mb_advantages * ratiopg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - clip_coef, 1 + clip_coef)pg_loss = torch.max(pg_loss1, pg_loss2).mean# L_clip = min(r_t * A_t, clip(r_t, 1 - ε, 1 + ε) * A_t)
@@ -235,8 +119,8 @@ delta = rewards[t] + gamma * nextvalues * nextnonterminal - values[t]advantages[
 
 These are used to train both actor and critic:
 
--   The **actor** (via `advantages`) -> via pg_loss & entropy
--   The **critic** (via `returns`) -> via v_loss (MSE)
+- The **actor** (via `advantages`) -> via pg_loss & entropy
+- The **critic** (via `returns`) -> via v_loss (MSE)
 
 ### Critic
 
@@ -252,6 +136,6 @@ v_loss = 0.5 * ((newvalue - b_returns) ** 2).mean()
 
 ### Extra Commentary about PPO inside LLMs
 
-1.  Example usage of KL divergence:
-    1.  Between the current policy and a reference policy (e.g., the SFT model) when training LLMs with PPO to avoid the policy becoming too different from the reference. We compute KL divergence per token by comparing token probability distributions from the two LLMs for each token in the sequence. This can be added as a penalty to the PPO loss or directly subtracted from the reward.
-2.  Unlike a reward model that predicts the outcome reward, the critic predicts expected reward per token. The value function is also on-policy, unlike reward models which are fixed at the beginning of RL training. In PPO, the critic is trained alongside the LLM in each policy update by using an MSE loss against actual / observed rewards. **This is called an actor-critic setup.
+1. Example usage of KL divergence:
+   1. Between the current policy and a reference policy (e.g., the SFT model) when training LLMs with PPO to avoid the policy becoming too different from the reference. We compute KL divergence per token by comparing token probability distributions from the two LLMs for each token in the sequence. This can be added as a penalty to the PPO loss or directly subtracted from the reward.
+2. Unlike a reward model that predicts the outcome reward, the critic predicts expected reward per token. The value function is also on-policy, unlike reward models which are fixed at the beginning of RL training. In PPO, the critic is trained alongside the LLM in each policy update by using an MSE loss against actual / observed rewards. **This is called an actor-critic setup.
