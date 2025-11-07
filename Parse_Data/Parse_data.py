@@ -1,56 +1,43 @@
-from pydantic import BaseModel
 from typing import List
 
-class Entity(BaseModel):
-    id: int
-    mapX: int
-    mapY: int
-    type: str
-    distance: int
+DIRECTION_MAP = {
+    "up": 0,
+    "down": 1,
+    "left": 2,
+    "right": 3,
+    "idle": 4  # if needed
+}
 
-class Player(BaseModel):
-    id: int
-    mapX: int
-    mapY: int
-    direction: str
-    hp: int
-    maxHp: int
-    mp: int
-    maxMp: int
+def parse_observation(data: dict) -> List[float]:
+    obs = []
+    player = data["player"]
+    direction = DIRECTION_MAP.get(player.get("direction", "idle"), 4)
+    obs.extend([
+        player["mapX"],
+        player["mapY"],
+        direction,
+        player["hp"],
+        player["maxHp"],
+        player["mp"],
+        player["maxMp"]
+    ])
+    monsters = [
+        e for e in data["entities"]
+        if e["type"] == "monster" and not e["isCurrentPlayer"]
+    ]
+    monsters.sort(key=lambda m: m.get("distance", float('inf')))
 
-class WorldState(BaseModel):
-    timestamp: int
-    player: Player
-    entities: List[Entity]
+    for monster in monsters[:2]:
+        obs.extend([
+            monster["mapX"],
+            monster["mapY"],
+            0, 
+            monster["hp"],
+            monster["maxHp"],
+            monster["mp"],
+            monster["maxMp"]
+        ])
 
-"""
-#Use Fast API
-
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List
-import uvicorn
-
-app = FastAPI()
-
-# Allow browser access (CORS)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"]
-)
-
-@app.post("/ai-action")
-async def ai_action(state: WorldState):
-    print("Received state:", state)
-
-    action = "left"
-
-    return {"move": action}
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
-"""
+    while len(obs) < 21:
+        obs.extend([0.0] * 7)
+    return obs
