@@ -144,3 +144,45 @@
     }
   ]
 }
+
+"""
+JS code here:
+try {
+        const obsRes = await fetch("http://localhost:8000/observation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(worldState)
+        });
+
+        const obsResult = await obRes.json();
+        console.log("Observation sent:", obsResult);
+
+
+        // 2. Get the last action taken (you can also combine this into one POST if preferred)
+        const actionRes = await fetch("http://localhost:8000/last-action", {
+            method: "GET"
+        });
+
+        const actionData = await actionRes.json();
+        console.log("Received action:", actionData);
+
+        if (actionData.move) {
+            movePlayerDirection(actionData.move); // "left", "right", etc.
+        }
+
+         const resetReset = await fetch("http://localhost:8000/reset", {
+            method: "GET"
+        });
+
+        const resetData = await Reset.json();
+        //Not sure set Player Hp to -1 for death
+        if (resetData){
+            getNetwork().playerHp(-1);
+        }
+
+    } catch (err) {
+        console.error("AI server error:", err);
+    }
+
+
+"""

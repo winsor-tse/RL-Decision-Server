@@ -41,3 +41,13 @@ def parse_observation(data: dict) -> List[float]:
     while len(obs) < 21:
         obs.extend([0.0] * 7)
     return obs
+
+def get_reward(obs, actions):
+    #simple implementation of rewards
+    #Implement based on the given 21 OBS Space
+    #Attacking give positive rewards
+    #Distance from Enemy over a certain limit will give positive rewards
+    #Killing (Track this somehow...) enemy will give positive rewards
+    #Hp below a certain limit is negative rewards, etc.
+    #Rest can be zero reward...
+    return None

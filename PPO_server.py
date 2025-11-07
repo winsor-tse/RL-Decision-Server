@@ -15,6 +15,14 @@ from torch.utils.tensorboard import SummaryWriter
 from Custom_env import Dummy_env
 
 
+"""
+TODO:
+Evaluation Flag needs to be added: Should just be a loop with torch.no_grad.
+    Only FeedForwad
+"""
+
+
+
 @dataclass
 class Args:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -165,7 +173,7 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs, _ = envs.reset(seed=args.seed)
+    next_obs, _ = envs.reset()
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
 
