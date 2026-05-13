@@ -70,7 +70,7 @@ class CustomBlankEnv(gym.Env):
                     return np.array(obs, dtype=np.float32)
             except Exception as e:
                 print("[WARN] Failed to fetch observation:", e)
-            time.sleep(0.1)
+            time.sleep(3)
 
         print("[TIMEOUT] Using last known state")
         return np.array(last_obs, dtype=np.float32)
