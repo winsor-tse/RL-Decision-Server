@@ -64,16 +64,15 @@ class CustomBlankEnv(gym.Env):
         while time.time() - start < self.timeout:
             try:
                 res = requests.get(f"{self.api_url}/observation")
+                print(res.json())
                 obs = Parse_data.parse_observation(res.json())
                 if obs and obs != last_obs:
                     print(f"recevied state here: {obs}")
                     return np.array(obs, dtype=np.float32)
             except Exception as e:
                 print("[WARN] Failed to fetch observation:", e)
-            time.sleep(3)
-
+            time.sleep(5)
         print("[TIMEOUT] Using last known state")
-        return np.array(last_obs, dtype=np.float32)
 
     def reset(self):
         try:
@@ -89,6 +88,7 @@ class CustomBlankEnv(gym.Env):
         self._send_action(action)
         obs = self._wait_for_new_observation()
         #DEbug here
+        print("Stepping")
         self.current_state = np.array(obs, dtype=np.float32)
         self.current_step += 1
         reward = 0 #reward function TBD Parse_data.get_reward(obs, actions)

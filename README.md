@@ -1,4 +1,4 @@
-# RL-Decision-Server
+# "RL-Decision-Server"
 
 This project is a bridge between a Reinforcement Learning (RL) agent and an external application (e.g., game engine or simulation) via a REST API. It enables communication of actions and observations between the agent and the environment, allowing you to train or run RL agents in a decoupled system.
 
