@@ -8,23 +8,13 @@ import Parse_data
 ACTIONS = ["up", "down", "left", "right", "direction:up", "direction:down", "direction:left", "direction:right", "attack", "castSpell:1", "castSpell:2", "castSpell:3"]
 ZMQ_BIND_URL = "tcp://127.0.0.1:5555"
 
-#TODO: the current world state is
-"""
-Received: {'type': 'ai_tick', 'requestId': '5a0a6841-082c-4c5a-b270-5d4c27cb2bbd', 'worldState': {'timestamp': 1778889927696, '
-player': {'id': 7, 'name': 'testsd', 'mapX': 18, 'mapY': 29, 'direction': 'up', 'hp': 1002383, 'maxHp': 1002383, 'mp': 1003118, 'maxMp': 1003118}, 
-'entities': [{'id': 2, 'name': 'Sage of Welcoming', 'type': 'monster', 'isCurrentPlayer': False, 'mapX': 14, 'mapY': 13, 'hp': 500000, 'maxHp': 500000, 'mp': 0, 'maxMp': 0, 'distance': 20}, 
-{'id': 7, 'name': 'testsd', 'type': 'player', 'isCurrentPlayer': True, 'mapX': 18, 'mapY': 29, 'hp': 1002383, 'maxHp': 1002383, 'mp': 1003118, 'maxMp': 1003118, 'distance': 0}]},
- 'pageUrl': 'http://127.0.0.1:8080/?server=test.yugensaga.com', 'timestamp': 1778889927696}
-"""
-#parse into and save as spaces.Box mapX, mapY, direction(0-4), percentageHP (hp/maxHP), percentageMP (mp/maxMP), 
-
 class TestEnv(gym.Env):
     def __init__(self):
         super().__init__()
         self.Actions = ACTIONS
         self.single_action_space = spaces.Discrete(len(self.Actions))
-        self.single_observation_space = spaces.Box(low=0, high=math.inf, shape=(21,), dtype=np.float32)
-        self.current_state = np.zeros(21, dtype=np.float32)  # instead of 21
+        self.single_observation_space = spaces.Box(low=0, high=math.inf, shape=(13,), dtype=np.float32)
+        self.current_state = np.zeros(13, dtype=np.float32)  # instead of 21
         self.current_step = 0
         self.max_steps = 20
         #Intialize
