@@ -8,13 +8,7 @@ ZMQ_BIND_URL = "tcp://127.0.0.1:5555"
 
 
 def decide_move(world_state: Dict[str, Any]) -> str:
-    player_hp = world_state.get("playerHp", 100)
-
-    if player_hp <= 20:
-        return "backward"
-
-    return random.choice(["up", "down", "left", "right"])
-
+    return random.choice(["up", "down", "left", "right", "direction:up", "direction:down", "direction:left", "direction:right", "attack", "castSpell:1", "castSpell:2", "castSpell:3"])
 
 def should_reset(world_state: Dict[str, Any]) -> bool:
     player_hp = world_state.get("playerHp", 100)
