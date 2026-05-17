@@ -1,5 +1,5 @@
 from typing import List
-
+import numpy as np
 DIRECTION_MAP = {
     "up": 0,
     "down": 1,
@@ -9,11 +9,11 @@ DIRECTION_MAP = {
 }
 
 INV_DIRECTION_MAP = {v: k for k, v in DIRECTION_MAP.items()}
-
 OBS_PLAYER_SIZE = 5
 OBS_ENEMY_SIZE = 4
 MAX_ENEMIES = 2
 OBS_SIZE = OBS_PLAYER_SIZE + OBS_ENEMY_SIZE * MAX_ENEMIES  # 13
+
 # Observation layout:
 # [
 #   player_mapX,
@@ -72,7 +72,7 @@ def direction_from_player(player: dict, entity: dict) -> int:
         return DIRECTION_MAP["down"] if dy > 0 else DIRECTION_MAP["up"]
 
 
-def parse_observation(data: dict) -> List[float]:
+def parse_observation(data: dict, obs_size) -> List[float]:
     """
     Converts the game tick/world state into a fixed 13-float observation.
     Supports either:
@@ -108,7 +108,7 @@ def parse_observation(data: dict) -> List[float]:
             ]
         )
     # Pad missing enemy sensor slots with zeros
-    while len(obs) < OBS_SIZE:
+    while len(obs) < obs_size:
         obs.extend([0.0, 0.0, 0.0, 0.0])
     return np.array(obs, dtype=np.float32)
 

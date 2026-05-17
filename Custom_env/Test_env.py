@@ -4,22 +4,29 @@ import numpy as np
 import time
 import math
 import Parse_data
+import zmq
 
 ACTIONS = ["up", "down", "left", "right", "direction:up", "direction:down", "direction:left", "direction:right", "attack", "castSpell:1", "castSpell:2", "castSpell:3"]
 ZMQ_BIND_URL = "tcp://127.0.0.1:5555"
+OBS_PLAYER_SIZE = 5
+OBS_ENEMY_SIZE = 4
+MAX_ENEMIES = 2
+OBS_SIZE = OBS_PLAYER_SIZE + OBS_ENEMY_SIZE * MAX_ENEMIES  # 13
+
+#TODO: test this enviornment
 
 class TestEnv(gym.Env):
     def __init__(self):
         super().__init__()
         self.Actions = ACTIONS
         self.single_action_space = spaces.Discrete(len(self.Actions))
-        self.single_observation_space = spaces.Box(low=0, high=math.inf, shape=(13,), dtype=np.float32)
-        self.current_state = np.zeros(13, dtype=np.float32)  # instead of 21
+        self.single_observation_space = spaces.Box(low=0, high=math.inf, shape=(OBS_SIZE,), dtype=np.float32)
+        self.current_state = np.zeros(OBS_SIZE, dtype=np.float32)  # instead of 21
         self.current_step = 0
         self.max_steps = 20
         #Intialize
         self.context = zmq.Context.instance()
-        self.socket = context.socket(zmq.REP)
+        self.socket = self.context.socket(zmq.REP)
         self.socket.bind(ZMQ_BIND_URL)
 
     def _get_obs(self):
@@ -51,7 +58,7 @@ class TestEnv(gym.Env):
             }
         env.socket.send_json(response)
         world_state = message.get("worldState", {})
-        self.current_state = Parse_data.parse_observation(world_state)
+        self.current_state = Parse_data.parse_observation(world_state, OBS_SIZE)
         return self.current_state, self._get_info()
 
     def step(self, action):
@@ -75,14 +82,14 @@ class TestEnv(gym.Env):
             }
         env.socket.send_json(response)
         self.current_step += 1
-        self.current_state = Parse_data.parse_observation(world_state)
-        return self.current_state, 0, false, false, info
+        self.current_state = Parse_data.parse_observation(world_state, OBS_SIZE)
+        return self.current_state, 0, False, False, self._get_info()
 
 # Example usage:
 if __name__ == "__main__":
     env = TestEnv()
-    obs, info = env.reset()
-    print("Initial Observation:", obs)
+    #bs, info = env.reset()
+    #print("Initial Observation:", obs)
     for _ in range(env.max_steps):
         #DO AI stuff here
         action = np.random.randint(len(ACTIONS)) #replaced with DRL categorical action eventually
