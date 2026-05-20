@@ -112,12 +112,58 @@ def parse_observation(data: dict, obs_size) -> List[float]:
         obs.extend([0.0, 0.0, 0.0, 0.0])
     return np.array(obs, dtype=np.float32)
 
-def get_reward(obs, actions):
-    #simple implementation of rewards
-    #Implement based on the given OBS Space
-    #Attacking give positive rewards
-    #Closer Distance from Enemy will give positive rewards, vice versa
-    #Killing enemy will give positive rewards (enemy hp turns to 0)
-    #Hp percentage below a certain limit is negative rewards, etc.
-    #Rest can be zero reward...
+
+#TODO: Prev Observations can create bugs when not cleared during reset??
+
+def get_termination(obs, prev_obs):
+    player_hp_pct = float(obs[3])
+    if player_hp_pct <= 0.0:
+        return True
+    # Enemy killed
+    enemy_was_alive = prev_nearest_enemy["hp_pct"] > 0
+    enemy_is_dead = nearest_enemy["hp_pct"] <= 0
+    if enemy_was_alive and enemy_is_dead:
+        return True
+    return False
+
+def get_truncated(obs, prev_obs, current_step):
+    #simple each epoch has max 100 steps
+    if current_step >= 100:
+        return True
+    return False
+
+
+#simple implementation of rewards
+#Implement based on the given OBS Space
+#Attacking give positive rewards
+#Closer Distance from Enemy will give positive rewards, vice versa
+#Killing enemy will give positive rewards (enemy hp turns to 0)
+#Hp percentage below a certain limit is negative rewards, etc.
+#Rest can be zero reward...
+def get_reward(obs, actions, prev_obs):
+    reward = 0.0
+    player_hp_pct = float(obs[3])
+    nearest_enemy = enemy_block(obs, 0)
+    if player_hp_pct < 0.25:
+        reward -= 0.50
+    elif player_hp_pct < 0.50:
+        reward -= 0.15
+        # If no previous observation exists, return stateless reward only
+    if prev_obs is None or not np.any(prev_obs):
+        return float(reward)
+    prev_player_hp_pct = float(prev_obs[3])
+    prev_nearest_enemy = enemy_block(prev_obs, 0)
+    # Player HP loss penalty
+    hp_lost = prev_player_hp_pct - player_hp_pct
+    if hp_lost > 0:
+        reward -= 2.0 * hp_lost
+    # Enemy damage reward
+    enemy_hp_lost = prev_nearest_enemy["hp_pct"] - nearest_enemy["hp_pct"]
+    if enemy_hp_lost > 0:
+        reward += 3.0 * enemy_hp_lost
+    # Enemy kill reward
+    enemy_was_alive = prev_nearest_enemy["hp_pct"] > 0
+    enemy_is_dead = nearest_enemy["hp_pct"] <= 0
+    if enemy_was_alive and enemy_is_dead:
+        reward += 5.0
     return None

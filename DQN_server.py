@@ -138,7 +138,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
-    obs, _ = envs.reset(seed=args.seed)
+    #obs, _ = envs.reset(seed=args.seed) //do not need to reset at start
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         epsilon = linear_schedule(args.start_e, args.end_e, args.exploration_fraction * args.total_timesteps, global_step)
@@ -186,9 +186,9 @@ if __name__ == "__main__":
                     writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
                 # optimize the model
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+                optimizer.zero_grad() # reset grad
+                loss.backward() #back prop
+                optimizer.step() #
 
             # update target network
             if global_step % args.target_network_frequency == 0:

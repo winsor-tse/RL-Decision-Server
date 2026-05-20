@@ -21,16 +21,16 @@ class TestEnv(gym.Env):
         self.Actions = ACTIONS
         self.single_action_space = spaces.Discrete(len(self.Actions))
         self.single_observation_space = spaces.Box(low=0, high=math.inf, shape=(OBS_SIZE,), dtype=np.float32)
-        self.current_state = np.zeros(OBS_SIZE, dtype=np.float32)  # instead of 21
+        self.next_state = np.zeros(OBS_SIZE, dtype=np.float32)  # instead of 21
         self.current_step = 0
-        self.max_steps = 20
-        #Intialize
+        self.max_steps = 20 #Only used for testing main below, the max steps is done in server
+        #Intialize ZMQ and sockets
         self.context = zmq.Context.instance()
         self.socket = self.context.socket(zmq.REP)
         self.socket.bind(ZMQ_BIND_URL)
 
     def _get_obs(self):
-        return self.current_state
+        return self.next_state
 
     def _get_info(self):
         return {"current_step": self.current_step, "current_state": self.current_state}
@@ -58,8 +58,9 @@ class TestEnv(gym.Env):
             }
         env.socket.send_json(response)
         world_state = message.get("worldState", {})
-        self.current_state = Parse_data.parse_observation(world_state, OBS_SIZE)
-        return self.current_state, self._get_info()
+        self.next_state = np.zeros(OBS_SIZE, dtype=np.float32) #needs to be nothing
+        real_next_state = Parse_data.parse_observation(world_state, OBS_SIZE)
+        return real_next_state, self._get_info()
 
     def step(self, action):
         message = env.socket.recv_json()
@@ -82,8 +83,14 @@ class TestEnv(gym.Env):
             }
         env.socket.send_json(response)
         self.current_step += 1
-        self.current_state = Parse_data.parse_observation(world_state, OBS_SIZE)
-        return self.current_state, 0, False, False, self._get_info()
+        real_next_state = Parse_data.parse_observation(world_state, OBS_SIZE)
+        #TODO: need to be really careful here actually b/c one edge case is if we terminate or reset epoch
+        # we can get obs from previous epochs and continually terminating or give false rewards
+        reward = Parse_data.get_reward(real_next_state, action, self.next_state) #self.current_state is previous
+        terminated = Parse_data.get_termination(real_next_state, self.next_state)
+        truncated = Parse_data.get_truncated(real_next_state, self.next_state, self.current_step)
+        self.next_state = real_next_state
+        return self.next_state, reward, terminated, False, self._get_info()
 
 # Example usage:
 if __name__ == "__main__":
