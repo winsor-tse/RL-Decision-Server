@@ -115,6 +115,8 @@ def parse_observation(data: dict, obs_size) -> List[float]:
 
 #TODO: Prev Observations can create bugs when not cleared during reset??
 
+#Termination: "The game is over forever, so there is no future."
+#Future Value: Set to 0.
 def get_termination(obs, prev_obs):
     player_hp_pct = float(obs[3])
     if player_hp_pct <= 0.0:
@@ -126,6 +128,8 @@ def get_termination(obs, prev_obs):
         return True
     return False
 
+# Truncation: "The game was paused by a timer, so we must guess what the future would have looked like."
+# Future Value: Kept (The neural network guesses how many points the agent would have gotten if the timer hadn't stopped the game)
 def get_truncated(obs, prev_obs, current_step):
     #simple each epoch has max 100 steps
     if current_step >= 100:
