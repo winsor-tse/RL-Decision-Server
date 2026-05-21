@@ -32,6 +32,8 @@ class TestEnv(gym.Env):
     def _get_obs(self):
         return self.next_state
 
+    #This is currently fine but cleanRL's native info looks at final_observation and final_info
+    #Not sure how to handle this customly
     def _get_info(self):
         return {"current_step": self.current_step, "next_state": self.next_state}
     
