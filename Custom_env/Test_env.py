@@ -48,7 +48,7 @@ class TestEnv(gym.Env):
             response = {
                 "type": "ai_result",
                 "requestId": message.get("requestId"),
-                "move": "direction:up", #handle None in JS
+                "move": "direction:up", #handle None in JS or do nothing
                 "reset": True,
                 "serverTime": time.time()
             }
