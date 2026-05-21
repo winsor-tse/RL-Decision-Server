@@ -15,14 +15,6 @@ from torch.utils.tensorboard import SummaryWriter
 from Custom_env import Dummy_env
 
 
-"""
-TODO:
-Evaluation Flag needs to be added: Should just be a loop with torch.no_grad.
-    Only FeedForwad
-"""
-
-
-
 @dataclass
 class Args:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
