@@ -49,6 +49,21 @@ def distance_from_player(player: dict, entity: dict) -> float:
     # Grid-world style Manhattan distance
     return float(abs(dx) + abs(dy))
 
+def enemy_block(obs: Sequence[float], enemy_index: int):
+    """
+    enemy_index:
+    - 0 for nearest enemy
+    - 1 for second nearest enemy
+    """
+    start = OBS_PLAYER_SIZE + enemy_index * OBS_ENEMY_SIZE
+
+    return {
+        "distance": float(obs[start]),
+        "direction": int(obs[start + 1]),
+        "hp_pct": float(obs[start + 2]),
+        "mp_pct": float(obs[start + 3]),
+    }
+
 
 def direction_from_player(player: dict, entity: dict) -> int:
     """
@@ -118,10 +133,14 @@ def parse_observation(data: dict, obs_size) -> List[float]:
 #Termination: "The game is over forever, so there is no future."
 #Future Value: Set to 0.
 def get_termination(obs, prev_obs):
+    if prev_obs is None or not np.any(prev_obs):
+        return False
     player_hp_pct = float(obs[3])
     if player_hp_pct <= 0.0:
         return True
     # Enemy killed
+    nearest_enemy = enemy_block(obs, 0)
+    prev_nearest_enemy = enemy_block(prev_obs, 0)
     enemy_was_alive = prev_nearest_enemy["hp_pct"] > 0
     enemy_is_dead = nearest_enemy["hp_pct"] <= 0
     if enemy_was_alive and enemy_is_dead:

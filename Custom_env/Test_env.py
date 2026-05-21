@@ -3,7 +3,7 @@ from gymnasium import spaces
 import numpy as np
 import time
 import math
-import Parse_data
+from Custom_env import Parse_data
 import zmq
 
 ACTIONS = ["up", "down", "left", "right", "direction:up", "direction:down", "direction:left", "direction:right", "attack", "castSpell:1", "castSpell:2", "castSpell:3"]
@@ -33,13 +33,13 @@ class TestEnv(gym.Env):
         return self.next_state
 
     def _get_info(self):
-        return {"current_step": self.current_step, "current_state": self.current_state}
+        return {"current_step": self.current_step, "next_state": self.next_state}
     
     def _send_action(self, action_idx):
         return random.choice(ACTIONS)
 
     def reset(self):
-        message = env.socket.recv_json()
+        message = self.socket.recv_json()
         print("RESET Received:", message)
         message_type = message.get("type")
         if message_type == "ai_tick":
@@ -56,14 +56,14 @@ class TestEnv(gym.Env):
                 "requestId": message.get("requestId"),
                 "error": f"Unknown message type: {message_type}"
             }
-        env.socket.send_json(response)
+        self.socket.send_json(response)
         world_state = message.get("worldState", {})
         self.next_state = np.zeros(OBS_SIZE, dtype=np.float32) #needs to be nothing
         real_next_state = Parse_data.parse_observation(world_state, OBS_SIZE)
         return real_next_state, self._get_info()
 
     def step(self, action):
-        message = env.socket.recv_json()
+        message = self.socket.recv_json()
         print("STEP Received:", message)
         message_type = message.get("type")
         world_state = message.get("worldState", {})
@@ -71,7 +71,7 @@ class TestEnv(gym.Env):
             response = {
                 "type": "ai_result",
                 "requestId": message.get("requestId"),
-                "move": self.Actions[action],
+                "move": self.Actions[int(action)],
                 "reset": False,
                 "serverTime": time.time()
             }
@@ -81,7 +81,7 @@ class TestEnv(gym.Env):
                 "requestId": message.get("requestId"),
                 "error": f"Unknown message type: {message_type}"
             }
-        env.socket.send_json(response)
+        self.socket.send_json(response)
         self.current_step += 1
         real_next_state = Parse_data.parse_observation(world_state, OBS_SIZE)
         #TODO: need to be really careful here actually b/c one edge case is if we terminate or reset epoch
