@@ -66,7 +66,7 @@ class TestEnv(gym.Env):
 
     def step(self, action):
         message = self.socket.recv_json()
-        print("STEP Received:", message)
+        #print("STEP Received:", message)
         message_type = message.get("type")
         world_state = message.get("worldState", {})
         if message_type == "ai_tick":
