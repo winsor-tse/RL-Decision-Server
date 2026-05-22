@@ -195,13 +195,13 @@ if __name__ == "__main__":
                         args.tau * q_network_param.data + (1.0 - args.tau) * target_network_param.data
                     )
 
-    #TODO: Save model needs to be be done every Mod times
+    #TODO: Save model needs to be be done every Mod times and add it as a parameter
+    
     if args.save_model:
         model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
         torch.save(q_network.state_dict(), model_path)
         print(f"model saved to {model_path}")
-        from cleanrl_utils.evals.dqn_eval import evaluate
-
+        from dqn_eval import evaluate
         episodic_returns = evaluate(
             model_path,
             make_env,
