@@ -30,7 +30,7 @@ class Args:
     """if toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "cleanRL"
     """the wandb's project name"""
-    wandb_entity: str = DQN_server_Yugen_Saga
+    wandb_entity: str = "DQN_server_Yugen_Saga"
     """the entity (team) of wandb's project"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
@@ -138,6 +138,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
+    #TODO: decide whether to reset env first or just go
     #obs, _ = envs.reset(seed=args.seed) //do not need to reset at start
     obs = envs.next_state #intialize as zero first
     for global_step in range(args.total_timesteps):
@@ -150,17 +151,11 @@ if __name__ == "__main__":
             actions = torch.argmax(q_values, dim=1).cpu().numpy()
 
         # TRY NOT TO MODIFY: execute the game and log data.
-        print(f"Taking actions: {actions}")
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
         
-        #TODO: investigate whether to chart for final info or every mod
-        # TRY NOT TO MODIFY: record rewards for plotting purposes
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if info and "episode" in info:
-                    print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                    writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                    writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+        #TODO: add episodic length
+        print(f"rewards {rewards}")
+        writer.add_scalar("charts/episodic_return", float(rewards), global_step)
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
         real_next_obs = next_obs.copy()
@@ -177,6 +172,7 @@ if __name__ == "__main__":
                 data = rb.sample(args.batch_size)
                 with torch.no_grad():
                     target_max, _ = target_network(data.next_observations).max(dim=1)
+                    #DQN's Bellmans
                     td_target = data.rewards.flatten() + args.gamma * target_max * (1 - data.dones.flatten())
                 old_val = q_network(data.observations).gather(1, data.actions).squeeze()
                 loss = F.mse_loss(td_target, old_val)
@@ -185,12 +181,12 @@ if __name__ == "__main__":
                     writer.add_scalar("losses/td_loss", loss, global_step)
                     writer.add_scalar("losses/q_values", old_val.mean().item(), global_step)
                     print("SPS:", int(global_step / (time.time() - start_time)))
-                    writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+                    #writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
                 # optimize the model
                 optimizer.zero_grad() # reset grad
                 loss.backward() #back prop
-                optimizer.step() #
+                optimizer.step() # learning rate * gradients
 
             # update target network
             if global_step % args.target_network_frequency == 0:
@@ -199,7 +195,7 @@ if __name__ == "__main__":
                         args.tau * q_network_param.data + (1.0 - args.tau) * target_network_param.data
                     )
 
-    #Save model needs to be be done every Mod times
+    #TODO: Save model needs to be be done every Mod times
     if args.save_model:
         model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
         torch.save(q_network.state_dict(), model_path)

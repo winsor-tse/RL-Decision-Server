@@ -189,4 +189,4 @@ def get_reward(obs, actions, prev_obs):
     enemy_is_dead = nearest_enemy["hp_pct"] <= 0
     if enemy_was_alive and enemy_is_dead:
         reward += 5.0
-    return None
+    return reward
