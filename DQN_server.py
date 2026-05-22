@@ -138,9 +138,8 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
-    #TODO: decide whether to reset env first or just go
-    #obs, _ = envs.reset(seed=args.seed) //do not need to reset at start
-    obs = envs.next_state #intialize as zero first
+    obs, _ = envs.reset()
+    #obs = envs.next_state #intialize as zero first
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         epsilon = linear_schedule(args.start_e, args.end_e, args.exploration_fraction * args.total_timesteps, global_step)
@@ -153,7 +152,7 @@ if __name__ == "__main__":
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
         
-        #TODO: add episodic length
+        #TODO: add episodic length and epislon decaying chart
         print(f"rewards {rewards}")
         writer.add_scalar("charts/episodic_return", float(rewards), global_step)
 

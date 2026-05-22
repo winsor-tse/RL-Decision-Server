@@ -150,8 +150,8 @@ def get_termination(obs, prev_obs):
 # Truncation: "The game was paused by a timer, so we must guess what the future would have looked like."
 # Future Value: Kept (The neural network guesses how many points the agent would have gotten if the timer hadn't stopped the game)
 def get_truncated(obs, prev_obs, current_step):
-    #simple each epoch has max 100 steps
-    if current_step >= 100:
+    #simple each epoch has 100 steps
+    if current_step == 100:
         return True
     return False
 
@@ -185,6 +185,7 @@ def get_reward(obs, actions, prev_obs):
     if enemy_hp_lost > 0:
         reward += 3.0 * enemy_hp_lost
     # Enemy kill reward
+    #TODO: this needs to be changed we are getting positive reward when tp to a certain map
     enemy_was_alive = prev_nearest_enemy["hp_pct"] > 0
     enemy_is_dead = nearest_enemy["hp_pct"] <= 0
     if enemy_was_alive and enemy_is_dead:
