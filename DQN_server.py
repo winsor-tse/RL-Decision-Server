@@ -161,10 +161,16 @@ if __name__ == "__main__":
         real_next_obs = next_obs.copy()
         if truncations:
             real_next_obs = infos.get("next_state", real_next_obs)
+            print(f"Truncated :{truncations}, real_next_obs :{real_next_obs}")
         rb.add(obs, real_next_obs, actions, rewards, terminations, infos)
 
-        # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
-        obs = next_obs
+        # Gymnasium.vector.SyncVectorEnv or AsyncVectorEnv which handle environment auto-resetting automatically.
+        # Manually reset here
+        done = bool(terminations or truncations)
+        if done:
+            obs, _ = envs.reset()
+        else:
+            obs = next_obs
 
         # ALGO LOGIC: training.
         if global_step > args.learning_starts:
@@ -182,6 +188,10 @@ if __name__ == "__main__":
                     writer.add_scalar("losses/q_values", old_val.mean().item(), global_step)
                     print("SPS:", int(global_step / (time.time() - start_time)))
                     #writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+                    #Save Model
+                    model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
+                    torch.save(q_network.state_dict(), model_path)
+                    print(f"model saved to {model_path}")
 
                 # optimize the model
                 optimizer.zero_grad() # reset grad
@@ -195,8 +205,6 @@ if __name__ == "__main__":
                         args.tau * q_network_param.data + (1.0 - args.tau) * target_network_param.data
                     )
 
-    #TODO: Save model needs to be be done every Mod times and add it as a parameter
-    
     if args.save_model:
         model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
         torch.save(q_network.state_dict(), model_path)
@@ -214,15 +222,6 @@ if __name__ == "__main__":
         )
         for idx, episodic_return in enumerate(episodic_returns):
             writer.add_scalar("eval/episodic_return", episodic_return, idx)
-
-        """
-        if args.upload_model:
-            from cleanrl_utils.huggingface import push_to_hub
-
-            repo_name = f"{args.env_id}-{args.exp_name}-seed{args.seed}"
-            repo_id = f"{args.hf_entity}/{repo_name}" if args.hf_entity else repo_name
-            push_to_hub(args, episodic_returns, repo_id, "DQN", f"runs/{run_name}", f"videos/{run_name}-eval")
-        """
 
     envs.close()
     writer.close()
