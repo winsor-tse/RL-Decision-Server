@@ -62,6 +62,8 @@ class TestEnv(gym.Env):
         world_state = message.get("worldState", {})
         self.next_state = np.zeros(OBS_SIZE, dtype=np.float32) #needs to be nothing
         real_next_state = Parse_data.parse_observation(world_state, OBS_SIZE)
+        self.current_step = 0
+        print(f"RESET")
         return real_next_state, self._get_info()
 
     def step(self, action):
