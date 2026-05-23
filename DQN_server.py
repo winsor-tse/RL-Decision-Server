@@ -41,19 +41,19 @@ class Args:
     hf_entity: str = ""
     """the user or org name of the model repository from the Hugging Face Hub"""
 
-    total_timesteps: int = 500000
+    total_timesteps: int = 500000 #TODO: needs to be lowered to around 5k?
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
     num_envs: int = 1
     """the number of parallel game environments"""
-    buffer_size: int = 10000
+    buffer_size: int = 10000 #TODO: not needed?
     """the replay memory buffer size"""
     gamma: float = 0.99
     """the discount factor gamma"""
     tau: float = 1.0
     """the target network update rate"""
-    target_network_frequency: int = 500
+    target_network_frequency: int = 500 #Do a fraction of total_time steps
     """the timesteps it takes to update the target network"""
     batch_size: int = 128
     """the batch size of sample from the reply memory"""
@@ -63,7 +63,7 @@ class Args:
     """the ending epsilon for exploration"""
     exploration_fraction: float = 0.5
     """the fraction of `total-timesteps` it takes from start-e to go end-e"""
-    learning_starts: int = 10000
+    learning_starts: int = 10000 #TODO: change learning starts
     """timestep to start learning"""
     train_frequency: int = 10
     """the frequency of training"""
@@ -163,8 +163,9 @@ if __name__ == "__main__":
             print(f"Truncated :{truncations}, real_next_obs :{real_next_obs}")
         rb.add(obs, real_next_obs, actions, rewards, terminations, infos)
 
-        # Gymnasium.vector.SyncVectorEnv or AsyncVectorEnv which handle environment auto-resetting automatically.
-        # Manually reset here
+        # Gymnasium.vector.SyncVectorEnv or AsyncVectorEnv which handle environment auto-resetting automatically. we need to Manually reset here for external envs.
+        if bool(truncations):
+            print("TRUNCATED")
         done = bool(terminations or truncations)
         if done:
             obs, _ = envs.reset()
@@ -208,6 +209,7 @@ if __name__ == "__main__":
         model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
         torch.save(q_network.state_dict(), model_path)
         print(f"model saved to {model_path}")
+        #TODO: eval does not work here yet
         from dqn_eval import evaluate
         episodic_returns = evaluate(
             model_path,

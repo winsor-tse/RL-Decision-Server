@@ -94,6 +94,9 @@ class TestEnv(gym.Env):
         terminated = Parse_data.get_termination(real_next_state, self.next_state)
         truncated = Parse_data.get_truncated(real_next_state, self.next_state, self.current_step)
         self.next_state = real_next_state
+        #negative reward for death
+        if terminated:
+            reward -= 10
         return self.next_state, reward, terminated, False, self._get_info()
 
 # Example usage:
