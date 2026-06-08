@@ -151,7 +151,7 @@ def get_termination(obs, prev_obs):
 # Future Value: Kept (The neural network guesses how many points the agent would have gotten if the timer hadn't stopped the game)
 def get_truncated(obs, prev_obs, current_step):
     #simple each epoch has 100 steps
-    if current_step == 100:
+    if current_step == 128:
         return True
     return False
 
@@ -183,11 +183,13 @@ def get_reward(obs, actions, prev_obs):
     # Enemy damage reward
     enemy_hp_lost = prev_nearest_enemy["hp_pct"] - nearest_enemy["hp_pct"]
     if enemy_hp_lost > 0:
-        reward += 3.0 * enemy_hp_lost
+        reward += 5.0 * enemy_hp_lost
+    """
     # Enemy kill reward
-    #TODO: this needs to be changed we are getting positive reward when tp to a certain map
+    #TODO: change to experience gained? We tp to a certain place and it assumes the enemy is dead
     enemy_was_alive = prev_nearest_enemy["hp_pct"] > 0
     enemy_is_dead = nearest_enemy["hp_pct"] <= 0
     if enemy_was_alive and enemy_is_dead:
         reward += 5.0
+    """
     return reward
