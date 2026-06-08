@@ -41,7 +41,7 @@ class Args:
     hf_entity: str = ""
     """the user or org name of the model repository from the Hugging Face Hub"""
 
-    total_timesteps: int = 500000 #TODO: needs to be lowered to around 5k?
+    total_timesteps: int = 5000 #TODO: needs to be lowered to around 5k?
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
@@ -53,9 +53,9 @@ class Args:
     """the discount factor gamma"""
     tau: float = 1.0
     """the target network update rate"""
-    target_network_frequency: int = 500 #Do a fraction of total_time steps
+    target_network_frequency: int = 50 #Do a fraction of total_time steps
     """the timesteps it takes to update the target network"""
-    batch_size: int = 128
+    batch_size: int = 64
     """the batch size of sample from the reply memory"""
     start_e: float = 1
     """the starting epsilon for exploration"""
@@ -63,7 +63,7 @@ class Args:
     """the ending epsilon for exploration"""
     exploration_fraction: float = 0.5
     """the fraction of `total-timesteps` it takes from start-e to go end-e"""
-    learning_starts: int = 10000 #TODO: change learning starts
+    learning_starts: int = 100 #TODO: change learning starts
     """timestep to start learning"""
     train_frequency: int = 10
     """the frequency of training"""
