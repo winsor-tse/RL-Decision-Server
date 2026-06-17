@@ -41,7 +41,7 @@ class Args:
     hf_entity: str = ""
     """the user or org name of the model repository from the Hugging Face Hub"""
 
-    total_timesteps: int = 5000 #TODO: needs to be lowered to around 5k?
+    total_timesteps: int = 126000 #TODO: needs to be lowered to around 5k?
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
@@ -192,8 +192,9 @@ if __name__ == "__main__":
                     print("SPS:", int(global_step / (time.time() - start_time)))
                     #writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
                     #Save Model
-                    model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
+                    model_path = f"runs/{run_name}/{args.exp_name}.pt"
                     torch.save(q_network.state_dict(), model_path)
+                    torch.onnx.export
                     print(f"model saved to {model_path}")
 
                 # optimize the model
@@ -209,7 +210,7 @@ if __name__ == "__main__":
                     )
 
     if args.save_model:
-        model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
+        model_path = f"runs/{run_name}/{args.exp_name}.pt"
         torch.save(q_network.state_dict(), model_path)
         print(f"model saved to {model_path}")
         #TODO: eval does not work here yet

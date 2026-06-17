@@ -6,7 +6,7 @@ import math
 from Custom_env import Parse_data
 import zmq
 
-ACTIONS = ["up", "down", "left", "right", "direction:up", "direction:down", "direction:left", "direction:right", "attack", "castSpell:1", "castSpell:2", "castSpell:3"]
+ACTIONS = ["up", "down", "left", "right", "direction:up", "direction:down", "direction:left", "direction:right", "attack", "castSpell:1", "castSpell:2", "castSpell:3", "castSpell:5", "castSpell:6", "castSpell:7"]
 ZMQ_BIND_URL = "tcp://127.0.0.1:5555"
 OBS_PLAYER_SIZE = 5
 OBS_ENEMY_SIZE = 4
