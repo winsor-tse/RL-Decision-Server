@@ -249,43 +249,49 @@ Models are overwritten at each checkpoint, keeping only the latest snapshot.
    - Stable Q-values - loss not spiking
    - Converged TD-loss - no longer decreasing
 
-### Inference / Model Evaluation (TBD)
+### Inference / Model Evaluation
 
-Inference is performed using the saved Q-network without exploration:
+Once training has produced a checkpoint, you can evaluate the learned policy without continued exploration.
 
-**Loading a Trained Model:**
+The evaluation script now supports command-line arguments and uses the custom Yugen Saga environment by default.
 
-```python
-from DQN_server import QNetwork
-import torch
+**What the inference script does:**
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = QNetwork(env).to(device)
-model.load_state_dict(torch.load("runs/DQN_server__1234567890/DQN_server.pt"))
-model.eval()  # Set to evaluation mode (disables dropout, batch norm updates)
-```
+- Loads a saved PyTorch checkpoint from disk
+- Initializes the custom environment in [Custom_env/Test_env.py](Custom_env/Test_env.py)
+- Runs one or more evaluation episodes with the trained policy
+- Uses greedy action selection by default (`epsilon = 0.0`)
+- Reports episode returns and summary statistics
 
-**Inference Step:**
-
-```python
-with torch.no_grad():  # Disable gradient computation
-    q_values = model(torch.Tensor(observation).to(device))
-    action = torch.argmax(q_values).item()
-```
-
-**DQN_eval.py** (evaluation script):
-
-- Loads a trained model from checkpoint
-- Runs the model for N evaluation episodes
-- **Epsilon = 0.0** (no exploration, pure greedy policy)
-- Records episodic returns
-- Reports average performance
-
-Usage:
+**Example usage:**
 
 ```bash
-python DQN_eval.py --model_path runs/DQN_server__1234567890/DQN_server.pt --eval_episodes 10
+python dqn_eval.py --model_path runs/DQN_server__1234567890/DQN_server.pt
 ```
+
+**Useful options:**
+
+```bash
+python dqn_eval.py --model_path runs/DQN_server__1234567890/DQN_server.pt --eval_episodes 20 --epsilon 0.05
+python dqn_eval.py --model_path runs/DQN_server__1234567890/DQN_server.pt --cuda false
+```
+
+**CLI arguments:**
+
+- `model_path` (required): path to the `.pt` checkpoint
+- `eval_episodes` (default: `10`): number of episodes to evaluate
+- `epsilon` (default: `0.0`): exploration rate during eval; keep at `0.0` for pure greedy inference
+- `cuda` (default: `True`): enable CUDA when available
+
+**Output:**
+
+The script prints per-episode returns plus a summary of:
+
+- mean return
+- standard deviation
+- max return
+- min return
+- total evaluation time
 
 ### Training Metrics in TensorBoard
 
@@ -326,7 +332,7 @@ Monitor these metrics in TensorBoard:
 5. **Deploy for Inference**
 
    ```bash
-   python DQN_eval.py --model_path runs/DQN_server__<timestamp>/DQN_server.pt
+   python dqn_eval.py --model_path runs/DQN_server__<timestamp>/DQN_server.pt
    ```
 
 ### Performance Expectations
@@ -342,8 +348,9 @@ For Yugen Saga training:
 
 ```
 .
-├── DQN_server.py          # DQN training and inference server
-├── PPO_server.py          # PPO training and inference server
+├── DQN_server.py          # DQN training server
+├── DQN_eval.py            # DQN Evaluate server
+├── PPO_server.py          # PPO training server
 ├── ws_zmq_bridge.py       # WebSocket ↔ ZMQ bridge
 ├── buffers.py             # Experience replay buffer
 ├── Custom_env/
