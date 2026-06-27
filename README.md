@@ -349,10 +349,9 @@ For Yugen Saga training:
 ├── Custom_env/
 │   ├── Test_env.py        # Custom Gymnasium environment
 │   └── Parse_data.py      # Game state parsing utilities
-├── runs/                  # TensorBoard event logs
+├── runs/                  # TensorBoard event logs alongside pytorch models
 ├── Sample_Data/           # Sample training data
 ├── Tests/                 # Test utilities
-├── RL_venv/              # Python virtual environment
 └── README.md             # This file
 ```
 
