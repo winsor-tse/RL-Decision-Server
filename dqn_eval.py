@@ -1,62 +1,94 @@
 import random
-from typing import Callable
+import time
+from dataclasses import dataclass
 
-import gymnasium as gym
 import numpy as np
 import torch
+import tyro
 
-#TODO: eval needs to be changed to not use Sync VEctor Env
+from DQN_server import QNetwork
+from Custom_env import Test_env
+
 
 def evaluate(
-    model_path: str,
-    make_env: Callable,
-    env_id: str,
+    env,
+    model: torch.nn.Module,
     eval_episodes: int,
-    run_name: str,
-    Model: torch.nn.Module,
     device: torch.device = torch.device("cpu"),
-    epsilon: float = 0.05,
-    capture_video: bool = True,
-):
-    #Fix code below, we are not using sync vector
-    envs = gym.vector.SyncVectorEnv([make_env(env_id, 0, 0, capture_video, run_name)])
-    model = Model(envs).to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    epsilon: float = 0.0,
+) -> list:
+    """Evaluate a trained DQN model on a single custom environment."""
     model.eval()
-
-    obs, _ = envs.reset()
     episodic_returns = []
-    while len(episodic_returns) < eval_episodes:
-        if random.random() < epsilon:
-            actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
-        else:
-            q_values = model(torch.Tensor(obs).to(device))
-            actions = torch.argmax(q_values, dim=1).cpu().numpy()
-        next_obs, _, _, _, infos = envs.step(actions)
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if "episode" not in info:
-                    continue
-                print(f"eval_episode={len(episodic_returns)}, episodic_return={info['episode']['r']}")
-                episodic_returns += [info["episode"]["r"]]
-        obs = next_obs
+
+    for episode in range(eval_episodes):
+        obs, _ = env.reset()
+        episode_return = 0.0
+        done = False
+
+        while not done:
+            if random.random() < epsilon:
+                action = env.single_action_space.sample()
+            else:
+                with torch.no_grad():
+                    q_values = model(torch.Tensor(obs).to(device))
+                    action = torch.argmax(q_values).cpu().item()
+
+            next_obs, reward, terminated, truncated, _ = env.step(np.array([action]))
+            episode_return += float(reward)
+            done = bool(terminated or truncated)
+            obs = next_obs
+
+        episodic_returns.append(episode_return)
+        print(f"eval_episode={episode}, episodic_return={episode_return}")
 
     return episodic_returns
 
 
+@dataclass
+class EvalArgs:
+    model_path: str
+    """Path to the trained PyTorch model (.pt file)."""
+    eval_episodes: int = 10
+    """Number of evaluation episodes to run."""
+    epsilon: float = 0.0
+    """Exploration rate during evaluation (0.0 for pure greedy)."""
+    cuda: bool = True
+    """Whether to use CUDA if available."""
+
+
 if __name__ == "__main__":
-    from huggingface_hub import hf_hub_download
+    args = tyro.cli(EvalArgs)
 
-    from cleanrl.dqn import QNetwork, make_env
+    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    print(f"Using device: {device}")
 
-    model_path = hf_hub_download(repo_id="cleanrl/CartPole-v1-dqn-seed1", filename="q_network.pth")
-    evaluate(
-        model_path,
-        make_env,
-        "CartPole-v1",
-        eval_episodes=10,
-        run_name=f"eval",
-        Model=QNetwork,
-        device="cpu",
-        capture_video=False,
+    print("Initializing Custom_env.Test_env.TestEnv...")
+    env = Test_env.TestEnv()
+
+    print(f"Loading model from {args.model_path}...")
+    model = QNetwork(env).to(device)
+    model.load_state_dict(torch.load(args.model_path, map_location=device))
+
+    print(f"Starting evaluation for {args.eval_episodes} episodes...")
+    start_time = time.time()
+    episodic_returns = evaluate(
+        env,
+        model,
+        eval_episodes=args.eval_episodes,
+        device=device,
+        epsilon=args.epsilon,
     )
+    elapsed_time = time.time() - start_time
+
+    print("\n" + "=" * 50)
+    print(f"Evaluation Results ({args.eval_episodes} episodes)")
+    print("=" * 50)
+    print(f"Mean Return: {np.mean(episodic_returns):.2f}")
+    print(f"Std Return: {np.std(episodic_returns):.2f}")
+    print(f"Max Return: {np.max(episodic_returns):.2f}")
+    print(f"Min Return: {np.min(episodic_returns):.2f}")
+    print(f"Total Time: {elapsed_time:.2f}s")
+    print("=" * 50)
+
+    env.close()
