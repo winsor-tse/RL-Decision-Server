@@ -26,20 +26,8 @@ class Args:
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
-    track: bool = False
-    """if toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "cleanRL"
-    """the wandb's project name"""
-    wandb_entity: str = "DQN_server_Yugen_Saga"
-    """the entity (team) of wandb's project"""
-    capture_video: bool = False
-    """whether to capture videos of the agent performances (check out `videos` folder)"""
-    save_model: bool = False
-    """whether to save model into the `runs/{run_name}` folder"""
-    upload_model: bool = False
-    """whether to upload the saved model to huggingface"""
-    hf_entity: str = ""
-    """the user or org name of the model repository from the Hugging Face Hub"""
+    save_model: bool = True
+    """save model is defaulted as True"""
 
     total_timesteps: int = 5000 #TimeSteps are scaled with JS action time (current is 0,5 seconds)
     """total timesteps of the experiments"""
@@ -94,24 +82,13 @@ if __name__ == "__main__":
     args = tyro.cli(Args)
     assert args.num_envs == 1, "vectorized envs are not supported at the moment"
     run_name = f"{args.exp_name}__{int(time.time())}"
-    if args.track:
-        import wandb
-
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=run_name,
-            monitor_gym=True,
-            save_code=True,
-        )
     writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
+    #TODO: determine whether the following is needed
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -158,6 +135,7 @@ if __name__ == "__main__":
         #TODO: add episodic length and epislon decaying chart
         print(f"rewards {rewards}")
         writer.add_scalar("charts/episodic_return", float(rewards), global_step)
+        writer.add_scalar("charts/epsilon", epsilon, global_step)
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
         real_next_obs = next_obs.copy()
@@ -186,15 +164,17 @@ if __name__ == "__main__":
                 old_val = q_network(data.observations).gather(1, data.actions).squeeze()
                 loss = F.mse_loss(td_target, old_val)
 
-                if global_step % 100 == 0:
-                    writer.add_scalar("losses/td_loss", loss, global_step)
-                    writer.add_scalar("losses/q_values", old_val.mean().item(), global_step)
+                # Log loss metrics every train step
+                writer.add_scalar("losses/td_loss", loss, global_step)
+                writer.add_scalar("losses/q_values", old_val.mean().item(), global_step)
+
+                if global_step % 100 == 0 and args.save_model:
                     print("SPS:", int(global_step / (time.time() - start_time)))
-                    #writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+                    writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
                     #Save Model
                     model_path = f"runs/{run_name}/{args.exp_name}.pt"
                     torch.save(q_network.state_dict(), model_path)
-                    torch.onnx.export
+                    torch.onnx.export #export to onnx
                     print(f"model saved to {model_path}")
 
                 # optimize the model
@@ -208,25 +188,6 @@ if __name__ == "__main__":
                     target_network_param.data.copy_(
                         args.tau * q_network_param.data + (1.0 - args.tau) * target_network_param.data
                     )
-
-    if args.save_model:
-        model_path = f"runs/{run_name}/{args.exp_name}.pt"
-        torch.save(q_network.state_dict(), model_path)
-        print(f"model saved to {model_path}")
-        #TODO: eval does not work here yet
-        from dqn_eval import evaluate
-        episodic_returns = evaluate(
-            model_path,
-            make_env,
-            args.env_id,
-            eval_episodes=10,
-            run_name=f"{run_name}-eval",
-            Model=QNetwork,
-            device=device,
-            epsilon=args.end_e,
-        )
-        for idx, episodic_return in enumerate(episodic_returns):
-            writer.add_scalar("eval/episodic_return", episodic_return, idx)
 
     envs.close()
     writer.close()

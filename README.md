@@ -33,23 +33,7 @@ git clone <repository-url>
 cd "RL Server"
 ```
 
-### 2. Create Virtual Environment
-
-```bash
-python -m venv RL_venv
-```
-
-Activate the virtual environment:
-
-- **Windows (PowerShell)**: `.\RL_venv\Scripts\Activate.ps1`
-- **Windows (CMD)**: `.\RL_venv\Scripts\activate.bat`
-- **Linux/Mac**: `source RL_venv/bin/activate`
-
-### 3. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
+Create Virtual Environment or Use MiniConda/Anaconda. Install requirements into VENV.
 
 ## Running the RL Server with Yugen Saga
 
@@ -99,12 +83,6 @@ View real-time training metrics:
 
 ```bash
 ./RunTensorboard.bat
-```
-
-Or manually:
-
-```bash
-tensorboard --logdir=runs
 ```
 
 Then open http://localhost:6006 in your browser.
@@ -262,19 +240,14 @@ Models are saved automatically during training:
 
 Models are overwritten at each checkpoint, keeping only the latest snapshot.
 
-**Checkpoint Selection Tips:**
+**Checkpoint/Model Selection:**
 
-1. ✅ **Good indicators for deployment:**
+1. **Good indicators for deployment:**
 
    - High episodic return (cumulative reward)
    - Low epsilon (< 0.1) - agent stopped exploring
    - Stable Q-values - loss not spiking
    - Converged TD-loss - no longer decreasing
-2. ❌ **Avoid deploying models where:**
-
-   - High episodic return BUT epsilon still high - may not have converged
-   - TD-loss very low but episodic return low - overfitting to buffer
-   - Q-values unstable - agent still learning unpredictably
 
 ### Inference / Model Evaluation (TBD)
 
@@ -376,10 +349,9 @@ For Yugen Saga training:
 ├── Custom_env/
 │   ├── Test_env.py        # Custom Gymnasium environment
 │   └── Parse_data.py      # Game state parsing utilities
-├── runs/                  # TensorBoard event logs
+├── runs/                  # TensorBoard event logs alongside pytorch models
 ├── Sample_Data/           # Sample training data
 ├── Tests/                 # Test utilities
-├── RL_venv/              # Python virtual environment
 └── README.md             # This file
 ```
 
