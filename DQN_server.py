@@ -41,7 +41,7 @@ class Args:
     hf_entity: str = ""
     """the user or org name of the model repository from the Hugging Face Hub"""
 
-    total_timesteps: int = 5000 #TODO: needs to be lowered to around 5k?
+    total_timesteps: int = 126000 #TODO: needs to be lowered to around 5k?
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
@@ -145,9 +145,12 @@ if __name__ == "__main__":
         epsilon = linear_schedule(args.start_e, args.end_e, args.exploration_fraction * args.total_timesteps, global_step)
         if random.random() < epsilon:
             actions = np.array([envs.single_action_space.sample()])
+            print(actions)
         else:
             q_values = q_network(torch.Tensor(obs).to(device))
-            actions = torch.argmax(q_values, dim=1).cpu().numpy()
+            print(q_values)
+            actions = torch.argmax(q_values).cpu().numpy()
+            print(actions)
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
@@ -189,8 +192,9 @@ if __name__ == "__main__":
                     print("SPS:", int(global_step / (time.time() - start_time)))
                     #writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
                     #Save Model
-                    model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
+                    model_path = f"runs/{run_name}/{args.exp_name}.pt"
                     torch.save(q_network.state_dict(), model_path)
+                    torch.onnx.export
                     print(f"model saved to {model_path}")
 
                 # optimize the model
@@ -206,7 +210,7 @@ if __name__ == "__main__":
                     )
 
     if args.save_model:
-        model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
+        model_path = f"runs/{run_name}/{args.exp_name}.pt"
         torch.save(q_network.state_dict(), model_path)
         print(f"model saved to {model_path}")
         #TODO: eval does not work here yet
