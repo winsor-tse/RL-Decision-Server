@@ -83,7 +83,7 @@ Choose **either** DQN or PPO:
 python DQN_server.py
 ```
 
-**For PPO:**
+**For PPO (not implemented):**
 
 ```bash
 python PPO_server.py
@@ -163,7 +163,6 @@ Rewards are based on:
 
 See `Custom_env/` for implementation details.
 
-
 ## Training and Inference
 
 ### Training Loop Overview
@@ -198,6 +197,7 @@ The agent balances exploration and exploitation:
 - **Exploration Fraction**: 0.5 (epsilon decays over first 50% of training)
 
 The epsilon decay schedule is linear:
+
 ```
 epsilon = start_e + (end_e - start_e) * (global_step / exploration_steps)
 ```
@@ -213,6 +213,7 @@ DQN maintains an experience replay buffer that stores transitions:
 - **Sampling**: Uniformly random from buffer
 
 The replay buffer provides:
+
 - **Decorrelated Samples**: Breaks temporal correlations in the data
 - **Improved Stability**: Smooths training by using diverse past experiences
 - **Off-Policy Learning**: Can reuse old experiences
@@ -232,16 +233,17 @@ Output Layer (15 units) → Q-values per action
 
 **DQN_server.py defaults:**
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `total_timesteps` | 5000 | Total training interactions (scaled by Yugen Saga action time ~0.5s) |
-| `learning_rate` | 2.5e-4 | Adam optimizer learning rate |
-| `learning_starts` | 100 | Timesteps before learning begins (populate buffer) |
-| `train_frequency` | 10 | Perform training every N timesteps |
-| `target_network_frequency` | 50 | Update target network every N timesteps |
-| `batch_size` | 64 | Samples per training batch |
-| `gamma` | 0.99 | Discount factor for future rewards |
-| `tau` | 1.0 | Target network soft-update rate |
+
+| Parameter                  | Value  | Description                                                          |
+| -------------------------- | ------ | -------------------------------------------------------------------- |
+| `total_timesteps`          | 5000   | Total training interactions (scaled by Yugen Saga action time ~0.5s) |
+| `learning_rate`            | 2.5e-4 | Adam optimizer learning rate                                         |
+| `learning_starts`          | 100    | Timesteps before learning begins (populate buffer)                   |
+| `train_frequency`          | 10     | Perform training every N timesteps                                   |
+| `target_network_frequency` | 50     | Update target network every N timesteps                              |
+| `batch_size`               | 64     | Samples per training batch                                           |
+| `gamma`                    | 0.99   | Discount factor for future rewards                                   |
+| `tau`                      | 1.0    | Target network soft-update rate                                      |
 
 **TD-Loss (Bellman Loss):**
 
@@ -263,17 +265,18 @@ Models are overwritten at each checkpoint, keeping only the latest snapshot.
 **Checkpoint Selection Tips:**
 
 1. ✅ **Good indicators for deployment:**
+
    - High episodic return (cumulative reward)
    - Low epsilon (< 0.1) - agent stopped exploring
    - Stable Q-values - loss not spiking
    - Converged TD-loss - no longer decreasing
-
 2. ❌ **Avoid deploying models where:**
+
    - High episodic return BUT epsilon still high - may not have converged
    - TD-loss very low but episodic return low - overfitting to buffer
    - Q-values unstable - agent still learning unpredictably
 
-### Inference / Model Evaluation
+### Inference / Model Evaluation (TBD)
 
 Inference is performed using the saved Q-network without exploration:
 
@@ -306,6 +309,7 @@ with torch.no_grad():  # Disable gradient computation
 - Reports average performance
 
 Usage:
+
 ```bash
 python DQN_eval.py --model_path runs/DQN_server__1234567890/DQN_server.pt --eval_episodes 10
 ```
@@ -314,37 +318,40 @@ python DQN_eval.py --model_path runs/DQN_server__1234567890/DQN_server.pt --eval
 
 Monitor these metrics in TensorBoard:
 
-| Metric | Location | Interpretation |
-|--------|----------|-----------------|
-| `charts/episodic_return` | Scalars | Cumulative reward per episode (higher is better) |
-| `losses/td_loss` | Scalars | Bellman TD-error (should decrease over time) |
-| `losses/q_values` | Scalars | Mean Q-values (useful for debugging) |
-| `charts/epsilon` | Scalars | Exploration rate (should decay to end_e) |
-| `charts/SPS` | Scalars | Steps per second (throughput) |
+
+| Metric                   | Location | Interpretation                                   |
+| ------------------------ | -------- | ------------------------------------------------ |
+| `charts/episodic_return` | Scalars  | Cumulative reward per episode (higher is better) |
+| `losses/td_loss`         | Scalars  | Bellman TD-error (should decrease over time)     |
+| `losses/q_values`        | Scalars  | Mean Q-values (useful for debugging)             |
+| `charts/epsilon`         | Scalars  | Exploration rate (should decay to end_e)         |
+| `charts/SPS`             | Scalars  | Steps per second (throughput)                    |
 
 ### Practical Training Workflow
 
 1. **Start Training**
+
    ```bash
    python DQN_server.py
    ```
-   
 2. **Monitor Real-Time Progress**
+
    ```bash
    tensorboard --logdir=runs
    ```
-   Open http://localhost:6006
 
+   Open http://localhost:6006
 3. **Evaluate Training**
+
    - Watch `episodic_return` and `td_loss` curves
    - Ensure `epsilon` is decaying smoothly
    - Stop training when metrics plateau
-
 4. **Select Best Checkpoint**
+
    - Identify timestamp of best model from TensorBoard
    - Note the checkpoint path: `runs/DQN_server__<timestamp>/DQN_server.pt`
-
 5. **Deploy for Inference**
+
    ```bash
    python DQN_eval.py --model_path runs/DQN_server__<timestamp>/DQN_server.pt
    ```
