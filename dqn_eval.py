@@ -9,6 +9,16 @@ import tyro
 from DQN_server import QNetwork
 from Custom_env import Test_env
 
+"""
+# Basic usage with defaults
+python DQN_eval.py --model_path runs/DQN_server__1234567890/DQN_server.pt
+
+# Custom eval episodes and epsilon
+python DQN_eval.py --model_path runs/DQN_server__1234567890/DQN_server.pt --eval_episodes 20 --epsilon 0.05
+
+# Force CPU
+python DQN_eval.py --model_path runs/DQN_server__1234567890/DQN_server.pt --cuda false
+"""
 
 def evaluate(
     env,
