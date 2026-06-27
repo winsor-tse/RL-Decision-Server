@@ -41,13 +41,13 @@ class Args:
     hf_entity: str = ""
     """the user or org name of the model repository from the Hugging Face Hub"""
 
-    total_timesteps: int = 126000 #TODO: needs to be lowered to around 5k?
+    total_timesteps: int = 5000 #TimeSteps are scaled with JS action time (current is 0,5 seconds)
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
     num_envs: int = 1
     """the number of parallel game environments"""
-    buffer_size: int = 10000 #TODO: not needed?
+    #buffer_size: int = 10000 #not needed its a external game enviornment
     """the replay memory buffer size"""
     gamma: float = 0.99
     """the discount factor gamma"""
