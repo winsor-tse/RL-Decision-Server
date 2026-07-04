@@ -1,0 +1,21 @@
+# Shared RL environment configuration.
+#
+# Every concrete environment uses this file for the state/observation space.
+# Class-specific files still own their action space plus Env_conditions logic:
+# rewards, termination, and truncation.
+
+# ZMQ bridge endpoint used by browser/game ticks.
+ZMQ_BIND_URL: "tcp://127.0.0.1:5555"
+
+# Observation/state-space layout shared by all environments.
+# OBS_SIZE must equal OBS_PLAYER_SIZE + OBS_ENEMY_SIZE * MAX_ENEMIES.
+OBS_PLAYER_SIZE: 5
+OBS_ENEMY_SIZE: 4
+MAX_ENEMIES: 2
+OBS_SIZE: 13
+
+# Shared RL episode/runtime defaults.
+# Individual Env_conditions files decide how these limits are interpreted.
+MAX_EPISODE_STEPS: 128
+STATE_DTYPE: "float32"
+ACTION_SPACE_TYPE: "discrete"

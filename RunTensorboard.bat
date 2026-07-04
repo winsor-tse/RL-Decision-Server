@@ -1,2 +1,0 @@
-tensorboard --logdir=./runs
-pause

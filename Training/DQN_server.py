@@ -1,8 +1,10 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/dqn/#dqnpy
 import os
 import random
+import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
@@ -11,9 +13,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import tyro
-from torch.utils.tensorboard import SummaryWriter
-from buffers import ReplayBuffer
-from Custom_env import Test_env
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from Utils.buffers import ReplayBuffer
+from Custom_enviornments.Test_Env import Env_16
 
 
 @dataclass
@@ -35,7 +41,7 @@ class Args:
     """the learning rate of the optimizer"""
     num_envs: int = 1
     """the number of parallel game environments"""
-    #buffer_size: int = 10000 #not needed its a external game enviornment
+    buffer_size: int = 500 #changed from 10000
     """the replay memory buffer size"""
     gamma: float = 0.99
     """the discount factor gamma"""
@@ -80,6 +86,8 @@ def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
+    from torch.utils.tensorboard import SummaryWriter
+
     assert args.num_envs == 1, "vectorized envs are not supported at the moment"
     run_name = f"{args.exp_name}__{int(time.time())}"
     writer = SummaryWriter(f"runs/{run_name}")
@@ -98,7 +106,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    envs = Test_env.TestEnv()
+    envs = Env_16.Env16()
 
     q_network = QNetwork(envs).to(device)
     optimizer = optim.Adam(q_network.parameters(), lr=args.learning_rate)
@@ -113,7 +121,6 @@ if __name__ == "__main__":
         handle_timeout_termination=False,
     )
     start_time = time.time()
-
     # TRY NOT TO MODIFY: start the game
     obs, _ = envs.reset()
     #obs = envs.next_state #intialize as zero first
@@ -132,7 +139,6 @@ if __name__ == "__main__":
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
         
-        #TODO: add episodic length and epislon decaying chart
         print(f"rewards {rewards}")
         writer.add_scalar("charts/episodic_return", float(rewards), global_step)
         writer.add_scalar("charts/epsilon", epsilon, global_step)

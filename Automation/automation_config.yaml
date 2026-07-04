@@ -1,0 +1,15 @@
+# Automation config for running the bridge and selected RL algorithm together.
+#
+# The bridge starts first. The launcher waits until bridge_ready_signal appears
+# in bridge output, then starts the configured algorithm command.
+
+rl_algorithm: "dqn"
+bridge_command: "python Automation/Bridge/ws_zmq_bridge.py"
+bridge_ready_signal: "WebSocket bridge listening"
+ready_timeout_seconds: 30
+start_tensorboard: true
+tensorboard_command: "Automation/RunTensorboard.bat"
+
+dqn_command: "python Training/DQN_server.py"
+ppo_command: "python Training/PPO_server.py"
+inference_command: "python Inference/dqn_eval.py --model_path runs/DQN_server__<timestamp>/DQN_server.pt"
