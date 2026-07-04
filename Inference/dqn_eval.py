@@ -6,8 +6,8 @@ import numpy as np
 import torch
 import tyro
 
-from DQN_server import QNetwork
-from Custom_env import Test_env
+from Training.DQN_server import QNetwork
+from Custom_enviornments.Test_Env import Env_16
 
 """
 # Basic usage with defaults
@@ -73,8 +73,8 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
     print(f"Using device: {device}")
 
-    print("Initializing Custom_env.Test_env.TestEnv...")
-    env = Test_env.TestEnv()
+    print("Initializing Custom_enviornments.Test_Env.Env_16.Env16...")
+    env = Env_16.Env16()
 
     print(f"Loading model from {args.model_path}...")
     model = QNetwork(env).to(device)
