@@ -1,8 +1,10 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/dqn/#dqnpy
 import os
 import random
+import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
@@ -11,7 +13,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import tyro
-from torch.utils.tensorboard import SummaryWriter
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 from Utils.buffers import ReplayBuffer
 from Custom_enviornments.Test_Env import Env_16
 
@@ -80,6 +86,8 @@ def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
+    from torch.utils.tensorboard import SummaryWriter
+
     assert args.num_envs == 1, "vectorized envs are not supported at the moment"
     run_name = f"{args.exp_name}__{int(time.time())}"
     writer = SummaryWriter(f"runs/{run_name}")

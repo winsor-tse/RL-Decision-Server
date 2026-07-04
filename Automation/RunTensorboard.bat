@@ -1,2 +1,2 @@
-tensorboard --logdir=./runs
+tensorboard --logdir=../runs
 pause
