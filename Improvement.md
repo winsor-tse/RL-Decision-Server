@@ -248,3 +248,8 @@ Utils/
 ## Important Constraint
 
 Keep observation and action dimensions stable across models that should be resumed or fine-tuned. If those dimensions change, checkpoint loading needs partial weight loading, model surgery, or a conversion layer.
+
+
+## Red Section
+
+Two threads for actions, one for movement/facing and one for casting.
