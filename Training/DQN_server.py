@@ -141,7 +141,7 @@ if __name__ == "__main__":
         
         print(f"rewards {rewards}")
         writer.add_scalar("charts/episodic_return", float(rewards), global_step)
-        writer.add_scalar("charts/epsilon", epsilon, global_step)
+        writer.add_scalar("charts/epsilon", epsilon, global_step)        
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
         real_next_obs = next_obs.copy()
@@ -174,9 +174,7 @@ if __name__ == "__main__":
                 writer.add_scalar("losses/td_loss", loss, global_step)
                 writer.add_scalar("losses/q_values", old_val.mean().item(), global_step)
 
-                if global_step % 100 == 0 and args.save_model:
-                    print("SPS:", int(global_step / (time.time() - start_time)))
-                    writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+                if global_step % 100 == 0 and args.save_model:                    
                     #Save Model
                     model_path = f"runs/{run_name}/{args.exp_name}.pt"
                     torch.save(q_network.state_dict(), model_path)
