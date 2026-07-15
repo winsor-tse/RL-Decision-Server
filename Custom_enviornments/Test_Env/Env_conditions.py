@@ -133,6 +133,9 @@ def get_reward(obs, action, prev_obs):
     if prev_obs is None or not np.any(prev_obs):
         return float(reward)
 
+    if obs[1] < 30:
+        reward -= 0.1 * (30- obs[1])
+
     prev_player_hp_pct = float(prev_obs[3])
     prev_nearest_enemy = enemy_block(prev_obs, 0)
 
@@ -142,7 +145,7 @@ def get_reward(obs, action, prev_obs):
 
     enemy_hp_lost = prev_nearest_enemy["hp_pct"] - nearest_enemy["hp_pct"]
     if enemy_hp_lost > 0:
-        reward += 5.0 * enemy_hp_lost
+        reward += 25.0 * enemy_hp_lost
 
     return reward
 
@@ -163,4 +166,4 @@ def get_termination(obs, prev_obs):
 
 
 def get_truncated(obs, prev_obs, current_step):
-    return current_step >= MAX_EPISODE_STEPS
+    return (current_step >= MAX_EPISODE_STEPS or obs[1] < 25)
