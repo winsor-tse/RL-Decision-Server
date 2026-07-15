@@ -87,7 +87,7 @@ class Env16(BaseEnv):
 
         self.next_state = real_next_state
         if terminated:
-            reward -= 500
+            reward -= 100
 
         return self.next_state, reward, terminated, truncated, self._get_info()
 
