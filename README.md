@@ -11,6 +11,20 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 - `Utils/buffers.py`: replay buffer used by DQN.
 - `Custom_enviornments/`: shared env config, base env, and class-specific environments.
 
+## DQN Learning Showcase
+
+The clips below show the DQN agent interacting with the live game while it learns to select movement, targeting, and combat actions from the environment state and reward signal.
+
+<p align="center">
+  <img src="Sample_Runs/SampleGif.gif" alt="DQN agent gameplay sample 1" width="32%">
+  <img src="Sample_Runs/SampleGif2.gif" alt="DQN agent gameplay sample 2" width="32%">
+  <img src="Sample_Runs/SampleGif3.gif" alt="DQN agent gameplay sample 3" width="32%">
+</p>
+
+The training dashboard captures the learning signals produced during a demo run, including episodic return, epsilon decay, Q-values, and temporal-difference loss.
+
+![TensorBoard metrics from a DQN demo run](Sample_Runs/Demo_Run.png)
+
 ## Project Structure
 
 ```text
