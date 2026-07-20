@@ -78,7 +78,11 @@ class Env16(BaseEnv):
             int(self.config["OBS_SIZE"]),
         )
         reward = Env_conditions.get_reward(real_next_state, action_idx, self.next_state)
-        terminated = Env_conditions.get_termination(real_next_state, self.next_state)
+        episode_outcome = Env_conditions.get_episode_outcome(
+            real_next_state,
+            self.next_state,
+        )
+        terminated = episode_outcome is not None
         truncated = Env_conditions.get_truncated(
             real_next_state,
             self.next_state,
@@ -89,7 +93,14 @@ class Env16(BaseEnv):
         if terminated:
             reward -= 500
 
-        return self.next_state, reward, terminated, truncated, self._get_info()
+        info = self._get_info()
+        info["is_win"] = episode_outcome == "win"
+        info["episode_outcome"] = (
+            episode_outcome
+            if terminated
+            else "truncated" if truncated else None
+        )
+        return self.next_state, reward, terminated, truncated, info
 
     def close(self):
         self.socket.close(linger=0)

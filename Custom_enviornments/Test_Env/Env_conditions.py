@@ -150,19 +150,26 @@ def get_reward(obs, action, prev_obs):
     return reward
 
 
-def get_termination(obs, prev_obs):
+def get_episode_outcome(obs, prev_obs):
     if prev_obs is None or not np.any(prev_obs):
-        return False
+        return None
 
     player_hp_pct = float(obs[3])
     if player_hp_pct <= 0.0:
-        return True
+        return "loss"
 
     nearest_enemy = enemy_block(obs, 0)
     prev_nearest_enemy = enemy_block(prev_obs, 0)
     enemy_was_alive = prev_nearest_enemy["hp_pct"] > 0
     enemy_is_dead = nearest_enemy["hp_pct"] <= 0
-    return bool(enemy_was_alive and enemy_is_dead)
+    if enemy_was_alive and enemy_is_dead:
+        return "win"
+
+    return None
+
+
+def get_termination(obs, prev_obs):
+    return get_episode_outcome(obs, prev_obs) is not None
 
 
 def get_truncated(obs, prev_obs, current_step):
