@@ -123,6 +123,9 @@ if __name__ == "__main__":
     start_time = time.time()
     # TRY NOT TO MODIFY: start the game
     obs, _ = envs.reset()
+    episode_return = 0.0
+    completed_episodes = 0
+    wins = 0
     #obs = envs.next_state #intialize as zero first
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
@@ -140,7 +143,8 @@ if __name__ == "__main__":
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
         
         print(f"rewards {rewards}")
-        writer.add_scalar("charts/episodic_return", float(rewards), global_step)
+        episode_return += float(rewards)
+        writer.add_scalar("charts/agent_return", float(rewards), global_step)
         writer.add_scalar("charts/epsilon", epsilon, global_step)        
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
@@ -155,6 +159,23 @@ if __name__ == "__main__":
             print("TRUNCATED")
         done = bool(terminations or truncations)
         if done:
+            outcome = infos.get("episode_outcome")
+            is_win = outcome == "win"
+            completed_episodes += 1
+            wins += int(is_win)
+
+            writer.add_scalar("charts/episodic_return", episode_return, global_step)
+            writer.add_scalar(
+                "charts/win_rate",
+                wins / completed_episodes,
+                global_step,
+            )
+
+            print(
+                f"episode={completed_episodes}, outcome={outcome}, "
+                f"return={episode_return}, win_rate={wins / completed_episodes:.2%}"
+            )
+            episode_return = 0.0
             obs, _ = envs.reset()
         else:
             obs = next_obs
