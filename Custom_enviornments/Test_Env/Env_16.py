@@ -94,7 +94,7 @@ class Env16(BaseEnv):
         #Define termination reward
         if terminated == "loss":
             reward -= 500
-        else:
+        elif terminated == "win":
             reward += 500
 
         info = self._get_info()
