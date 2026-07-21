@@ -90,8 +90,12 @@ class Env16(BaseEnv):
         )
 
         self.next_state = real_next_state
-        if terminated:
+
+        #Define termination reward
+        if terminated == "loss":
             reward -= 500
+        else:
+            reward += 500
 
         info = self._get_info()
         info["is_win"] = episode_outcome == "win"
