@@ -32,14 +32,16 @@ def evaluate(
     eval_episodes: int,
     device: torch.device = torch.device("cpu"),
     epsilon: float = 0.0,
-) -> list:
+) -> tuple[list[float], int]:
     """Evaluate a trained DQN model on a single custom environment."""
     model.eval()
     episodic_returns = []
+    wins = 0
 
     for episode in range(eval_episodes):
         obs, _ = env.reset()
         episode_return = 0.0
+        episode_won = False
         done = False
 
         while not done:
@@ -50,15 +52,21 @@ def evaluate(
                     q_values = model(torch.Tensor(obs).to(device))
                     action = torch.argmax(q_values).cpu().item()
 
-            next_obs, reward, terminated, truncated, _ = env.step(np.array([action]))
+            next_obs, reward, terminated, truncated, info = env.step(np.array([action]))
             episode_return += float(reward)
             done = bool(terminated or truncated)
+            if done:
+                episode_won = bool(info.get("is_win", False))
             obs = next_obs
 
         episodic_returns.append(episode_return)
-        print(f"eval_episode={episode}, episodic_return={episode_return}")
+        wins += int(episode_won)
+        print(
+            f"eval_episode={episode}, episodic_return={episode_return}, "
+            f"outcome={'win' if episode_won else info.get('episode_outcome', 'loss')}"
+        )
 
-    return episodic_returns
+    return episodic_returns, wins
 
 
 @dataclass
@@ -88,7 +96,7 @@ if __name__ == "__main__":
 
     print(f"Starting evaluation for {args.eval_episodes} episodes...")
     start_time = time.time()
-    episodic_returns = evaluate(
+    episodic_returns, wins = evaluate(
         env,
         model,
         eval_episodes=args.eval_episodes,
@@ -104,6 +112,8 @@ if __name__ == "__main__":
     print(f"Std Return: {np.std(episodic_returns):.2f}")
     print(f"Max Return: {np.max(episodic_returns):.2f}")
     print(f"Min Return: {np.min(episodic_returns):.2f}")
+    print(f"Wins: {wins}/{args.eval_episodes}")
+    print(f"Win Rate: {100.0 * wins / args.eval_episodes:.2f}%")
     print(f"Total Time: {elapsed_time:.2f}s")
     print("=" * 50)
 
