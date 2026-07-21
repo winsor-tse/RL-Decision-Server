@@ -21,7 +21,7 @@ ACTIONS_16 = [
     "castSpell:1",
     "castSpell:2",
     "castSpell:3",
-    #"castSpell:4",
+    "castSpell:4",
     "castSpell:5",
     "castSpell:6",
     "castSpell:7",
@@ -90,8 +90,12 @@ class Env16(BaseEnv):
         )
 
         self.next_state = real_next_state
-        if terminated:
-            reward -= 100
+
+        #Define termination reward
+        if terminated == "loss":
+            reward -= 500
+        elif terminated == "win":
+            reward += 500
 
         info = self._get_info()
         info["is_win"] = episode_outcome == "win"
