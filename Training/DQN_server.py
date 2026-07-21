@@ -35,7 +35,7 @@ class Args:
     save_model: bool = True
     """save model is defaulted as True"""
 
-    total_timesteps: int = 5000 #TimeSteps are scaled with JS action time (current is 0,5 seconds)
+    total_timesteps: int = 20000 #TimeSteps are scaled with JS action time (current is 0,15 seconds)
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""

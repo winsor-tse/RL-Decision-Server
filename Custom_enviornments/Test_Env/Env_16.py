@@ -21,7 +21,7 @@ ACTIONS_16 = [
     "castSpell:1",
     "castSpell:2",
     "castSpell:3",
-    "castSpell:4",
+    #"castSpell:4",
     "castSpell:5",
     "castSpell:6",
     "castSpell:7",
