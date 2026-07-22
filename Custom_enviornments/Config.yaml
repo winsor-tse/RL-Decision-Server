@@ -16,6 +16,6 @@ OBS_SIZE: 13
 
 # Shared RL episode/runtime defaults.
 # Individual Env_conditions files decide how these limits are interpreted.
-MAX_EPISODE_STEPS: 128
+MAX_EPISODE_STEPS: 256
 STATE_DTYPE: "float32"
 ACTION_SPACE_TYPE: "discrete"
