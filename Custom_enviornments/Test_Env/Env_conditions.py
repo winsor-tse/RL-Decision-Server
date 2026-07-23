@@ -90,13 +90,13 @@ def parse_observation(data: dict, obs_size: int = OBS_SIZE):
         player.get("direction", "idle"),
         DIRECTION_MAP["idle"],
     )
-    obs = [
-        float(player.get("mapID", 0)),
+    obs = [        
         float(player.get("mapX", 0)),
         float(player.get("mapY", 0)),
         float(player_direction),
         safe_pct(player.get("hp", 0), player.get("maxHp", 0)),
         safe_pct(player.get("mp", 0), player.get("maxMp", 0)),
+        float(player.get("mapID", 0)[3:]),
     ]
 
     monsters = [
@@ -158,7 +158,8 @@ def get_episode_outcome(obs, prev_obs):
 
     player_hp_pct = float(obs[3])
     print(f"{player_hp_pct}")
-    if player_hp_pct <= 0.0:
+    map_id = obs[5]
+    if map_id != 53:
         return "loss"
 
     nearest_enemy = enemy_block(obs, 0)
