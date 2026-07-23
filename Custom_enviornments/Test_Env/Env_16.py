@@ -66,6 +66,7 @@ class Env16(BaseEnv):
 
         message = self.socket.recv_json()
         world_state = message.get("worldState", {})
+        print(f"{world_state}")
 
         response = self._build_response(
             message=message,
@@ -84,8 +85,8 @@ class Env16(BaseEnv):
             real_next_state,
             self.next_state,
         )
-        print(f"{episode_outcome}")
-        outcome = episode_outcome is not None
+        # print(f"{episode_outcome}")
+        outcome = episode_outcome
         truncated = Env_conditions.get_truncated(
             real_next_state,
             self.next_state,

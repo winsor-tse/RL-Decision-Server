@@ -9,10 +9,10 @@ ZMQ_BIND_URL: "tcp://127.0.0.1:5555"
 
 # Observation/state-space layout shared by all environments.
 # OBS_SIZE must equal OBS_PLAYER_SIZE + OBS_ENEMY_SIZE * MAX_ENEMIES.
-OBS_PLAYER_SIZE: 5
+OBS_PLAYER_SIZE: 6
 OBS_ENEMY_SIZE: 4
-MAX_ENEMIES: 2
-OBS_SIZE: 13
+MAX_ENEMIES: 5
+OBS_SIZE: 26
 
 # Shared RL episode/runtime defaults.
 # Individual Env_conditions files decide how these limits are interpreted.

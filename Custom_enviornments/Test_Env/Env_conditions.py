@@ -78,7 +78,7 @@ def parse_observation(data: dict, obs_size: int = OBS_SIZE):
     Builds the fixed Yugen Saga observation vector used by the RL agent.
 
     Layout:
-    - player map X, map Y, direction, HP pct, MP pct
+    - player mapID, map X, map Y, direction, HP pct, MP pct
     - nearest enemy distance, direction, HP pct, MP pct
     - second nearest enemy distance, direction, HP pct, MP pct
     """
@@ -91,6 +91,7 @@ def parse_observation(data: dict, obs_size: int = OBS_SIZE):
         DIRECTION_MAP["idle"],
     )
     obs = [
+        float(player.get("mapID", 0)),
         float(player.get("mapX", 0)),
         float(player.get("mapY", 0)),
         float(player_direction),
@@ -156,6 +157,7 @@ def get_episode_outcome(obs, prev_obs):
         return None
 
     player_hp_pct = float(obs[3])
+    print(f"{player_hp_pct}")
     if player_hp_pct <= 0.0:
         return "loss"
 

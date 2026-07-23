@@ -142,7 +142,7 @@ if __name__ == "__main__":
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
         
-        print(f"rewards {rewards}")
+        # print(f"rewards {rewards}")
         episode_return += float(rewards)
         writer.add_scalar("charts/agent_return", float(rewards), global_step)
         writer.add_scalar("charts/epsilon", epsilon, global_step)        
