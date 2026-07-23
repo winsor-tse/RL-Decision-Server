@@ -35,7 +35,7 @@ class Args:
     save_model: bool = True
     """save model is defaulted as True"""
 
-    total_timesteps: int = 5000 #TimeSteps are scaled with JS action time (current is 0,5 seconds)
+    total_timesteps: int = 20000 #TimeSteps are scaled with JS action time (current is 0,15 seconds)
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
@@ -123,24 +123,28 @@ if __name__ == "__main__":
     start_time = time.time()
     # TRY NOT TO MODIFY: start the game
     obs, _ = envs.reset()
+    episode_return = 0.0
+    completed_episodes = 0
+    wins = 0
     #obs = envs.next_state #intialize as zero first
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         epsilon = linear_schedule(args.start_e, args.end_e, args.exploration_fraction * args.total_timesteps, global_step)
         if random.random() < epsilon:
             actions = np.array([envs.single_action_space.sample()])
-            print(actions)
+            # print(actions)
         else:
             q_values = q_network(torch.Tensor(obs).to(device))
-            print(q_values)
+            # print(q_values)
             actions = torch.argmax(q_values).cpu().numpy()
-            print(actions)
+            # print(actions)
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
         
-        print(f"rewards {rewards}")
-        writer.add_scalar("charts/episodic_return", float(rewards), global_step)
+        # print(f"rewards {rewards}")
+        episode_return += float(rewards)
+        writer.add_scalar("charts/agent_return", float(rewards), global_step)
         writer.add_scalar("charts/epsilon", epsilon, global_step)        
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
@@ -150,11 +154,31 @@ if __name__ == "__main__":
             print(f"Truncated :{truncations}, real_next_obs :{real_next_obs}")
         rb.add(obs, real_next_obs, actions, rewards, terminations, infos)
 
+        # if bool(terminations):
+        print(f"{terminations}")
+
         # Gymnasium.vector.SyncVectorEnv or AsyncVectorEnv which handle environment auto-resetting automatically. we need to Manually reset here for external envs.
         if bool(truncations):
             print("TRUNCATED")
         done = bool(terminations or truncations)
         if done:
+            outcome = infos.get("episode_outcome")
+            is_win = outcome == "kill"
+            completed_episodes += 1
+            wins += int(is_win)
+
+            writer.add_scalar("charts/episodic_return", episode_return, global_step)
+            writer.add_scalar(
+                "charts/win_rate",
+                wins / completed_episodes,
+                global_step,
+            )
+
+            print(
+                f"episode={completed_episodes}, outcome={outcome}, "
+                f"return={episode_return}, win_rate={wins / completed_episodes:.2%}"
+            )
+            episode_return = 0.0
             obs, _ = envs.reset()
         else:
             obs = next_obs

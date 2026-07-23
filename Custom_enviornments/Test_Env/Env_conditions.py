@@ -33,6 +33,7 @@ DIRECTION_MAP = {
 
 INV_DIRECTION_MAP = {value: key for key, value in DIRECTION_MAP.items()}
 
+KILLED_COUNTER = 0
 
 def safe_pct(value: float, max_value: float) -> float:
     if max_value is None or max_value <= 0:
@@ -77,7 +78,7 @@ def parse_observation(data: dict, obs_size: int = OBS_SIZE):
     Builds the fixed Yugen Saga observation vector used by the RL agent.
 
     Layout:
-    - player map X, map Y, direction, HP pct, MP pct
+    - player mapID, map X, map Y, direction, HP pct, MP pct
     - nearest enemy distance, direction, HP pct, MP pct
     - second nearest enemy distance, direction, HP pct, MP pct
     """
@@ -89,12 +90,13 @@ def parse_observation(data: dict, obs_size: int = OBS_SIZE):
         player.get("direction", "idle"),
         DIRECTION_MAP["idle"],
     )
-    obs = [
+    obs = [        
         float(player.get("mapX", 0)),
         float(player.get("mapY", 0)),
         float(player_direction),
         safe_pct(player.get("hp", 0), player.get("maxHp", 0)),
         safe_pct(player.get("mp", 0), player.get("maxMp", 0)),
+        float(player.get("mapID", 0)[3:]),
     ]
 
     monsters = [
@@ -150,19 +152,28 @@ def get_reward(obs, action, prev_obs):
     return reward
 
 
-def get_termination(obs, prev_obs):
+def get_episode_outcome(obs, prev_obs):
     if prev_obs is None or not np.any(prev_obs):
-        return False
+        return None
 
     player_hp_pct = float(obs[3])
-    if player_hp_pct <= 0.0:
-        return True
+    print(f"{player_hp_pct}")
+    map_id = obs[5]
+    if map_id != 53:
+        return "loss"
 
     nearest_enemy = enemy_block(obs, 0)
     prev_nearest_enemy = enemy_block(prev_obs, 0)
     enemy_was_alive = prev_nearest_enemy["hp_pct"] > 0
     enemy_is_dead = nearest_enemy["hp_pct"] <= 0
-    return bool(enemy_was_alive and enemy_is_dead)
+    if enemy_was_alive and enemy_is_dead:
+        return "kill"
+
+    return None
+
+
+def get_termination(obs, prev_obs):
+    return get_episode_outcome(obs, prev_obs) is not None
 
 
 def get_truncated(obs, prev_obs, current_step):

@@ -146,11 +146,16 @@ Open http://localhost:6006.
 
 Useful metrics:
 
+- `charts/agent_return`
 - `charts/episodic_return`
+- `charts/win_rate`
 - `charts/epsilon`
 - `losses/td_loss`
 - `losses/q_values`
 - `charts/SPS`
+
+`agent_return` is the reward at each global step. `episodic_return` and
+`win_rate` are written when an episode ends.
 
 ## Evaluation
 

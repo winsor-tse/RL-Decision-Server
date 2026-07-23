@@ -21,7 +21,7 @@ ACTIONS_16 = [
     "castSpell:1",
     "castSpell:2",
     "castSpell:3",
-    "castSpell:4",
+    #"castSpell:4",
     "castSpell:5",
     "castSpell:6",
     "castSpell:7",
@@ -35,11 +35,13 @@ class Env16(BaseEnv):
 
     def __init__(self):
         super().__init__(actions=ACTIONS_16, config=load_env_config())
+        self.kill_counter = 0
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         message = self.socket.recv_json()
         print("RESET Received:", message)
+        self.kill_counter = 0
 
         response = self._build_response(
             message=message,
@@ -64,6 +66,7 @@ class Env16(BaseEnv):
 
         message = self.socket.recv_json()
         world_state = message.get("worldState", {})
+        print(f"{world_state}")
 
         response = self._build_response(
             message=message,
@@ -78,7 +81,12 @@ class Env16(BaseEnv):
             int(self.config["OBS_SIZE"]),
         )
         reward = Env_conditions.get_reward(real_next_state, action_idx, self.next_state)
-        terminated = Env_conditions.get_termination(real_next_state, self.next_state)
+        episode_outcome = Env_conditions.get_episode_outcome(
+            real_next_state,
+            self.next_state,
+        )
+        # print(f"{episode_outcome}")
+        outcome = episode_outcome
         truncated = Env_conditions.get_truncated(
             real_next_state,
             self.next_state,
@@ -86,10 +94,28 @@ class Env16(BaseEnv):
         )
 
         self.next_state = real_next_state
-        if terminated:
-            reward -= 500
 
-        return self.next_state, reward, terminated, truncated, self._get_info()
+        #Define termination reward
+        terminated = None
+        
+        if outcome == "loss":
+            reward -= 500
+            terminated = True
+        elif outcome == "kill":
+            self.kill_counter += 1
+            reward += 200
+
+        if self.kill_counter >= 5:
+            terminated = True
+
+        info = self._get_info()
+        info["is_win"] = self.kill_counter >= 1
+        info["episode_outcome"] = (
+            episode_outcome
+            if terminated
+            else "truncated" if truncated else None
+        )
+        return self.next_state, reward, terminated, truncated, info
 
     def close(self):
         self.socket.close(linger=0)

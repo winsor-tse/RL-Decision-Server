@@ -12,4 +12,4 @@ tensorboard_command: "Automation/RunTensorboard.bat"
 
 dqn_command: "python Training/DQN_server.py"
 ppo_command: "python Training/PPO_server.py"
-inference_command: "python Inference/dqn_eval.py --model_path runs/DQN_server__<timestamp>/DQN_server.pt"
+inference_command: "python Inference/dqn_eval.py --model_path runs/DQN_server__1784092660/DQN_server.pt"

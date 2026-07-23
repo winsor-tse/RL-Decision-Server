@@ -2,40 +2,7 @@
 
 Ideas for extending training, fine-tuning, curriculum learning, replay storage, and behavior cloning.
 
-## 1. Resume DQN Training From Checkpoints
-
-Goal: create `Training/Load_DQN_server.py` to load a previous run and continue training.
-
-Steps:
-
-1. Save richer checkpoints from `Training/DQN_server.py`.
-2. Include model weights, target model weights, optimizer state, global step, and args.
-3. Build the env before loading the model.
-4. Create `QNetwork(env)` exactly like normal training.
-5. Load the checkpoint weights into `q_network`.
-6. Load the same weights into `target_network`.
-7. Optionally load optimizer state so training resumes more smoothly.
-8. Resume epsilon carefully so the model does not restart with fully random behavior.
-
-Recommended checkpoint shape:
-
-```python
-{
-    "model": q_network.state_dict(),
-    "target_model": target_network.state_dict(),
-    "optimizer": optimizer.state_dict(),
-    "global_step": global_step,
-    "args": vars(args),
-}
-```
-
-Example command:
-
-```bash
-python Training/Load_DQN_server.py --checkpoint runs/.../DQN_server.pt
-```
-
-## 2. Fine-Tune Models For Different Scenarios
+## 1. Fine-Tune Models For Different Scenarios
 
 Goal: take a trained model and continue training it on a different class/scenario env.
 
@@ -107,79 +74,7 @@ curriculum:
     timesteps: 15000
 ```
 
-## 4. Store Top States And Actions
-
-Goal: create a local experience database for high-return behavior.
-
-Recommended first option: SQLite.
-
-Why SQLite:
-
-- local file
-- no server required
-- easy queries
-- good enough for replay and behavior cloning experiments
-
-Example path:
-
-```text
-Data/rl_experiences.sqlite
-```
-
-Recommended tables:
-
-```text
-experiences
-episodes
-models
-```
-
-Important `experiences` columns:
-
-```text
-id
-episode_id
-state
-action
-reward
-next_state
-done
-step
-episode_return
-env_name
-model_path
-created_at
-```
-
-Start by storing `state` and `next_state` as JSON lists. Use binary or compressed NumPy storage later if needed.
-
-## 5. Store Highest-Return Episodes
-
-There are two good approaches.
-
-Option A: store all transitions, query the best later.
-
-Example query:
-
-```sql
-SELECT *
-FROM experiences
-WHERE episode_return > 50
-ORDER BY reward DESC;
-```
-
-Option B: only save elite episodes.
-
-Steps:
-
-1. Track episode return during training.
-2. Keep transitions for the current episode in memory.
-3. If episode return is above a threshold, save the episode.
-4. Keep the top N episodes per environment.
-
-This creates cleaner data for behavior cloning.
-
-## 6. Behavior Cloning
+## 6. Behavior Cloning / Inverse RL
 
 Goal: train a model from high-return state/action pairs.
 
@@ -201,7 +96,7 @@ y = actions
 
 3. Train the Q-network or policy head with classification loss.
 4. Save the behavior-cloned model.
-5. Use that model as initialization for DQN.
+5. Use that model as initialization for DQN or even for critic in PPO.
 6. Fine-tune with normal RL afterward.
 
 Example pipeline:
@@ -248,3 +143,8 @@ Utils/
 ## Important Constraint
 
 Keep observation and action dimensions stable across models that should be resumed or fine-tuned. If those dimensions change, checkpoint loading needs partial weight loading, model surgery, or a conversion layer.
+
+
+## Red Section
+
+Two threads for actions, one for movement/facing and one for casting.
