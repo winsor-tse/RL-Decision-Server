@@ -33,6 +33,7 @@ DIRECTION_MAP = {
 
 INV_DIRECTION_MAP = {value: key for key, value in DIRECTION_MAP.items()}
 
+KILLED_COUNTER = 0
 
 def safe_pct(value: float, max_value: float) -> float:
     if max_value is None or max_value <= 0:
@@ -163,7 +164,7 @@ def get_episode_outcome(obs, prev_obs):
     enemy_was_alive = prev_nearest_enemy["hp_pct"] > 0
     enemy_is_dead = nearest_enemy["hp_pct"] <= 0
     if enemy_was_alive and enemy_is_dead:
-        return "win"
+        return "kill"
 
     return None
 

@@ -132,12 +132,12 @@ if __name__ == "__main__":
         epsilon = linear_schedule(args.start_e, args.end_e, args.exploration_fraction * args.total_timesteps, global_step)
         if random.random() < epsilon:
             actions = np.array([envs.single_action_space.sample()])
-            print(actions)
+            # print(actions)
         else:
             q_values = q_network(torch.Tensor(obs).to(device))
-            print(q_values)
+            # print(q_values)
             actions = torch.argmax(q_values).cpu().numpy()
-            print(actions)
+            # print(actions)
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
@@ -154,13 +154,16 @@ if __name__ == "__main__":
             print(f"Truncated :{truncations}, real_next_obs :{real_next_obs}")
         rb.add(obs, real_next_obs, actions, rewards, terminations, infos)
 
+        # if bool(terminations):
+        print(f"{terminations}")
+
         # Gymnasium.vector.SyncVectorEnv or AsyncVectorEnv which handle environment auto-resetting automatically. we need to Manually reset here for external envs.
         if bool(truncations):
             print("TRUNCATED")
         done = bool(terminations or truncations)
         if done:
             outcome = infos.get("episode_outcome")
-            is_win = outcome == "win"
+            is_win = outcome == "kill"
             completed_episodes += 1
             wins += int(is_win)
 
