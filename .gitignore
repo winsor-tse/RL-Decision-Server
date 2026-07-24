@@ -21,3 +21,5 @@ wandb/
 *.pt
 *.pth
 *.onnx
+
+.gitignore
