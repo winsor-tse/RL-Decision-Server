@@ -1,16 +1,8 @@
-from pathlib import Path
-import sys
 from typing import Sequence
 
 import numpy as np
 
-try:
-    from Custom_enviornments.Load_env_config import load_env_config
-except ModuleNotFoundError:
-    env_root = Path(__file__).resolve().parents[1]
-    if str(env_root) not in sys.path:
-        sys.path.append(str(env_root))
-    from Load_env_config import load_env_config
+from Custom_enviornments.Load_env_config import load_env_config
 
 
 # This file is specific to this directory or class
@@ -156,8 +148,6 @@ def get_episode_outcome(obs, prev_obs):
     if prev_obs is None or not np.any(prev_obs):
         return None
 
-    player_hp_pct = float(obs[3])
-    print(f"{player_hp_pct}")
     map_id = obs[5]
     if map_id != 53:
         return "loss"
@@ -177,4 +167,4 @@ def get_termination(obs, prev_obs):
 
 
 def get_truncated(obs, prev_obs, current_step):
-    return (current_step >= MAX_EPISODE_STEPS or obs[1] < 25)
+    return bool(current_step >= MAX_EPISODE_STEPS or obs[1] < 25)

@@ -7,7 +7,7 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 - `Automation/Bridge/ws_zmq_bridge.py`: translates WebSocket messages from Yugen Saga into ZMQ backend requests.
 - `Training/DQN_server.py`: DQN training loop for the current custom environment.
 - `Inference/dqn_eval.py`: loads a saved DQN checkpoint and runs evaluation.
-- `RunRL.ps1` / `RunRL.sh`: starts TensorBoard, the bridge, and the configured RL algorithm together.
+- `RunRL.ps1`: starts TensorBoard, the bridge, and the configured RL algorithm together.
 - `Utils/buffers.py`: replay buffer used by DQN.
 - `Custom_enviornments/`: shared env config, base env, and class-specific environments.
 
@@ -30,15 +30,15 @@ The training dashboard captures the learning signals produced during a demo run,
 ```text
 .
 |-- requirements.txt
+|-- pyproject.toml
 |-- InstallationReadMe.md
 |-- RunRL.ps1
-|-- RunRL.sh
 |-- RunInference.ps1
-|-- RunInference.sh
 |-- Automation/
 |   |-- automation_config.yaml
-|   |-- Training_stack.py
-|   |-- Inference_stack.py
+|   |-- processes.py
+|   |-- train.py
+|   |-- infer.py
 |   |-- RunTensorboard.bat
 |   `-- Bridge/
 |       `-- ws_zmq_bridge.py
@@ -67,7 +67,7 @@ Environment code is split by responsibility:
 - `Custom_enviornments/Config.yaml`: shared state-space and runtime constants used by all envs.
 - `Custom_enviornments/Load_env_config.py`: the only config parser used by environments.
 - `Custom_enviornments/BaseEnv.py`: bare Gymnasium/ZMQ base environment.
-- `Custom_enviornments/Test_Env/Env_16.py`: example class-specific env with a 16-action discrete action space.
+- `Custom_enviornments/Test_Env/Env_16.py`: current class-specific discrete-action environment.
 - `Custom_enviornments/Test_Env/Env_conditions.py`: example class-specific observation parsing, rewards, termination, and truncation.
 
 Each new game/class environment should have its own folder, action-space file, and `Env_conditions.py`. Shared state-space config stays in `Config.yaml`; class-specific reward and end-condition logic stays beside that class env.
@@ -95,12 +95,12 @@ The current observation space is 13 values:
 
 `Custom_enviornments/Test_Env/Env_16.py` is the active example env used by `Training/DQN_server.py` and `Inference/dqn_eval.py`.
 
-It exposes 16 discrete actions:
+It exposes 15 discrete actions:
 
 - Movement: `up`, `down`, `left`, `right`
 - Direction: `direction:up`, `direction:down`, `direction:left`, `direction:right`
 - Combat: `attack`
-- Spells: `castSpell:1` through `castSpell:7`
+- Spells: `castSpell:1`, `castSpell:2`, `castSpell:3`, `castSpell:5`, `castSpell:6`, and `castSpell:7`
 
 ## Running Training
 
@@ -110,26 +110,26 @@ Recommended one-command startup:
 .\RunRL.ps1
 ```
 
-Or from Bash:
+Or directly from any shell:
 
 ```bash
-./RunRL.sh
+python -m Automation.train
 ```
 
-`RunRL` reads `Automation/automation_config.yaml`, starts TensorBoard when enabled, starts `Automation/Bridge/ws_zmq_bridge.py`, waits for the configured bridge-ready signal, then starts the configured RL algorithm through `Automation/Training_stack.py`.
+The launcher reads `Automation/automation_config.yaml`, starts TensorBoard when enabled, starts the bridge, waits for its configured readiness signal, and then starts the selected RL algorithm. Configured commands are YAML argument lists and use the active Python interpreter.
 
 Manual startup is still supported.
 
 Start the WebSocket/ZMQ bridge first:
 
 ```bash
-python Automation/Bridge/ws_zmq_bridge.py
+python -m Automation.Bridge.ws_zmq_bridge
 ```
 
 Then start DQN training:
 
 ```bash
-python Training/DQN_server.py
+python -m Training.DQN_server
 ```
 
 The game must be running and sending `ai_tick` messages through the browser extension before the env can step.
@@ -162,25 +162,28 @@ Useful metrics:
 After training creates a checkpoint:
 
 ```bash
-python Inference/dqn_eval.py --model_path runs/DQN_server__<timestamp>/DQN_server.pt
+python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt
 ```
 
 Optional examples:
 
 ```bash
-python Inference/dqn_eval.py --model_path runs/DQN_server__<timestamp>/DQN_server.pt --eval_episodes 20
-python Inference/dqn_eval.py --model_path runs/DQN_server__<timestamp>/DQN_server.pt --epsilon 0.05
-python Inference/dqn_eval.py --model_path runs/DQN_server__<timestamp>/DQN_server.pt --cuda false
+python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt --eval-episodes 20
+python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt --epsilon 0.05
+python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt --cuda false
 ```
 
-To run inference with the bridge automation, configure `inference_command` in `Automation/automation_config.yaml` or pass a command:
+The inference launcher uses the newest `.pt` checkpoint under `runs/` by
+default. Set `inference_model_path` in `Automation/automation_config.yaml` to
+select a specific checkpoint, or pass a complete command:
 
 ```powershell
-.\RunInference.ps1 -Command "python Inference/dqn_eval.py --model_path runs/DQN_server__<timestamp>/DQN_server.pt"
+.\RunInference.ps1 -Command "python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt"
 ```
 
 ## Notes
 
 - DQN is the active training path for the current discrete action space.
+- Run Python entry points with `python -m ...`; package imports no longer depend on script-relative `sys.path` changes.
 - `Load_env_config.py` should remain the single place that parses shared env config.
 - `Automation/automation_config.yaml` controls TensorBoard startup, bridge startup, training command, and inference command.

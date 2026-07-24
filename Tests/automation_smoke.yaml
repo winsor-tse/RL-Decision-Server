@@ -1,0 +1,19 @@
+rl_algorithm: smoke
+bridge_command:
+  - python
+  - -m
+  - Tests.automation_fixture
+  - bridge
+bridge_ready_signal: AUTOMATION_FIXTURE_READY
+ready_timeout_seconds: 5
+start_tensorboard: false
+smoke_command:
+  - python
+  - -m
+  - Tests.automation_fixture
+  - child
+inference_command:
+  - python
+  - -m
+  - Tests.automation_fixture
+  - child

@@ -3,8 +3,13 @@ param(
     [string]$Command = ""
 )
 
+$ProjectPython = Join-Path $PSScriptRoot "RL_venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $ProjectPython)) {
+    $ProjectPython = "python"
+}
+
 if ($Command) {
-    python Automation\Inference_stack.py --config $Config --command $Command
+    & $ProjectPython -m Automation.infer --config $Config --command $Command
 } else {
-    python Automation\Inference_stack.py --config $Config
+    & $ProjectPython -m Automation.infer --config $Config
 }

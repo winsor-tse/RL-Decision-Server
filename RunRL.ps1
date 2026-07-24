@@ -2,4 +2,9 @@ param(
     [string]$Config = "Automation\automation_config.yaml"
 )
 
-python Automation\Training_stack.py --config $Config
+$ProjectPython = Join-Path $PSScriptRoot "RL_venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $ProjectPython)) {
+    $ProjectPython = "python"
+}
+
+& $ProjectPython -m Automation.train --config $Config

@@ -1,5 +1,4 @@
-from pathlib import Path
-import sys
+import logging
 
 import numpy as np
 
@@ -7,8 +6,10 @@ from Custom_enviornments.BaseEnv import BaseEnv
 from Custom_enviornments.Load_env_config import load_env_config
 from Custom_enviornments.Test_Env import Env_conditions
 
+LOGGER = logging.getLogger(__name__)
 
-ACTIONS_16 = [
+
+ACTIONS_15 = [
     "up",
     "down",
     "left",
@@ -31,16 +32,16 @@ ACTIONS_16 = [
 # This action space is specific to Test_Env.
 # A different game class should define its own env file and action list.
 class Env16(BaseEnv):
-    """Yugen Saga environment with a 16-action discrete action space."""
+    """Yugen Saga environment with the current 15-action discrete action space."""
 
     def __init__(self):
-        super().__init__(actions=ACTIONS_16, config=load_env_config())
+        super().__init__(actions=ACTIONS_15, config=load_env_config())
         self.kill_counter = 0
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         message = self.socket.recv_json()
-        print("RESET Received:", message)
+        LOGGER.debug("Reset message received: %s", message)
         self.kill_counter = 0
 
         response = self._build_response(
@@ -56,7 +57,7 @@ class Env16(BaseEnv):
             int(self.config["OBS_SIZE"]),
         )
         self.current_step = 0
-        print("RESET")
+        LOGGER.info("Environment reset")
         return self.next_state, self._get_info()
 
     def step(self, action):
@@ -66,7 +67,7 @@ class Env16(BaseEnv):
 
         message = self.socket.recv_json()
         world_state = message.get("worldState", {})
-        print(f"{world_state}")
+        LOGGER.debug("World state received: %s", world_state)
 
         response = self._build_response(
             message=message,
@@ -96,7 +97,7 @@ class Env16(BaseEnv):
         self.next_state = real_next_state
 
         #Define termination reward
-        terminated = None
+        terminated = False
         
         if outcome == "loss":
             reward -= 500

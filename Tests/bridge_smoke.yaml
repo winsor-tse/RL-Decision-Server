@@ -1,0 +1,13 @@
+rl_algorithm: smoke
+bridge_command:
+  - python
+  - -m
+  - Automation.Bridge.ws_zmq_bridge
+bridge_ready_signal: WebSocket bridge listening
+ready_timeout_seconds: 5
+start_tensorboard: false
+smoke_command:
+  - python
+  - -m
+  - Tests.automation_fixture
+  - child
