@@ -3,6 +3,7 @@ import os
 import random
 import sys
 import time
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,18 @@ from Utils.buffers import ReplayBuffer
 from Custom_enviornments.Test_Env import Env_16
 
 
+DEFAULT_TOTAL_TIMESTEPS = 20_000
+CLEANRL_REFERENCE_TOTAL_TIMESTEPS = 500_000
+CLEANRL_COUNT_RATIOS = {
+    "buffer_size": 10_000 / CLEANRL_REFERENCE_TOTAL_TIMESTEPS,
+    "target_network_frequency": 500 / CLEANRL_REFERENCE_TOTAL_TIMESTEPS,
+    "batch_size": 128 / CLEANRL_REFERENCE_TOTAL_TIMESTEPS,
+    "learning_starts": 10_000 / CLEANRL_REFERENCE_TOTAL_TIMESTEPS,
+    "train_frequency": 10 / CLEANRL_REFERENCE_TOTAL_TIMESTEPS,
+    "metrics_frequency": 10 / CLEANRL_REFERENCE_TOTAL_TIMESTEPS,
+}
+
+
 @dataclass
 class Args:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -35,34 +48,74 @@ class Args:
     save_model: bool = True
     """save model is defaulted as True"""
 
-    total_timesteps: int = 20000 #TimeSteps are scaled with JS action time (current is 0.15 seconds)
-    """total timesteps of the experiments"""
+    total_timesteps: int = DEFAULT_TOTAL_TIMESTEPS
+    """total number of environment steps"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
     num_envs: int = 1
     """the number of parallel game environments"""
-    buffer_size: int = 500 #changed from 10000
-    """the replay memory buffer size"""
+    buffer_size: int = 400
+    """replay-buffer capacity"""
     gamma: float = 0.99
     """the discount factor gamma"""
     tau: float = 1.0
     """the target network update rate"""
-    target_network_frequency: int = 50 #Do a fraction of total_time steps
-    """the timesteps it takes to update the target network"""
-    batch_size: int = 64
-    """the batch size of sample from the reply memory"""
+    target_network_frequency: int = 20
+    """target-network update interval"""
+    batch_size: int = 5
+    """training batch size"""
     start_e: float = 1
     """the starting epsilon for exploration"""
     end_e: float = 0.05
     """the ending epsilon for exploration"""
     exploration_fraction: float = 0.5
     """the fraction of `total-timesteps` it takes from start-e to go end-e"""
-    learning_starts: int = 100 #TODO: change learning starts
-    """timestep to start learning"""
-    train_frequency: int = 10
-    """the frequency of training"""
-    metrics_frequency: int = 10
-    """the number of environment steps between sampled TensorBoard metrics"""
+    learning_starts: int = 400
+    """environment step after which learning begins"""
+    train_frequency: int = 1
+    """environment steps between training updates"""
+    metrics_frequency: int = 1
+    """environment steps between regular TensorBoard writes"""
+
+    def __post_init__(self) -> None:
+        """Warn about unusual values without modifying user configuration."""
+        if self.total_timesteps <= 0:
+            warnings.warn(
+                "total_timesteps should be greater than zero",
+                UserWarning,
+                stacklevel=2,
+            )
+            return
+
+        for name, ratio in CLEANRL_COUNT_RATIOS.items():
+            value = getattr(self, name)
+            recommended = max(1, int(round(self.total_timesteps * ratio)))
+            lower_bound = max(1, int(round(recommended * 0.5)))
+            upper_bound = max(lower_bound, int(round(recommended * 2.0)))
+            if value < lower_bound or value > upper_bound:
+                warnings.warn(
+                    f"{name}={value} is outside the recommended range "
+                    f"{lower_bound}-{upper_bound} for "
+                    f"total_timesteps={self.total_timesteps} "
+                    f"(CleanRL-ratio target: {recommended})",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+        if self.batch_size > self.buffer_size:
+            warnings.warn(
+                "batch_size exceeds buffer_size; replay samples will contain "
+                "heavy duplication",
+                UserWarning,
+                stacklevel=2,
+            )
+        if self.learning_starts >= self.total_timesteps:
+            warnings.warn(
+                "learning_starts is at or beyond total_timesteps; no training "
+                "updates will occur",
+                UserWarning,
+                stacklevel=2,
+            )
 
 
 # ALGO LOGIC: initialize agent here:
@@ -151,9 +204,28 @@ if __name__ == "__main__":
     assert args.num_envs == 1, "vectorized envs are not supported at the moment"
     run_name = f"{args.exp_name}__{int(time.time())}"
     writer = SummaryWriter(f"runs/{run_name}")
+    hyperparameters = {
+        **vars(args),
+        "cleanrl_reference_total_timesteps": CLEANRL_REFERENCE_TOTAL_TIMESTEPS,
+    }
     writer.add_text(
         "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+        "|param|value|\n|-|-|\n%s"
+        % "\n".join(
+            f"|{key}|{value}|" for key, value in hyperparameters.items()
+        ),
+    )
+    configured_names = (
+        "buffer_size",
+        "target_network_frequency",
+        "batch_size",
+        "learning_starts",
+        "train_frequency",
+        "metrics_frequency",
+    )
+    print(
+        "Configured hyperparameters: "
+        + ", ".join(f"{name}={getattr(args, name)}" for name in configured_names)
     )
 
     #TODO: determine whether the following is needed
@@ -190,7 +262,7 @@ if __name__ == "__main__":
     wins = 0
     action_counts = np.zeros(envs.single_action_space.n, dtype=np.int64)
     recent_actions = []
-    metrics_frequency = max(1, args.metrics_frequency)
+    metrics_frequency = args.metrics_frequency
     player_hp_index = 3
     enemy_hp_index = int(envs.config["OBS_PLAYER_SIZE"]) + 2
     #obs = envs.next_state #intialize as zero first

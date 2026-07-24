@@ -149,13 +149,46 @@ Then start DQN training:
 python -m Training.DQN_server
 ```
 
-To change how often regular step metrics are written:
+The game must be running and sending `ai_tick` messages through the browser extension before the env can step.
+
+## DQN Hyperparameters
+
+Hyperparameters are concrete `Args` values and are not automatically changed
+when `total_timesteps` changes. The defaults are currently configured for a
+20,000-step run using the proportions from the supplied CleanRL CartPole
+configuration:
+
+| Parameter | Default |
+|---|---:|
+| `total_timesteps` | 20,000 |
+| `buffer_size` | 400 |
+| `target_network_frequency` | 20 |
+| `batch_size` | 5 |
+| `learning_starts` | 400 |
+| `train_frequency` | 1 |
+| `metrics_frequency` | 1 |
+
+Every value can be configured directly for training or fine-tuning:
 
 ```bash
-python -m Training.DQN_server --metrics-frequency 25
+python -m Training.DQN_server \
+  --total-timesteps 20000 \
+  --buffer-size 2000 \
+  --batch-size 32 \
+  --learning-starts 0 \
+  --train-frequency 2 \
+  --target-network-frequency 50 \
+  --metrics-frequency 25
 ```
 
-The game must be running and sending `ai_tick` messages through the browser extension before the env can step.
+Configuration checks only issue warnings. They never rewrite a supplied value
+or stop the run. A warning is emitted when a count parameter is below half or
+above twice the proportional CleanRL recommendation for the selected
+`total_timesteps`, when batch size exceeds replay-buffer size, or when learning
+would start after the run ends.
+
+Configured values are printed once at startup and stored in TensorBoard's
+`hyperparameters` text entry.
 
 ## Monitoring
 
@@ -188,9 +221,10 @@ Useful metrics:
 - `rewards/positioning`
 - `rewards/episode_*`
 
-Step and environment metrics are sampled every 10 steps by default and always
-written for non-zero reward events and episode endings. Change the regular
-sampling interval with `--metrics-frequency`.
+Step and environment metrics are sampled according to the configured
+`metrics_frequency` (1 step by default) and always written for
+non-zero reward events and episode endings. Set `--metrics-frequency`
+explicitly when a different logging interval is preferred.
 Episode return, length, win rate, and episode reward-component totals are
 written when an episode ends.
 
