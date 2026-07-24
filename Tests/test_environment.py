@@ -7,13 +7,13 @@ from Custom_enviornments.Test_Env import Env_conditions
 from Custom_enviornments.Test_Env.Env_16 import ACTIONS_15, Env16
 
 
-def make_world_state() -> dict:
+def make_world_state(*, player_hp: int = 100, enemy_hp: int = 100) -> dict:
     return {
         "player": {
             "mapX": 10,
             "mapY": 30,
             "direction": "up",
-            "hp": 100,
+            "hp": player_hp,
             "maxHp": 100,
             "mp": 50,
             "maxMp": 100,
@@ -24,7 +24,7 @@ def make_world_state() -> dict:
                 "type": "monster",
                 "mapX": 11,
                 "mapY": 30,
-                "hp": 100,
+                "hp": enemy_hp,
                 "maxHp": 100,
                 "mp": 0,
                 "maxMp": 0,
@@ -68,11 +68,25 @@ class EnvironmentCorrectnessTests(unittest.TestCase):
         env.current_step = 0
         env.kill_counter = 0
 
-        _, _, terminated, truncated, _ = env.step(np.array([0]))
+        _, _, terminated, truncated, info = env.step(np.array([0]))
 
         self.assertIs(terminated, False)
         self.assertIsInstance(truncated, bool)
         self.assertEqual(env.socket.response["move"], "up")
+        self.assertIn("reward_components", info)
+
+    def test_reward_components_sum_to_reward(self):
+        previous = Env_conditions.parse_observation(make_world_state())
+        current = Env_conditions.parse_observation(
+            make_world_state(player_hp=80, enemy_hp=50)
+        )
+
+        components = Env_conditions.get_reward_components(current, 0, previous)
+        reward = Env_conditions.get_reward(current, 0, previous)
+
+        self.assertAlmostEqual(components["damage_taken"], -0.4)
+        self.assertAlmostEqual(components["damage_dealt"], 12.5)
+        self.assertAlmostEqual(reward, sum(components.values()))
 
 
 if __name__ == "__main__":

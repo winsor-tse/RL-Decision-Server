@@ -81,7 +81,11 @@ class Env16(BaseEnv):
             world_state,
             int(self.config["OBS_SIZE"]),
         )
-        reward = Env_conditions.get_reward(real_next_state, action_idx, self.next_state)
+        reward_components = Env_conditions.get_reward_components(
+            real_next_state,
+            action_idx,
+            self.next_state,
+        )
         episode_outcome = Env_conditions.get_episode_outcome(
             real_next_state,
             self.next_state,
@@ -100,16 +104,18 @@ class Env16(BaseEnv):
         terminated = False
         
         if outcome == "loss":
-            reward -= 500
+            reward_components["terminal"] -= 500
             terminated = True
         elif outcome == "kill":
             self.kill_counter += 1
-            reward += 200
+            reward_components["terminal"] += 200
 
         if self.kill_counter >= 5:
             terminated = True
 
         info = self._get_info()
+        reward = float(sum(reward_components.values()))
+        info["reward_components"] = reward_components
         info["is_win"] = self.kill_counter >= 1
         info["episode_outcome"] = (
             episode_outcome

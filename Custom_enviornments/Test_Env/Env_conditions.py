@@ -25,8 +25,6 @@ DIRECTION_MAP = {
 
 INV_DIRECTION_MAP = {value: key for key, value in DIRECTION_MAP.items()}
 
-KILLED_COUNTER = 0
-
 def safe_pct(value: float, max_value: float) -> float:
     if max_value is None or max_value <= 0:
         return 0.0
@@ -114,34 +112,46 @@ def parse_observation(data: dict, obs_size: int = OBS_SIZE):
     return np.array(obs[:obs_size], dtype=np.float32)
 
 
-def get_reward(obs, action, prev_obs):
-    reward = 0.0
+def get_reward_components(obs, action, prev_obs) -> dict[str, float]:
+    """Return signed reward contributions for metrics and reward calculation."""
+    components = {
+        "health_state": 0.0,
+        "positioning": 0.0,
+        "damage_taken": 0.0,
+        "damage_dealt": 0.0,
+        "terminal": 0.0,
+    }
     player_hp_pct = float(obs[3])
     nearest_enemy = enemy_block(obs, 0)
 
     if player_hp_pct < 0.25:
-        reward -= 0.50
+        components["health_state"] = -0.50
     elif player_hp_pct < 0.50:
-        reward -= 0.15
+        components["health_state"] = -0.15
 
     if prev_obs is None or not np.any(prev_obs):
-        return float(reward)
+        return components
 
     if obs[1] < 30:
-        reward -= 0.1 * (30- obs[1])
+        components["positioning"] = -0.1 * (30 - float(obs[1]))
 
     prev_player_hp_pct = float(prev_obs[3])
     prev_nearest_enemy = enemy_block(prev_obs, 0)
 
     hp_lost = prev_player_hp_pct - player_hp_pct
     if hp_lost > 0:
-        reward -= 2.0 * hp_lost
+        components["damage_taken"] = -2.0 * hp_lost
 
     enemy_hp_lost = prev_nearest_enemy["hp_pct"] - nearest_enemy["hp_pct"]
     if enemy_hp_lost > 0:
-        reward += 25.0 * enemy_hp_lost
+        components["damage_dealt"] = 25.0 * enemy_hp_lost
 
-    return reward
+    return components
+
+
+def get_reward(obs, action, prev_obs) -> float:
+    """Return the sum of all non-terminal reward components."""
+    return float(sum(get_reward_components(obs, action, prev_obs).values()))
 
 
 def get_episode_outcome(obs, prev_obs):

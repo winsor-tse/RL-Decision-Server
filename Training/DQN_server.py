@@ -35,7 +35,7 @@ class Args:
     save_model: bool = True
     """save model is defaulted as True"""
 
-    total_timesteps: int = 20000 #TimeSteps are scaled with JS action time (current is 0,15 seconds)
+    total_timesteps: int = 20000 #TimeSteps are scaled with JS action time (current is 0.15 seconds)
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
@@ -61,6 +61,8 @@ class Args:
     """timestep to start learning"""
     train_frequency: int = 10
     """the frequency of training"""
+    metrics_frequency: int = 10
+    """the number of environment steps between sampled TensorBoard metrics"""
 
 
 # ALGO LOGIC: initialize agent here:
@@ -82,6 +84,64 @@ class QNetwork(nn.Module):
 def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
     slope = (end_e - start_e) / duration
     return max(slope * t + start_e, end_e)
+
+
+def log_step_metrics(
+    writer,
+    *,
+    global_step: int,
+    reward: float,
+    epsilon: float,
+    replay_buffer_size: int,
+    observation: np.ndarray,
+    player_hp_index: int,
+    enemy_hp_index: int,
+    reward_components: dict[str, float],
+    action_counts: np.ndarray,
+    action_names: list[str],
+    recent_actions: list[int],
+) -> None:
+    """Write sampled environment and training-state metrics to TensorBoard."""
+    writer.add_scalar("charts/step_reward", reward, global_step)
+    writer.add_scalar("charts/epsilon", epsilon, global_step)
+    writer.add_scalar(
+        "training/replay_buffer_size",
+        replay_buffer_size,
+        global_step,
+    )
+    writer.add_scalar(
+        "environment/player_hp",
+        float(observation[player_hp_index]),
+        global_step,
+    )
+    writer.add_scalar(
+        "environment/enemy_hp",
+        float(observation[enemy_hp_index]),
+        global_step,
+    )
+    for component_name, component_value in reward_components.items():
+        writer.add_scalar(
+            f"rewards/{component_name}",
+            float(component_value),
+            global_step,
+        )
+
+    total_actions = int(action_counts.sum())
+    if total_actions:
+        for index, action_name in enumerate(action_names):
+            metric_name = action_name.replace(":", "_").replace("/", "_")
+            writer.add_scalar(
+                f"environment/action_frequency/{metric_name}",
+                action_counts[index] / total_actions,
+                global_step,
+            )
+    if recent_actions:
+        writer.add_histogram(
+            "environment/action_frequency",
+            np.asarray(recent_actions, dtype=np.int64),
+            global_step,
+            bins=np.arange(len(action_names) + 1) - 0.5,
+        )
 
 
 if __name__ == "__main__":
@@ -124,43 +184,70 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     obs, _ = envs.reset()
     episode_return = 0.0
+    episode_length = 0
+    episode_reward_components = {}
     completed_episodes = 0
     wins = 0
+    action_counts = np.zeros(envs.single_action_space.n, dtype=np.int64)
+    recent_actions = []
+    metrics_frequency = max(1, args.metrics_frequency)
+    player_hp_index = 3
+    enemy_hp_index = int(envs.config["OBS_PLAYER_SIZE"]) + 2
     #obs = envs.next_state #intialize as zero first
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         epsilon = linear_schedule(args.start_e, args.end_e, args.exploration_fraction * args.total_timesteps, global_step)
         if random.random() < epsilon:
             actions = np.array([envs.single_action_space.sample()])
-            # print(actions)
         else:
-            q_values = q_network(torch.Tensor(obs).to(device))
-            # print(q_values)
-            actions = torch.argmax(q_values).cpu().numpy()
-            # print(actions)
+            with torch.no_grad():
+                q_values = q_network(torch.as_tensor(obs, dtype=torch.float32, device=device))
+                actions = np.array([torch.argmax(q_values).item()])
+        action_index = int(np.asarray(actions).item())
+        action_counts[action_index] += 1
+        recent_actions.append(action_index)
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
-        
-        # print(f"rewards {rewards}")
+
         episode_return += float(rewards)
-        writer.add_scalar("charts/agent_return", float(rewards), global_step)
-        writer.add_scalar("charts/epsilon", epsilon, global_step)        
+        episode_length += 1
+        reward_components = infos.get("reward_components", {})
+        for component_name, component_value in reward_components.items():
+            episode_reward_components[component_name] = (
+                episode_reward_components.get(component_name, 0.0)
+                + float(component_value)
+            )
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
         real_next_obs = next_obs.copy()
         if truncations:
             real_next_obs = infos.get("next_state", real_next_obs)
-            print(f"Truncated :{truncations}, real_next_obs :{real_next_obs}")
         rb.add(obs, real_next_obs, actions, rewards, terminations, infos)
 
-        # if bool(terminations):
-        print(f"{terminations}")
-
         # Gymnasium.vector.SyncVectorEnv or AsyncVectorEnv which handle environment auto-resetting automatically. we need to Manually reset here for external envs.
-        if bool(truncations):
-            print("TRUNCATED")
         done = bool(terminations or truncations)
+        has_reward_event = any(
+            float(component_value) != 0.0
+            for component_value in reward_components.values()
+        )
+        if global_step % metrics_frequency == 0 or done or has_reward_event:
+            log_step_metrics(
+                writer,
+                global_step=global_step,
+                reward=float(rewards),
+                epsilon=epsilon,
+                replay_buffer_size=rb.size(),
+                observation=next_obs,
+                player_hp_index=player_hp_index,
+                enemy_hp_index=enemy_hp_index,
+                reward_components=reward_components,
+                action_counts=action_counts,
+                action_names=envs.Actions,
+                recent_actions=recent_actions,
+            )
+            recent_actions.clear()
+
         if done:
             outcome = infos.get("episode_outcome")
             is_win = outcome == "kill"
@@ -168,17 +255,27 @@ if __name__ == "__main__":
             wins += int(is_win)
 
             writer.add_scalar("charts/episodic_return", episode_return, global_step)
+            writer.add_scalar("charts/episode_length", episode_length, global_step)
             writer.add_scalar(
                 "charts/win_rate",
                 wins / completed_episodes,
                 global_step,
             )
+            for component_name, component_total in episode_reward_components.items():
+                writer.add_scalar(
+                    f"rewards/episode_{component_name}",
+                    component_total,
+                    global_step,
+                )
 
             print(
                 f"episode={completed_episodes}, outcome={outcome}, "
-                f"return={episode_return}, win_rate={wins / completed_episodes:.2%}"
+                f"length={episode_length}, return={episode_return:.2f}, "
+                f"win_rate={wins / completed_episodes:.2%}"
             )
             episode_return = 0.0
+            episode_length = 0
+            episode_reward_components.clear()
             obs, _ = envs.reset()
         else:
             obs = next_obs
@@ -195,8 +292,8 @@ if __name__ == "__main__":
                 loss = F.mse_loss(td_target, old_val)
 
                 # Log loss metrics every train step
-                writer.add_scalar("losses/td_loss", loss, global_step)
-                writer.add_scalar("losses/q_values", old_val.mean().item(), global_step)
+                writer.add_scalar("losses/td_loss", loss.item(), global_step)
+                writer.add_scalar("losses/mean_q_value", old_val.mean().item(), global_step)
 
                 if global_step % 100 == 0 and args.save_model:                    
                     #Save Model

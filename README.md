@@ -57,6 +57,9 @@ The training dashboard captures the learning signals produced during a demo run,
 |       |-- Env_16.py
 |       `-- Env_conditions.py
 |-- Tests/
+|   |-- test_automation.py
+|   |-- test_dqn_metrics.py
+|   `-- test_environment.py
 `-- README.md
 ```
 
@@ -85,11 +88,25 @@ Each new game/class environment should have its own folder, action-space file, a
 - `STATE_DTYPE`: dtype metadata for state tensors.
 - `ACTION_SPACE_TYPE`: action-space metadata.
 
-The current observation space is 13 values:
+The current observation space contains 26 normalized/numeric values:
 
-- 5 player features
-- 4 enemy features for each of 2 tracked enemies
-- missing enemy slots are zero-padded
+- 6 player features at indices `0-5`: map X, map Y, direction, HP percentage,
+  MP percentage, and map ID.
+- 5 enemy blocks with 4 features each: distance, direction, HP percentage,
+  and MP percentage.
+- Enemies are sorted by distance, so the first block represents the nearest
+  enemy.
+- Missing enemy blocks are zero-padded.
+
+For enemy index `n`, its block starts at:
+
+```text
+OBS_PLAYER_SIZE + n * OBS_ENEMY_SIZE
+```
+
+The nearest enemy therefore starts at index `6`, and its HP percentage is at
+index `8` (`OBS_PLAYER_SIZE + 2`). Player and enemy HP metrics range from
+`0.0` to `1.0`.
 
 ## Current Env
 
@@ -132,11 +149,18 @@ Then start DQN training:
 python -m Training.DQN_server
 ```
 
+To change how often regular step metrics are written:
+
+```bash
+python -m Training.DQN_server --metrics-frequency 25
+```
+
 The game must be running and sending `ai_tick` messages through the browser extension before the env can step.
 
 ## Monitoring
 
-Training logs are written under `runs/`.
+Training logs are written under `runs/`. The automation launcher starts
+TensorBoard by default; when training manually, start it with:
 
 ```bash
 tensorboard --logdir=runs
@@ -146,16 +170,67 @@ Open http://localhost:6006.
 
 Useful metrics:
 
-- `charts/agent_return`
+- `charts/step_reward`
 - `charts/episodic_return`
+- `charts/episode_length`
 - `charts/win_rate`
 - `charts/epsilon`
 - `losses/td_loss`
-- `losses/q_values`
-- `charts/SPS`
+- `losses/mean_q_value`
+- `training/replay_buffer_size`
+- `environment/player_hp`
+- `environment/enemy_hp`
+- `environment/action_frequency/*`
+- `rewards/damage_dealt`
+- `rewards/damage_taken`
+- `rewards/terminal`
+- `rewards/health_state`
+- `rewards/positioning`
+- `rewards/episode_*`
 
-`agent_return` is the reward at each global step. `episodic_return` and
-`win_rate` are written when an episode ends.
+Step and environment metrics are sampled every 10 steps by default and always
+written for non-zero reward events and episode endings. Change the regular
+sampling interval with `--metrics-frequency`.
+Episode return, length, win rate, and episode reward-component totals are
+written when an episode ends.
+
+### Metric meanings
+
+| Metric | Meaning |
+|---|---|
+| `charts/step_reward` | Total reward returned for the sampled environment step. |
+| `charts/episodic_return` | Sum of rewards over the completed episode. |
+| `charts/episode_length` | Number of environment steps in the completed episode. |
+| `charts/win_rate` | Cumulative fraction of completed episodes classified as wins. |
+| `charts/epsilon` | Current epsilon-greedy exploration probability. |
+| `losses/td_loss` | DQN temporal-difference mean-squared error. |
+| `losses/mean_q_value` | Mean selected-action Q-value in the training batch. |
+| `training/replay_buffer_size` | Number of transitions currently available in replay memory. |
+| `environment/player_hp` | Current player HP percentage from observation index `3`. |
+| `environment/enemy_hp` | Nearest-enemy HP percentage from observation index `8`. |
+
+`environment/action_frequency` is a histogram of actions taken since the last
+metric write. Tags below `environment/action_frequency/*` show each action's
+cumulative fraction, such as `environment/action_frequency/attack` and
+`environment/action_frequency/castSpell_1`.
+
+### Reward components
+
+The environment records signed reward components in `info["reward_components"]`.
+Their sum is exactly the reward returned to DQN:
+
+| Component | Meaning |
+|---|---|
+| `damage_dealt` | Positive reward for reducing the nearest enemy's HP. |
+| `damage_taken` | Negative reward when the player's HP decreases. |
+| `terminal` | Kill bonus or loss penalty. |
+| `health_state` | Penalty for remaining at low health. |
+| `positioning` | Position-based penalty from the current environment rules. |
+
+The corresponding `rewards/episode_*` metrics accumulate each component across
+the complete episode. Console output is intentionally limited to episode
+summaries and checkpoint-save messages; raw world-state details use debug
+logging instead of per-step printing.
 
 ## Evaluation
 
