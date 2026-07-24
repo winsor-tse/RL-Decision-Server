@@ -17,6 +17,7 @@ dist/
 
 # Generated training output
 runs/
+logs/
 wandb/
 *.pt
 *.pth

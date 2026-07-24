@@ -14,7 +14,7 @@ start_tensorboard: true
 tensorboard_command:
   - python
   - -m
-  - tensorboard.main
+  - Automation.tensorboard_server
   - --logdir
   - runs
 

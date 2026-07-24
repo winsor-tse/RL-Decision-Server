@@ -1,3 +1,4 @@
+import io
 import os
 import tempfile
 import sys
@@ -6,6 +7,7 @@ from pathlib import Path
 
 from Automation.infer import resolve_inference_command
 from Automation.processes import load_config, normalize_command
+from Automation.tensorboard_server import FilteredStderr, NO_TENSORFLOW_NOTICE
 
 
 class AutomationConfigTests(unittest.TestCase):
@@ -46,6 +48,16 @@ class AutomationConfigTests(unittest.TestCase):
             )
 
         self.assertEqual(command[-1], str(latest))
+
+    def test_tensorboard_filter_keeps_real_errors(self):
+        output = io.StringIO()
+        filtered = FilteredStderr(output)
+
+        filtered.write(NO_TENSORFLOW_NOTICE)
+        filtered.write("\n")
+        filtered.write("real TensorBoard error\n")
+
+        self.assertEqual(output.getvalue(), "real TensorBoard error\n")
 
 
 if __name__ == "__main__":

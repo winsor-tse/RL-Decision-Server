@@ -140,7 +140,7 @@ Custom_enviornments/Test_Env/Env_conditions.py
 ## 10. Monitor Training
 
 ```bash
-tensorboard --logdir=runs
+python -m Automation.tensorboard_server --logdir runs
 ```
 
 Open http://localhost:6006.

@@ -135,6 +135,19 @@ python -m Automation.train
 
 The launcher reads `Automation/automation_config.yaml`, starts TensorBoard when enabled, starts the bridge, waits for its configured readiness signal, and then starts the selected RL algorithm. Configured commands are YAML argument lists and use the active Python interpreter.
 
+Both PowerShell launchers stream output to the terminal and save combined
+standard output and errors as readable UTF-8 text files:
+
+```text
+logs/training_YYYYMMDD_HHMMSS_mmm.txt
+logs/inference_YYYYMMDD_HHMMSS_mmm.txt
+```
+
+Each log includes the command, config path, start and finish times, complete
+child-process output, final exit code, and its own absolute path. Failed runs
+raise a PowerShell error that points to the saved log. Use
+`-LogDirectory <path>` to store logs somewhere else.
+
 Manual startup is still supported.
 
 Start the WebSocket/ZMQ bridge first:
@@ -196,10 +209,15 @@ Training logs are written under `runs/`. The automation launcher starts
 TensorBoard by default; when training manually, start it with:
 
 ```bash
-tensorboard --logdir=runs
+python -m Automation.tensorboard_server --logdir runs
 ```
 
 Open http://localhost:6006.
+
+The project launcher suppresses only TensorBoard's known `pkg_resources`
+deprecation and optional-TensorFlow notices. TensorFlow is not required for
+the scalar, histogram, text, and hyperparameter dashboards used here. Other
+warnings and errors still appear in the terminal and PowerShell text logs.
 
 Useful metrics:
 
