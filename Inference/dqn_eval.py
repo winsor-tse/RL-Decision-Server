@@ -1,29 +1,23 @@
 import random
-import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 import torch
 import tyro
-
-ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 
 from Training.DQN_server import QNetwork
 from Custom_enviornments.Test_Env import Env_16
 
 """
 # Basic usage with defaults
-python DQN_eval.py --model_path runs/DQN_server__1234567890/DQN_server.pt
+python -m Inference.dqn_eval --model-path runs/DQN_server__1234567890/DQN_server.pt
 
 # Custom eval episodes and epsilon
-python DQN_eval.py --model_path runs/DQN_server__1234567890/DQN_server.pt --eval_episodes 20 --epsilon 0.05
+python -m Inference.dqn_eval --model-path runs/DQN_server__1234567890/DQN_server.pt --eval-episodes 20 --epsilon 0.05
 
 # Force CPU
-python DQN_eval.py --model_path runs/DQN_server__1234567890/DQN_server.pt --cuda false
+python -m Inference.dqn_eval --model-path runs/DQN_server__1234567890/DQN_server.pt --cuda false
 """
 
 def evaluate(

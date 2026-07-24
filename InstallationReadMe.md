@@ -37,6 +37,7 @@ RL_venv\Scripts\activate.bat
 ```bash
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
 If TensorBoard is missing when running `Training/DQN_server.py`, install it into the same active environment:
@@ -50,8 +51,9 @@ python -m pip install tensorboard
 Run these from the repo root:
 
 ```bash
-python -m compileall Custom_enviornments Utils Training Inference Automation
+python -m compileall Custom_enviornments Utils Training Inference Automation Tests
 python -c "from Custom_enviornments.Test_Env import Env_16; print(Env_16.Env16.__name__)"
+python -m unittest discover -s Tests -p "test_*.py"
 ```
 
 Expected output includes:
@@ -88,10 +90,13 @@ The cleaner startup path is the automation script:
 .\RunRL.ps1
 ```
 
-Or from Bash:
+The PowerShell wrappers automatically use `RL_venv\Scripts\python.exe` when
+that environment exists; otherwise they use `python` from `PATH`.
+
+Or directly from any shell:
 
 ```bash
-./RunRL.sh
+python -m Automation.train
 ```
 
 These scripts read:
@@ -107,7 +112,7 @@ The launcher starts TensorBoard when enabled, starts `Automation/Bridge/ws_zmq_b
 In one terminal:
 
 ```bash
-python Automation/Bridge/ws_zmq_bridge.py
+python -m Automation.Bridge.ws_zmq_bridge
 ```
 
 The bridge listens for browser messages and forwards AI ticks to the Python env through ZMQ.
@@ -117,7 +122,7 @@ The bridge listens for browser messages and forwards AI ticks to the Python env 
 In another terminal with the same virtual environment active:
 
 ```bash
-python Training/DQN_server.py
+python -m Training.DQN_server
 ```
 
 The active env is:
@@ -135,7 +140,7 @@ Custom_enviornments/Test_Env/Env_conditions.py
 ## 10. Monitor Training
 
 ```bash
-tensorboard --logdir=runs
+python -m Automation.tensorboard_server --logdir runs
 ```
 
 Open http://localhost:6006.
@@ -143,26 +148,30 @@ Open http://localhost:6006.
 ## 11. Evaluate A Checkpoint
 
 ```bash
-python Inference/dqn_eval.py --model_path runs/DQN_server__<timestamp>/DQN_server.pt
+python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt
 ```
 
 Useful options:
 
 ```bash
-python Inference/dqn_eval.py --model_path runs/DQN_server__<timestamp>/DQN_server.pt --eval_episodes 20
-python Inference/dqn_eval.py --model_path runs/DQN_server__<timestamp>/DQN_server.pt --epsilon 0.05
-python Inference/dqn_eval.py --model_path runs/DQN_server__<timestamp>/DQN_server.pt --cuda false
+python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt --eval-episodes 20
+python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt --epsilon 0.05
+python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt --cuda false
 ```
 
 To run inference with bridge automation:
 
 ```powershell
-.\RunInference.ps1 -Command "python Inference/dqn_eval.py --model_path runs/DQN_server__<timestamp>/DQN_server.pt"
+.\RunInference.ps1 -Command "python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt"
 ```
+
+Without `-Command`, the launcher uses `inference_model_path` from
+`Automation/automation_config.yaml`. Its default value, `latest`, selects the
+most recently modified `.pt` checkpoint under `runs/`.
 
 ## Troubleshooting
 
-If Python cannot import `Custom_enviornments`, run commands from the repo root:
+If Python cannot import a project package, confirm that the editable install completed or run module commands from the repo root:
 
 ```text
 C:\Users\winds\Desktop\YugenSaga\RL Server

@@ -1,0 +1,26 @@
+# Python caches and tooling
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local environments and packaging
+.venv/
+venv/
+RL_venv/
+*.egg-info/
+build/
+dist/
+
+# Generated training output
+runs/
+logs/
+wandb/
+*.pt
+*.pth
+*.onnx
+
+.gitignore
