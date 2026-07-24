@@ -127,22 +127,22 @@ def get_reward(obs, action, prev_obs):
     player_hp_pct = float(obs[3])
     nearest_enemy = enemy_block(obs, 0)
 
-    if player_hp_pct < 0.25:
-        reward -= 0.50
-    elif player_hp_pct < 0.50:
-        reward -= 0.15
+    if player_hp_pct < 0.1:
+        reward -= 0.5
+    # elif player_hp_pct < 0.50:
+    #    reward -= 0.15
 
     if prev_obs is None or not np.any(prev_obs):
         return float(reward)
 
-    if obs[1] < 30:
-        reward -= 0.1 * (30- obs[1])
+    if obs[1] < 32:
+        reward -= 500 * (32 - obs[1])
 
     prev_player_hp_pct = float(prev_obs[3])
     prev_nearest_enemy = enemy_block(prev_obs, 0)
 
     hp_lost = prev_player_hp_pct - player_hp_pct
-    if hp_lost > 0:
+    if hp_lost > 0 or player_hp_pct != 0.5:
         reward -= 2.0 * hp_lost
 
     enemy_hp_lost = prev_nearest_enemy["hp_pct"] - nearest_enemy["hp_pct"]
@@ -157,7 +157,7 @@ def get_episode_outcome(obs, prev_obs):
         return None
 
     player_hp_pct = float(obs[3])
-    print(f"{player_hp_pct}")
+    # print(f"{player_hp_pct}")
     map_id = obs[5]
     if map_id != 53:
         return "loss"

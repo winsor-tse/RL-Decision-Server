@@ -66,7 +66,7 @@ class Env16(BaseEnv):
 
         message = self.socket.recv_json()
         world_state = message.get("worldState", {})
-        print(f"{world_state}")
+        # print(f"{world_state}")
 
         response = self._build_response(
             message=message,
@@ -99,11 +99,11 @@ class Env16(BaseEnv):
         terminated = None
         
         if outcome == "loss":
-            reward -= 500
+            reward -= 100
             terminated = True
         elif outcome == "kill":
             self.kill_counter += 1
-            reward += 200
+            reward += 300
 
         if self.kill_counter >= 5:
             terminated = True

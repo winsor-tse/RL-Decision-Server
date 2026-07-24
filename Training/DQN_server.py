@@ -35,7 +35,7 @@ class Args:
     save_model: bool = True
     """save model is defaulted as True"""
 
-    total_timesteps: int = 20000 #TimeSteps are scaled with JS action time (current is 0,15 seconds)
+    total_timesteps: int = 6000 #TimeSteps are scaled with JS action time (current is 0,15 seconds)
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
@@ -142,7 +142,7 @@ if __name__ == "__main__":
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
         
-        # print(f"rewards {rewards}")
+        print(f"rewards {rewards}")
         episode_return += float(rewards)
         writer.add_scalar("charts/agent_return", float(rewards), global_step)
         writer.add_scalar("charts/epsilon", epsilon, global_step)        
