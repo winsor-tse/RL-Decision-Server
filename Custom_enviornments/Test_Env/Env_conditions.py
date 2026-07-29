@@ -140,7 +140,7 @@ def get_reward_components(obs, action, prev_obs) -> dict[str, float]:
 
     hp_lost = prev_player_hp_pct - player_hp_pct
     if hp_lost > 0 or player_hp_pct != 0.5:
-        components["damage_taken"] = -2.0 * hp_lost
+        components["damage_taken"] = -20.0 * hp_lost
 
     enemy_hp_lost = prev_nearest_enemy["hp_pct"] - nearest_enemy["hp_pct"]
     if enemy_hp_lost > 0:
