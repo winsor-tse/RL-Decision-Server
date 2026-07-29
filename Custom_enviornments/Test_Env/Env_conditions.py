@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Sequence
 
 import numpy as np
@@ -24,6 +25,31 @@ DIRECTION_MAP = {
 }
 
 INV_DIRECTION_MAP = {value: key for key, value in DIRECTION_MAP.items()}
+MONSTER_IDS_FILE = Path(__file__).with_name("MonsterIds.txt")
+
+
+def save_monster_ids(monsters: Sequence[dict]) -> None:
+    """Add observed monster IDs to MonsterIds.txt in ascending numeric order."""
+    monster_ids = set()
+
+    if MONSTER_IDS_FILE.exists():
+        for value in MONSTER_IDS_FILE.read_text(encoding="utf-8").splitlines():
+            try:
+                monster_ids.add(int(value.strip()))
+            except ValueError:
+                continue
+
+    for monster in monsters:
+        try:
+            monster_ids.add(int(monster["id"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    MONSTER_IDS_FILE.write_text(
+        "".join(f"{monster_id}\n" for monster_id in sorted(monster_ids)),
+        encoding="utf-8",
+    )
+
 
 def safe_pct(value: float, max_value: float) -> float:
     if max_value is None or max_value <= 0:
@@ -95,13 +121,7 @@ def parse_observation(data: dict, obs_size: int = OBS_SIZE):
         if entity.get("type") == "monster" and not entity.get("isCurrentPlayer", False)
     ]
     monsters.sort(key=lambda monster: distance_from_player(player, monster))
-
-    for monster in monsters:
-       id = monster.get("id", 0)
-       print(id)
-
-    #all_ids = [monster['id'] for monster in monsters]
-    #print(all_ids)  # Output: [57, 28]
+    save_monster_ids(monsters)
 
     for monster in monsters[:MAX_ENEMIES]:        
         obs.extend(
