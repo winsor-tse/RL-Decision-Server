@@ -4,12 +4,24 @@
 # in bridge output, then starts the configured algorithm command.
 
 rl_algorithm: "dqn"
-bridge_command: "python Automation/Bridge/ws_zmq_bridge.py"
+bridge_command:
+  - python
+  - -m
+  - Automation.Bridge.ws_zmq_bridge
 bridge_ready_signal: "WebSocket bridge listening"
 ready_timeout_seconds: 30
 start_tensorboard: true
-tensorboard_command: "Automation/RunTensorboard.bat"
+tensorboard_command:
+  - python
+  - -m
+  - Automation.tensorboard_server
+  - --logdir
+  - runs
 
-dqn_command: "python Training/DQN_server.py"
-ppo_command: "python Training/PPO_server.py"
-inference_command: "python Inference/dqn_eval.py --model_path runs/DQN_server__1784092660/DQN_server.pt"
+dqn_command:
+  - python
+  - -m
+  - Training.DQN_server
+
+# Use the newest .pt file under runs/. This can also be a specific model path.
+inference_model_path: latest

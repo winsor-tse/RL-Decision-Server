@@ -1,16 +1,8 @@
-from pathlib import Path
-import sys
 from typing import Sequence
 
 import numpy as np
 
-try:
-    from Custom_enviornments.Load_env_config import load_env_config
-except ModuleNotFoundError:
-    env_root = Path(__file__).resolve().parents[1]
-    if str(env_root) not in sys.path:
-        sys.path.append(str(env_root))
-    from Load_env_config import load_env_config
+from Custom_enviornments.Load_env_config import load_env_config
 
 
 # This file is specific to this directory or class
@@ -32,8 +24,6 @@ DIRECTION_MAP = {
 }
 
 INV_DIRECTION_MAP = {value: key for key, value in DIRECTION_MAP.items()}
-
-KILLED_COUNTER = 0
 
 def safe_pct(value: float, max_value: float) -> float:
     if max_value is None or max_value <= 0:
@@ -106,7 +96,14 @@ def parse_observation(data: dict, obs_size: int = OBS_SIZE):
     ]
     monsters.sort(key=lambda monster: distance_from_player(player, monster))
 
-    for monster in monsters[:MAX_ENEMIES]:
+    for monster in monsters:
+       id = monster.get("id", 0)
+       print(id)
+
+    #all_ids = [monster['id'] for monster in monsters]
+    #print(all_ids)  # Output: [57, 28]
+
+    for monster in monsters[:MAX_ENEMIES]:        
         obs.extend(
             [
                 distance_from_player(player, monster),
@@ -122,42 +119,55 @@ def parse_observation(data: dict, obs_size: int = OBS_SIZE):
     return np.array(obs[:obs_size], dtype=np.float32)
 
 
-def get_reward(obs, action, prev_obs):
-    reward = 0.0
+def get_reward_components(obs, action, prev_obs) -> dict[str, float]:
+    """Return signed reward contributions for metrics and reward calculation."""
+    components = {
+        "health_state": 0.0,
+        "positioning": 0.0,
+        "damage_taken": 0.0,
+        "damage_dealt": 0.0,
+        "terminal": 0.0,
+    }
     player_hp_pct = float(obs[3])
     nearest_enemy = enemy_block(obs, 0)
 
+    if action <= 3 and obs[0] == prev_obs[0] and obs[1] == prev_obs[1]:
+        components["positioning"] -= 1000
+
     if player_hp_pct < 0.25:
-        reward -= 0.50
+        components["health_state"] = -0.50
     elif player_hp_pct < 0.50:
-        reward -= 0.15
+        components["health_state"] = -0.15
 
     if prev_obs is None or not np.any(prev_obs):
-        return float(reward)
+        return components
 
-    if obs[1] < 30:
-        reward -= 0.1 * (30- obs[1])
+    if obs[1] < 31:
+        components["positioning"] = -100 * (31 - float(obs[1]))
 
     prev_player_hp_pct = float(prev_obs[3])
     prev_nearest_enemy = enemy_block(prev_obs, 0)
 
     hp_lost = prev_player_hp_pct - player_hp_pct
-    if hp_lost > 0:
-        reward -= 2.0 * hp_lost
+    if hp_lost > 0 or player_hp_pct != 0.5:
+        components["damage_taken"] = -20.0 * hp_lost
 
     enemy_hp_lost = prev_nearest_enemy["hp_pct"] - nearest_enemy["hp_pct"]
     if enemy_hp_lost > 0:
-        reward += 25.0 * enemy_hp_lost
+        components["damage_dealt"] = 25.0 * enemy_hp_lost
 
-    return reward
+    return components
+
+
+def get_reward(obs, action, prev_obs) -> float:
+    """Return the sum of all non-terminal reward components."""
+    return float(sum(get_reward_components(obs, action, prev_obs).values()))
 
 
 def get_episode_outcome(obs, prev_obs):
     if prev_obs is None or not np.any(prev_obs):
         return None
 
-    player_hp_pct = float(obs[3])
-    print(f"{player_hp_pct}")
     map_id = obs[5]
     if map_id != 53:
         return "loss"
@@ -167,6 +177,7 @@ def get_episode_outcome(obs, prev_obs):
     enemy_was_alive = prev_nearest_enemy["hp_pct"] > 0
     enemy_is_dead = nearest_enemy["hp_pct"] <= 0
     if enemy_was_alive and enemy_is_dead:
+        print("kill")
         return "kill"
 
     return None
@@ -177,4 +188,4 @@ def get_termination(obs, prev_obs):
 
 
 def get_truncated(obs, prev_obs, current_step):
-    return (current_step >= MAX_EPISODE_STEPS or obs[1] < 25)
+    return bool(current_step >= MAX_EPISODE_STEPS or obs[1] < 25)
