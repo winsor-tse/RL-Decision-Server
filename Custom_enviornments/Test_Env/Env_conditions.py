@@ -47,23 +47,23 @@ def save_world_state(world: dict) -> None:
 def save_monster_ids(monsters: Sequence[dict]) -> None:
     """Replace MonsterIds.txt with the current monster ID and HP data."""
     ensure_world_state_dir()
-    MONSTER_IDS_FILE.write_text(
-        json.dumps(
-            [
-                {
-                    "id": monster.get("id"),
-                    "hp_percentage": safe_pct(
-                        monster.get("hp", 0),
-                        monster.get("maxHp", 0),
-                    ),
-                }
-                for monster in monsters
-            ],
-            indent=2,
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
+    monster_hp_percentages = []
+    for monster in monsters:
+        try:
+            monster_id = int(monster["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        monster_hp_percentages.append(
+            (
+                monster_id,
+                safe_pct(monster.get("hp", 0), monster.get("maxHp", 0)),
+            )
+        )
+
+    with MONSTER_IDS_FILE.open("w", encoding="utf-8") as monster_ids_file:
+        for monster_id, hp_percentage in sorted(monster_hp_percentages):
+            monster_ids_file.write(f"{monster_id}: {hp_percentage:.6f}\n")
 
 
 def safe_pct(value: float, max_value: float) -> float:
