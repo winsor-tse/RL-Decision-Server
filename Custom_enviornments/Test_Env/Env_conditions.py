@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Sequence
 
@@ -26,6 +27,15 @@ DIRECTION_MAP = {
 
 INV_DIRECTION_MAP = {value: key for key, value in DIRECTION_MAP.items()}
 MONSTER_IDS_FILE = Path(__file__).with_name("MonsterIds.txt")
+WORLD_STATE_FILE = Path(__file__).with_name("world_state.txt")
+
+
+def save_world_state(world: dict) -> None:
+    """Replace world_state.txt with the latest complete world state."""
+    WORLD_STATE_FILE.write_text(
+        json.dumps(world, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 def save_monster_ids(monsters: Sequence[dict]) -> None:
@@ -107,6 +117,7 @@ def parse_observation(data: dict, obs_size: int = OBS_SIZE):
     - second nearest enemy distance, direction, HP pct, MP pct
     """
     world = data.get("worldState", data)
+    save_world_state(world)
     player = world["player"]
     entities = world.get("entities", [])
 
