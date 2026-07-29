@@ -29,24 +29,32 @@ MONSTER_IDS_FILE = Path(__file__).with_name("MonsterIds.txt")
 
 
 def save_monster_ids(monsters: Sequence[dict]) -> None:
-    """Add observed monster IDs to MonsterIds.txt in ascending numeric order."""
-    monster_ids = set()
+    """Save observed monster IDs and their latest HP percentages."""
+    monster_hp_percentages = {}
 
     if MONSTER_IDS_FILE.exists():
-        for value in MONSTER_IDS_FILE.read_text(encoding="utf-8").splitlines():
+        for line in MONSTER_IDS_FILE.read_text(encoding="utf-8").splitlines():
             try:
-                monster_ids.add(int(value.strip()))
-            except ValueError:
+                monster_id, hp_pct = line.split(":", maxsplit=1)
+                monster_hp_percentages[int(monster_id.strip())] = float(hp_pct.strip())
+            except (TypeError, ValueError):
                 continue
 
     for monster in monsters:
         try:
-            monster_ids.add(int(monster["id"]))
+            monster_id = int(monster["id"])
         except (KeyError, TypeError, ValueError):
             continue
+        monster_hp_percentages[monster_id] = safe_pct(
+            monster.get("hp", 0),
+            monster.get("maxHp", 0),
+        )
 
     MONSTER_IDS_FILE.write_text(
-        "".join(f"{monster_id}\n" for monster_id in sorted(monster_ids)),
+        "".join(
+            f"{monster_id}: {monster_hp_percentages[monster_id]:.6f}\n"
+            for monster_id in sorted(monster_hp_percentages)
+        ),
         encoding="utf-8",
     )
 
