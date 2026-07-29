@@ -96,7 +96,14 @@ def parse_observation(data: dict, obs_size: int = OBS_SIZE):
     ]
     monsters.sort(key=lambda monster: distance_from_player(player, monster))
 
-    for monster in monsters[:MAX_ENEMIES]:
+    for monster in monsters:
+       id = monster.get("id", 0)
+       print(id)
+
+    #all_ids = [monster['id'] for monster in monsters]
+    #print(all_ids)  # Output: [57, 28]
+
+    for monster in monsters[:MAX_ENEMIES]:        
         obs.extend(
             [
                 distance_from_player(player, monster),
@@ -123,6 +130,9 @@ def get_reward_components(obs, action, prev_obs) -> dict[str, float]:
     }
     player_hp_pct = float(obs[3])
     nearest_enemy = enemy_block(obs, 0)
+
+    if action <= 3 and obs[0] == prev_obs[0] and obs[1] == prev_obs[1]:
+        components["positioning"] -= 1000
 
     if player_hp_pct < 0.25:
         components["health_state"] = -0.50
@@ -167,6 +177,7 @@ def get_episode_outcome(obs, prev_obs):
     enemy_was_alive = prev_nearest_enemy["hp_pct"] > 0
     enemy_is_dead = nearest_enemy["hp_pct"] <= 0
     if enemy_was_alive and enemy_is_dead:
+        print("kill")
         return "kill"
 
     return None
