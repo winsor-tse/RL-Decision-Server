@@ -26,12 +26,18 @@ DIRECTION_MAP = {
 }
 
 INV_DIRECTION_MAP = {value: key for key, value in DIRECTION_MAP.items()}
-MONSTER_IDS_FILE = Path(__file__).with_name("MonsterIds.txt")
-WORLD_STATE_FILE = Path(__file__).with_name("world_state.txt")
+WORLD_STATE_DIR = Path(__file__).resolve().parents[2] / "runs" / "world_state"
+MONSTER_IDS_FILE = WORLD_STATE_DIR / "MonsterIds.txt"
+WORLD_STATE_FILE = WORLD_STATE_DIR / "world_state.txt"
+
+
+def ensure_world_state_dir() -> None:
+    WORLD_STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def save_world_state(world: dict) -> None:
     """Replace world_state.txt with the latest complete world state."""
+    ensure_world_state_dir()
     WORLD_STATE_FILE.write_text(
         json.dumps(world, indent=2, ensure_ascii=False),
         encoding="utf-8",
@@ -40,6 +46,7 @@ def save_world_state(world: dict) -> None:
 
 def save_monster_ids(monsters: Sequence[dict]) -> None:
     """Save observed monster IDs and their latest HP percentages."""
+    ensure_world_state_dir()
     monster_hp_percentages = {}
 
     if MONSTER_IDS_FILE.exists():
