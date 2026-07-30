@@ -3,7 +3,7 @@
 # The bridge starts first. The launcher waits until bridge_ready_signal appears
 # in bridge output, then starts the configured algorithm command.
 
-rl_algorithm: "dqn"
+rl_algorithm: "ppo"
 bridge_command:
   - python
   - -m
@@ -18,10 +18,10 @@ tensorboard_command:
   - --logdir
   - runs
 
-dqn_command:
+ppo_command:
   - python
   - -m
-  - Training.DQN_server
+  - Training.PPO_server
 
 # Use the newest .pt file under runs/. This can also be a specific model path.
 inference_model_path: latest

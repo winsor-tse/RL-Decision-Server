@@ -5,7 +5,8 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 ## Overview
 
 - `Automation/Bridge/ws_zmq_bridge.py`: translates WebSocket messages from Yugen Saga into ZMQ backend requests.
-- `Training/DQN_server.py`: DQN training loop for the current custom environment.
+- `Training/PPO_server.py`: active PPO training loop for the current custom environment.
+- `Training/DQN_server.py`: previous DQN training loop.
 - `Inference/dqn_eval.py`: loads a saved DQN checkpoint and runs evaluation.
 - `RunRL.ps1`: starts TensorBoard, the bridge, and the configured RL algorithm together.
 - `Utils/buffers.py`: replay buffer used by DQN.
@@ -110,7 +111,8 @@ index `8` (`OBS_PLAYER_SIZE + 2`). Player and enemy HP metrics range from
 
 ## Current Env
 
-`Custom_enviornments/Test_Env/Env_16.py` is the active example env used by `Training/DQN_server.py` and `Inference/dqn_eval.py`.
+`Custom_enviornments/Test_Env/Env_16.py` is the active example env used by
+`Training/PPO_server.py`, `Training/DQN_server.py`, and `Inference/dqn_eval.py`.
 
 It exposes 15 discrete actions:
 
@@ -156,13 +158,17 @@ Start the WebSocket/ZMQ bridge first:
 python -m Automation.Bridge.ws_zmq_bridge
 ```
 
-Then start DQN training:
+Then start PPO training:
 
 ```bash
-python -m Training.DQN_server
+python -m Training.PPO_server
 ```
 
 The game must be running and sending `ai_tick` messages through the browser extension before the env can step.
+
+PPO uses one live `Env16` instance directly because the environment owns a
+single ZMQ endpoint. Episode resets and TensorBoard environment metrics are
+handled by `PPO_server.py`, matching the direct environment flow used by DQN.
 
 ## DQN Hyperparameters
 
@@ -225,10 +231,13 @@ Useful metrics:
 - `charts/episodic_return`
 - `charts/episode_length`
 - `charts/win_rate`
-- `charts/epsilon`
-- `losses/td_loss`
-- `losses/mean_q_value`
-- `training/replay_buffer_size`
+- `charts/learning_rate`
+- `losses/policy_loss`
+- `losses/value_loss`
+- `losses/entropy`
+- `losses/approx_kl`
+- `losses/clipfrac`
+- `losses/explained_variance`
 - `environment/player_hp`
 - `environment/enemy_hp`
 - `environment/action_frequency/*`
@@ -254,10 +263,10 @@ written when an episode ends.
 | `charts/episodic_return` | Sum of rewards over the completed episode. |
 | `charts/episode_length` | Number of environment steps in the completed episode. |
 | `charts/win_rate` | Cumulative percentage (0–100) of completed episodes classified as wins. |
-| `charts/epsilon` | Current epsilon-greedy exploration probability. |
-| `losses/td_loss` | DQN temporal-difference mean-squared error. |
-| `losses/mean_q_value` | Mean selected-action Q-value in the training batch. |
-| `training/replay_buffer_size` | Number of transitions currently available in replay memory. |
+| `losses/policy_loss` | PPO clipped policy-objective loss. |
+| `losses/value_loss` | PPO critic/value-function loss. |
+| `losses/entropy` | Entropy of the policy action distribution. |
+| `losses/approx_kl` | Approximate KL divergence between the old and updated policy. |
 | `environment/player_hp` | Current player HP percentage from observation index `3`. |
 | `environment/enemy_hp` | Nearest-enemy HP percentage from observation index `8`. |
 
@@ -269,7 +278,7 @@ cumulative fraction, such as `environment/action_frequency/attack` and
 ### Reward components
 
 The environment records signed reward components in `info["reward_components"]`.
-Their sum is exactly the reward returned to DQN:
+Their sum is exactly the reward returned to PPO:
 
 | Component | Meaning |
 |---|---|
@@ -310,7 +319,7 @@ select a specific checkpoint, or pass a complete command:
 
 ## Notes
 
-- DQN is the active training path for the current discrete action space.
+- PPO is the active training path for the current discrete action space.
 - Run Python entry points with `python -m ...`; package imports no longer depend on script-relative `sys.path` changes.
 - `Load_env_config.py` should remain the single place that parses shared env config.
 - `Automation/automation_config.yaml` controls TensorBoard startup, bridge startup, training command, and inference command.

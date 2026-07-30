@@ -16,7 +16,6 @@ dependencies = [
     "tensorboard>=2.20,<3",
     "torch>=2.9,<3",
     "tyro>=0.9,<1",
-    "wandb>=0.22,<1",
     "websockets>=16,<17",
 ]
 

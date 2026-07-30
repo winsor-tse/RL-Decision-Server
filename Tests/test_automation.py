@@ -11,6 +11,14 @@ from Automation.tensorboard_server import FilteredStderr, NO_TENSORFLOW_NOTICE
 
 
 class AutomationConfigTests(unittest.TestCase):
+    def test_default_config_selects_ppo_server(self):
+        config = load_config("Automation/automation_config.yaml")
+        self.assertEqual(config["rl_algorithm"], "ppo")
+        self.assertEqual(
+            config["ppo_command"],
+            ["python", "-m", "Training.PPO_server"],
+        )
+
     def test_python_command_uses_active_interpreter(self):
         command = normalize_command(["python", "-m", "example"])
         self.assertEqual(command, [sys.executable, "-m", "example"])
