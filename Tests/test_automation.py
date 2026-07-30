@@ -1,9 +1,6 @@
 import io
-import os
-import tempfile
 import sys
 import unittest
-from pathlib import Path
 
 from Automation.infer import resolve_inference_command
 from Automation.processes import load_config, normalize_command
@@ -14,6 +11,10 @@ class AutomationConfigTests(unittest.TestCase):
     def test_default_config_selects_ppo_server(self):
         config = load_config("Automation/automation_config.yaml")
         self.assertEqual(config["rl_algorithm"], "ppo")
+        self.assertEqual(
+            config["dqn_command"],
+            ["python", "-m", "Training.DQN_server"],
+        )
         self.assertEqual(
             config["ppo_command"],
             ["python", "-m", "Training.PPO_server"],
@@ -38,24 +39,47 @@ class AutomationConfigTests(unittest.TestCase):
         )
         self.assertEqual(command[-1], "runs/model file.pt")
 
-    def test_inference_defaults_to_latest_checkpoint(self):
-        with tempfile.TemporaryDirectory() as directory:
-            runs_directory = Path(directory)
-            older = runs_directory / "older.pt"
-            latest = runs_directory / "latest.pt"
-            older.touch()
-            latest.touch()
-            older.touch()
-            latest.touch()
-            older_time = older.stat().st_mtime - 10
-            os.utime(older, (older_time, older_time))
+    def test_inference_uses_explicit_configured_command(self):
+        config = load_config("Automation/automation_config.yaml")
 
-            command = resolve_inference_command(
-                {"inference_model_path": "latest"},
-                runs_directory=runs_directory,
-            )
+        command = resolve_inference_command(config)
 
-        self.assertEqual(command[-1], str(latest))
+        self.assertEqual(command, config["ppo_inference_command"])
+        self.assertEqual(
+            command,
+            [
+                "python",
+                "-m",
+                "Inference.ppo_eval",
+                "--model-path",
+                "runs/PPO_server.pt",
+            ],
+        )
+
+    def test_dqn_inference_command_is_selectable(self):
+        config = load_config("Automation/automation_config.yaml")
+        config["inference_algorithm"] = "dqn"
+
+        command = resolve_inference_command(config)
+
+        self.assertEqual(command, config["dqn_inference_command"])
+        self.assertEqual(
+            command,
+            [
+                "python",
+                "-m",
+                "Inference.dqn_eval",
+                "--model-path",
+                "runs/DQN_server__1783138095/DQN_server.pt",
+            ],
+        )
+
+    def test_missing_inference_command_is_rejected(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "inference_algorithm or inference_command",
+        ):
+            resolve_inference_command({})
 
     def test_tensorboard_filter_keeps_real_errors(self):
         output = io.StringIO()

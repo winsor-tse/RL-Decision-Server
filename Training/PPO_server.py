@@ -3,6 +3,7 @@ import os
 import random
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -25,6 +26,10 @@ class Args:
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
+    save_model: bool = True
+    """whether to save the PPO agent checkpoint"""
+    model_path: str = "runs/PPO_server.pt"
+    """path used for the latest PPO agent checkpoint"""
 
     # Algorithm specific arguments
     total_timesteps: int = 20000
@@ -126,6 +131,14 @@ def log_step_metrics(
             global_step,
             bins=np.arange(len(action_names) + 1) - 0.5,
         )
+
+
+def save_agent(agent: nn.Module, model_path: str) -> Path:
+    """Save the PPO actor and critic state to a deterministic checkpoint path."""
+    checkpoint_path = Path(model_path)
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(agent.state_dict(), checkpoint_path)
+    return checkpoint_path
 
 
 class Agent(nn.Module):
@@ -424,6 +437,9 @@ if __name__ == "__main__":
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        if args.save_model:
+            checkpoint_path = save_agent(agent, args.model_path)
+            print(f"model saved to {checkpoint_path}")
 
     envs.close()
     writer.close()

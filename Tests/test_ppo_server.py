@@ -1,8 +1,12 @@
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
+import torch
 
-from Training.PPO_server import Args, log_step_metrics
+from Training.PPO_server import Agent, Args, log_step_metrics, save_agent
 
 
 class FakeWriter:
@@ -59,6 +63,29 @@ class PPOMetricTests(unittest.TestCase):
         }
         self.assertTrue(expected_scalars.issubset(writer.scalars))
         self.assertIn("environment/action_frequency", writer.histograms)
+
+    def test_saved_agent_checkpoint_loads_into_same_architecture(self):
+        env = SimpleNamespace(
+            single_observation_space=SimpleNamespace(shape=(2,)),
+            single_action_space=SimpleNamespace(n=3),
+        )
+        source_agent = Agent(env)
+
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint_path = save_agent(
+                source_agent,
+                str(Path(directory) / "ppo.pt"),
+            )
+            loaded_agent = Agent(env)
+            loaded_agent.load_state_dict(
+                torch.load(checkpoint_path, weights_only=True)
+            )
+
+        for source_parameter, loaded_parameter in zip(
+            source_agent.parameters(),
+            loaded_agent.parameters(),
+        ):
+            self.assertTrue(torch.equal(source_parameter, loaded_parameter))
 
 
 if __name__ == "__main__":

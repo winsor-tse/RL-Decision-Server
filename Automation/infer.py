@@ -1,54 +1,37 @@
 """Start the bridge and a model-inference command."""
 
 import argparse
-from pathlib import Path
 from typing import Sequence
 
-from Automation.processes import DEFAULT_CONFIG, ROOT_DIR, load_config, run_stack
-
-
-def find_latest_checkpoint(runs_directory: Path = ROOT_DIR / "runs") -> Path:
-    """Return the most recently modified PyTorch checkpoint."""
-    checkpoints = list(runs_directory.rglob("*.pt"))
-    if not checkpoints:
-        raise FileNotFoundError(
-            f"No .pt checkpoints found under {runs_directory}. "
-            "Train a model or configure inference_model_path."
-        )
-    return max(checkpoints, key=lambda checkpoint: checkpoint.stat().st_mtime)
+from Automation.processes import DEFAULT_CONFIG, load_config, run_stack
 
 
 def resolve_inference_command(
     config: dict,
     override: str | Sequence[object] | None = None,
-    *,
-    runs_directory: Path = ROOT_DIR / "runs",
 ) -> str | Sequence[object]:
-    """Resolve an override, configured command, or DQN checkpoint command."""
+    """Resolve an override or an explicit algorithm-specific command."""
     if override:
         return override
 
+    # Keep custom/smoke configurations with one explicit command supported.
     configured_command = config.get("inference_command")
     if configured_command:
         return configured_command
 
-    configured_model_path = config.get("inference_model_path", "latest")
-    if str(configured_model_path).lower() == "latest":
-        model_path = find_latest_checkpoint(runs_directory)
-    else:
-        model_path = Path(str(configured_model_path))
-        if not model_path.is_absolute():
-            model_path = ROOT_DIR / model_path
-        if not model_path.is_file():
-            raise FileNotFoundError(f"Inference checkpoint does not exist: {model_path}")
+    algorithm = str(config.get("inference_algorithm", "")).lower()
+    if not algorithm:
+        raise ValueError(
+            "inference_algorithm or inference_command must be configured."
+        )
 
-    return [
-        "python",
-        "-m",
-        "Inference.dqn_eval",
-        "--model-path",
-        str(model_path),
-    ]
+    algorithm_command = config.get(f"{algorithm}_inference_command")
+    if not algorithm_command:
+        raise ValueError(
+            "No explicit inference command configured for "
+            f"inference_algorithm={algorithm!r}."
+        )
+    return algorithm_command
 
 
 def main(argv: list[str] | None = None) -> int:

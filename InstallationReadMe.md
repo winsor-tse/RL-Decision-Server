@@ -147,6 +147,15 @@ Open http://localhost:6006.
 
 ## 11. Evaluate A Checkpoint
 
+Evaluate PPO:
+
+```bash
+python -m Inference.ppo_eval --model-path runs/PPO_server.pt
+python -m Inference.ppo_eval --model-path runs/PPO_server.pt --no-deterministic
+```
+
+Evaluate DQN:
+
 ```bash
 python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt
 ```
@@ -162,12 +171,13 @@ python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_serve
 To run inference with bridge automation:
 
 ```powershell
-.\RunInference.ps1 -Command "python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt"
+.\RunInference.ps1
 ```
 
-Without `-Command`, the launcher uses `inference_model_path` from
-`Automation/automation_config.yaml`. Its default value, `latest`, selects the
-most recently modified `.pt` checkpoint under `runs/`.
+The launcher uses `inference_algorithm` plus the matching explicit
+`dqn_inference_command` or `ppo_inference_command` from
+`Automation/automation_config.yaml`. It does not scan for the newest
+checkpoint. Pass `-Command` to override the configured evaluator.
 
 ## Troubleshooting
 

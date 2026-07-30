@@ -18,10 +18,29 @@ tensorboard_command:
   - --logdir
   - runs
 
+dqn_command:
+  - python
+  - -m
+  - Training.DQN_server
+
 ppo_command:
   - python
   - -m
   - Training.PPO_server
 
-# Use the newest .pt file under runs/. This can also be a specific model path.
-inference_model_path: latest
+# Select either dqn_inference_command or ppo_inference_command.
+inference_algorithm: "ppo"
+
+dqn_inference_command:
+  - python
+  - -m
+  - Inference.dqn_eval
+  - --model-path
+  - runs/DQN_server__1783138095/DQN_server.pt
+
+ppo_inference_command:
+  - python
+  - -m
+  - Inference.ppo_eval
+  - --model-path
+  - runs/PPO_server.pt

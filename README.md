@@ -49,7 +49,8 @@ The training dashboard captures the learning signals produced during a demo run,
 |   |-- DQN_server.py
 |   `-- PPO_server.py
 |-- Inference/
-|   `-- dqn_eval.py
+|   |-- dqn_eval.py
+|   `-- ppo_eval.py
 |-- Custom_enviornments/
 |   |-- BaseEnv.py
 |   |-- Config.yaml
@@ -295,7 +296,21 @@ logging instead of per-step printing.
 
 ## Evaluation
 
-After training creates a checkpoint:
+PPO training saves its current actor and critic to `runs/PPO_server.pt`.
+Evaluate it deterministically with:
+
+```bash
+python -m Inference.ppo_eval --model-path runs/PPO_server.pt
+```
+
+To sample from the learned policy instead of selecting its highest-probability
+action:
+
+```bash
+python -m Inference.ppo_eval --model-path runs/PPO_server.pt --no-deterministic
+```
+
+DQN checkpoints are evaluated separately:
 
 ```bash
 python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt
@@ -309,12 +324,13 @@ python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_serve
 python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt --cuda false
 ```
 
-The inference launcher uses the newest `.pt` checkpoint under `runs/` by
-default. Set `inference_model_path` in `Automation/automation_config.yaml` to
-select a specific checkpoint, or pass a complete command:
+The inference launcher reads `inference_algorithm` from
+`Automation/automation_config.yaml` and selects either the explicit
+`dqn_inference_command` or `ppo_inference_command`. It never selects the newest
+`.pt` file automatically. You can also override the configured command:
 
 ```powershell
-.\RunInference.ps1 -Command "python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt"
+.\RunInference.ps1 -Command "python -m Inference.ppo_eval --model-path runs/PPO_server.pt"
 ```
 
 ## Notes
