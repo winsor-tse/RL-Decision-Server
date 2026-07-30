@@ -253,7 +253,7 @@ written when an episode ends.
 | `charts/step_reward` | Total reward returned for the sampled environment step. |
 | `charts/episodic_return` | Sum of rewards over the completed episode. |
 | `charts/episode_length` | Number of environment steps in the completed episode. |
-| `charts/win_rate` | Cumulative fraction of completed episodes classified as wins. |
+| `charts/win_rate` | Cumulative percentage (0–100) of completed episodes classified as wins. |
 | `charts/epsilon` | Current epsilon-greedy exploration probability. |
 | `losses/td_loss` | DQN temporal-difference mean-squared error. |
 | `losses/mean_q_value` | Mean selected-action Q-value in the training batch. |
@@ -273,7 +273,7 @@ Their sum is exactly the reward returned to DQN:
 
 | Component | Meaning |
 |---|---|
-| `damage_dealt` | Positive reward for reducing the nearest enemy's HP. |
+| `damage_dealt` | Positive reward for reducing matched enemy HP by entity ID, including nearby enemies that disappear from the next world state. |
 | `damage_taken` | Negative reward when the player's HP decreases. |
 | `terminal` | Kill bonus or loss penalty. |
 | `health_state` | Penalty for remaining at low health. |
