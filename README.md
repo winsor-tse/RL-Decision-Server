@@ -273,7 +273,7 @@ Their sum is exactly the reward returned to DQN:
 
 | Component | Meaning |
 |---|---|
-| `damage_dealt` | Positive reward for reducing the nearest enemy's HP. |
+| `damage_dealt` | Positive reward for reducing matched enemy HP by entity ID, including nearby enemies that disappear from the next world state. |
 | `damage_taken` | Negative reward when the player's HP decreases. |
 | `terminal` | Kill bonus or loss penalty. |
 | `health_state` | Penalty for remaining at low health. |

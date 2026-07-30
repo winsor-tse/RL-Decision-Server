@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Sequence
+from typing import Hashable, Mapping, Sequence
 
 import numpy as np
 
@@ -29,6 +29,8 @@ INV_DIRECTION_MAP = {value: key for key, value in DIRECTION_MAP.items()}
 WORLD_STATE_DIR = Path(__file__).resolve().parents[2] / "runs" / "world_state"
 MONSTER_IDS_FILE = WORLD_STATE_DIR / "MonsterIds.txt"
 WORLD_STATE_FILE = WORLD_STATE_DIR / "world_state.txt"
+ENTITY_DEATH_DISTANCE = 15.0
+EntityState = dict[Hashable, dict[str, float]]
 
 
 def ensure_world_state_dir() -> None:
@@ -94,6 +96,28 @@ def direction_from_player(player: dict, entity: dict) -> int:
     return DIRECTION_MAP["down"] if dy > 0 else DIRECTION_MAP["up"]
 
 
+def parse_entity_state(data: dict) -> EntityState:
+    """Return the enemy data needed to compare consecutive world states."""
+    world = data.get("worldState", data)
+    player = world.get("player", {})
+    entity_state: EntityState = {}
+
+    for entity in world.get("entities", []):
+        if (entity.get("isCurrentPlayer", True)):
+            continue
+
+        entity_id = entity.get("id")
+        if entity_id is None:
+            continue
+
+        entity_state[entity_id] = {
+            "hp_pct": safe_pct(entity.get("hp", 0), entity.get("maxHp", 0)),
+            "distance": distance_from_player(player, entity),
+        }
+
+    return entity_state
+
+
 def enemy_block(obs: Sequence[float], enemy_index: int):
     start = OBS_PLAYER_SIZE + enemy_index * OBS_ENEMY_SIZE
     return {
@@ -155,7 +179,13 @@ def parse_observation(data: dict, obs_size: int = OBS_SIZE):
     return np.array(obs[:obs_size], dtype=np.float32)
 
 
-def get_reward_components(obs, action, prev_obs) -> dict[str, float]:
+def get_reward_components(
+    obs,
+    action,
+    prev_obs,
+    prev_ent_state: Mapping[Hashable, Mapping[str, float]],
+    true_next_ent_state: Mapping[Hashable, Mapping[str, float]],
+) -> dict[str, float]:
     """Return signed reward contributions for metrics and reward calculation."""
     components = {
         "health_state": 0.0,
@@ -165,8 +195,6 @@ def get_reward_components(obs, action, prev_obs) -> dict[str, float]:
         "terminal": 0.0,
     }
     player_hp_pct = float(obs[3])
-    nearest_enemy = enemy_block(obs, 0)
-
     if action <= 3 and obs[0] == prev_obs[0] and obs[1] == prev_obs[1]:
         components["positioning"] -= 1000
 
@@ -182,22 +210,50 @@ def get_reward_components(obs, action, prev_obs) -> dict[str, float]:
         components["positioning"] = -100 * (31 - float(obs[1]))
 
     prev_player_hp_pct = float(prev_obs[3])
-    prev_nearest_enemy = enemy_block(prev_obs, 0)
-
     hp_lost = prev_player_hp_pct - player_hp_pct
     if hp_lost > 0 or player_hp_pct != 0.5:
         components["damage_taken"] = -20.0 * hp_lost
 
-    enemy_hp_lost = prev_nearest_enemy["hp_pct"] - nearest_enemy["hp_pct"]
-    if enemy_hp_lost > 0:
-        components["damage_dealt"] = 25.0 * enemy_hp_lost
+    damage_dealt = 0.0
+    shared_enemy_ids = prev_ent_state.keys().intersection(true_next_ent_state.keys())
+    for enemy_id in shared_enemy_ids:
+        enemy_hp_lost = (
+            float(prev_ent_state[enemy_id]["hp_pct"])
+            - float(true_next_ent_state[enemy_id]["hp_pct"])
+        )
+        if enemy_hp_lost > 0:
+            damage_dealt += 25.0 * enemy_hp_lost
+
+    missing_enemy_ids = prev_ent_state.keys() - true_next_ent_state.keys()
+    for enemy_id in missing_enemy_ids:
+        previous_enemy = prev_ent_state[enemy_id]
+        if float(previous_enemy["distance"]) < ENTITY_DEATH_DISTANCE:
+            damage_dealt += 25.0 * float(previous_enemy["hp_pct"])
+
+    components["damage_dealt"] = damage_dealt
 
     return components
 
-
-def get_reward(obs, action, prev_obs) -> float:
+#This is not used?
+def get_reward(
+    obs,
+    action,
+    prev_obs,
+    prev_ent_state: Mapping[Hashable, Mapping[str, float]],
+    true_next_ent_state: Mapping[Hashable, Mapping[str, float]],
+) -> float:
     """Return the sum of all non-terminal reward components."""
-    return float(sum(get_reward_components(obs, action, prev_obs).values()))
+    return float(
+        sum(
+            get_reward_components(
+                obs,
+                action,
+                prev_obs,
+                prev_ent_state,
+                true_next_ent_state,
+            ).values()
+        )
+    )
 
 
 def get_episode_outcome(obs, prev_obs):
