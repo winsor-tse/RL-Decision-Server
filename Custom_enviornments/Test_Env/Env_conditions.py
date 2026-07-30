@@ -29,6 +29,7 @@ INV_DIRECTION_MAP = {value: key for key, value in DIRECTION_MAP.items()}
 WORLD_STATE_DIR = Path(__file__).resolve().parents[2] / "runs" / "world_state"
 MONSTER_IDS_FILE = WORLD_STATE_DIR / "MonsterIds.txt"
 WORLD_STATE_FILE = WORLD_STATE_DIR / "world_state.txt"
+ENT_DMG_DEAD_FILE = WORLD_STATE_DIR / "EntDmgDead.txt"
 ENTITY_DEATH_DISTANCE = 15.0
 EntityState = dict[Hashable, dict[str, float]]
 
@@ -68,6 +69,19 @@ def save_monster_ids(monsters: Sequence[dict]) -> None:
             monster_ids_file.write(f"{monster_id}: {hp_percentage:.6f}\n")
 
 
+def save_ent_dmg_dead(
+    shared_enemy_ids: dict[Hashable, float],
+    missing_enemy_ids: set[Hashable],
+) -> None:
+    """Save damaged shared enemies and missing enemy IDs."""
+    ensure_world_state_dir()
+    ENT_DMG_DEAD_FILE.write_text(
+        f"shared_enemy_ids: {shared_enemy_ids}\n"
+        f"missing_enemy_ids: {missing_enemy_ids}\n",
+        encoding="utf-8",
+    )
+
+
 def safe_pct(value: float, max_value: float) -> float:
     if max_value is None or max_value <= 0:
         return 0.0
@@ -103,7 +117,7 @@ def parse_entity_state(data: dict) -> EntityState:
     entity_state: EntityState = {}
 
     for entity in world.get("entities", []):
-        if (entity.get("isCurrentPlayer", True)):
+        if entity.get("isCurrentPlayer", False):
             continue
 
         entity_id = entity.get("id")
@@ -215,21 +229,27 @@ def get_reward_components(
         components["damage_taken"] = -20.0 * hp_lost
 
     damage_dealt = 0.0
-    shared_enemy_ids = prev_ent_state.keys().intersection(true_next_ent_state.keys())
-    for enemy_id in shared_enemy_ids:
+    shared_enemy_ids = {}
+    common_enemy_ids = prev_ent_state.keys() & true_next_ent_state.keys()
+    for enemy_id in common_enemy_ids:
         enemy_hp_lost = (
             float(prev_ent_state[enemy_id]["hp_pct"])
             - float(true_next_ent_state[enemy_id]["hp_pct"])
         )
         if enemy_hp_lost > 0:
+            shared_enemy_ids[enemy_id] = enemy_hp_lost
             damage_dealt += 25.0 * enemy_hp_lost
 
+    assumed_dead_ids = set()
     missing_enemy_ids = prev_ent_state.keys() - true_next_ent_state.keys()
     for enemy_id in missing_enemy_ids:
         previous_enemy = prev_ent_state[enemy_id]
         if float(previous_enemy["distance"]) < ENTITY_DEATH_DISTANCE:
+            #TODO this needs to be a gigantic reward for killed enemies not just a scale
             damage_dealt += 25.0 * float(previous_enemy["hp_pct"])
+            assumed_dead_ids.add(enemy_id)
 
+    save_ent_dmg_dead(shared_enemy_ids, assumed_dead_ids)
     components["damage_dealt"] = damage_dealt
 
     return components
