@@ -207,6 +207,7 @@ def get_reward_components(
         "damage_taken": 0.0,
         "damage_dealt": 0.0,
         "terminal": 0.0,
+        "killed": 0.0
     }
     player_hp_pct = float(obs[3])
     if action <= 3 and obs[0] == prev_obs[0] and obs[1] == prev_obs[1]:
@@ -236,21 +237,26 @@ def get_reward_components(
             float(prev_ent_state[enemy_id]["hp_pct"])
             - float(true_next_ent_state[enemy_id]["hp_pct"])
         )
-        if enemy_hp_lost > 0:
+        if enemy_hp_lost != 0:
             shared_enemy_ids[enemy_id] = enemy_hp_lost
             damage_dealt += 25.0 * enemy_hp_lost
 
     assumed_dead_ids = set()
     missing_enemy_ids = prev_ent_state.keys() - true_next_ent_state.keys()
-    for enemy_id in missing_enemy_ids:
-        previous_enemy = prev_ent_state[enemy_id]
-        if float(previous_enemy["distance"]) < ENTITY_DEATH_DISTANCE:
-            #TODO this needs to be a gigantic reward for killed enemies not just a scale
-            damage_dealt += 25.0 * float(previous_enemy["hp_pct"])
-            assumed_dead_ids.add(enemy_id)
+    
+    if obs[5] == 53 and prev_obs[5] == 53:
+        for enemy_id in missing_enemy_ids:
+            previous_enemy = prev_ent_state[enemy_id]
+            if float(previous_enemy["distance"]) < ENTITY_DEATH_DISTANCE:
+                #TODO this needs to be a gigantic reward for killed enemies not just a scale
+                damage_dealt += 25.0 * float(previous_enemy["hp_pct"])            
+                assumed_dead_ids.add(enemy_id)
 
     save_ent_dmg_dead(shared_enemy_ids, assumed_dead_ids)
     components["damage_dealt"] = damage_dealt
+
+    killed = len(assumed_dead_ids)
+    components["killed"] = 10 * killed
 
     return components
 
@@ -276,27 +282,15 @@ def get_reward(
     )
 
 
-def get_episode_outcome(obs, prev_obs):
+def is_episode_loss(obs, prev_obs):
     if prev_obs is None or not np.any(prev_obs):
-        return None
+        return False
 
     map_id = obs[5]
     if map_id != 53:
-        return "loss"
+        return True
 
-    nearest_enemy = enemy_block(obs, 0)
-    prev_nearest_enemy = enemy_block(prev_obs, 0)
-    enemy_was_alive = prev_nearest_enemy["hp_pct"] > 0
-    enemy_is_dead = nearest_enemy["hp_pct"] <= 0
-    if enemy_was_alive and enemy_is_dead:
-        print("kill")
-        return "kill"
-
-    return None
-
-
-def get_termination(obs, prev_obs):
-    return get_episode_outcome(obs, prev_obs) is not None
+    return False
 
 
 def get_truncated(obs, prev_obs, current_step):

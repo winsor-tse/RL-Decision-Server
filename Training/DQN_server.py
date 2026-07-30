@@ -321,9 +321,9 @@ if __name__ == "__main__":
 
         if done:
             outcome = infos.get("episode_outcome")
-            is_win = outcome == "kill"
+            is_win = outcome == "win"
             completed_episodes += 1
-            wins += int(is_win)
+            wins += 1
 
             writer.add_scalar("charts/episodic_return", episode_return, global_step)
             writer.add_scalar("charts/episode_length", episode_length, global_step)

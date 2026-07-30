@@ -91,12 +91,11 @@ class Env16(BaseEnv):
             self.next_Ent_state,
             true_next_ent_state,
         )
-        episode_outcome = Env_conditions.get_episode_outcome(
+        is_loss = Env_conditions.is_episode_loss(
             real_next_state,
             self.next_state,
         )
         # print(f"{episode_outcome}")
-        outcome = episode_outcome
         truncated = Env_conditions.get_truncated(
             real_next_state,
             self.next_state,
@@ -109,12 +108,11 @@ class Env16(BaseEnv):
         #Define termination reward
         terminated = False
         
-        if outcome == "loss":
+        if is_loss:
             reward_components["terminal"] -= 100
             terminated = True
-        elif outcome == "kill":
-            self.kill_counter += 1
-            reward_components["terminal"] += 300
+        elif reward_components["killed"] > 0:
+            self.kill_counter += (reward_components["killed"] / 10)
 
         if self.kill_counter >= 5:
             terminated = True
@@ -122,12 +120,17 @@ class Env16(BaseEnv):
         info = self._get_info()
         reward = float(sum(reward_components.values()))
         info["reward_components"] = reward_components
-        info["is_win"] = self.kill_counter >= 1
-        info["episode_outcome"] = (
-            episode_outcome
-            if terminated
-            else "truncated" if truncated else None
-        )
+        info["is_win"] = self.kill_counter >= 5
+        
+        if is_loss and terminated:
+            info["episode_outcome"] = "loss"
+        elif info["is_win"] and terminated: 
+            info["episode_outcome"] = "win"
+        elif truncated:
+            info["episode_outcome"] = "truncated"
+        else:
+            info["episode_outcome"] = None
+        
         return self.next_state, reward, terminated, truncated, info
 
     def close(self):
