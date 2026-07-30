@@ -323,13 +323,14 @@ if __name__ == "__main__":
             outcome = infos.get("episode_outcome")
             is_win = outcome == "win"
             completed_episodes += 1
-            wins += 1
+            wins += int(is_win)
+            win_percentage = 100.0 * wins / completed_episodes
 
             writer.add_scalar("charts/episodic_return", episode_return, global_step)
             writer.add_scalar("charts/episode_length", episode_length, global_step)
             writer.add_scalar(
                 "charts/win_rate",
-                wins / completed_episodes,
+                win_percentage,
                 global_step,
             )
             for component_name, component_total in episode_reward_components.items():
@@ -342,7 +343,7 @@ if __name__ == "__main__":
             print(
                 f"episode={completed_episodes}, outcome={outcome}, "
                 f"length={episode_length}, return={episode_return:.2f}, "
-                f"win_rate={wins / completed_episodes:.2%}"
+                f"win_rate={win_percentage:.2f}%"
             )
             episode_return = 0.0
             episode_length = 0

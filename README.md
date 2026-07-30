@@ -253,7 +253,7 @@ written when an episode ends.
 | `charts/step_reward` | Total reward returned for the sampled environment step. |
 | `charts/episodic_return` | Sum of rewards over the completed episode. |
 | `charts/episode_length` | Number of environment steps in the completed episode. |
-| `charts/win_rate` | Cumulative fraction of completed episodes classified as wins. |
+| `charts/win_rate` | Cumulative percentage (0–100) of completed episodes classified as wins. |
 | `charts/epsilon` | Current epsilon-greedy exploration probability. |
 | `losses/td_loss` | DQN temporal-difference mean-squared error. |
 | `losses/mean_q_value` | Mean selected-action Q-value in the training batch. |
