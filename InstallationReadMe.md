@@ -117,12 +117,19 @@ python -m Automation.Bridge.ws_zmq_bridge
 
 The bridge listens for browser messages and forwards AI ticks to the Python env through ZMQ.
 
-## 9. Manual Startup: Start DQN Training
+## 9. Manual Startup: Start Training
 
 In another terminal with the same virtual environment active:
 
 ```bash
 python -m Training.DQN_server
+```
+
+PPO and recurrent PPO use the same live environment:
+
+```bash
+python -m Training.PPO_server
+python -m Training.PPO_lstm_server
 ```
 
 The active env is:

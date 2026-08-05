@@ -19,6 +19,10 @@ class AutomationConfigTests(unittest.TestCase):
             config["ppo_command"],
             ["python", "-m", "Training.PPO_server"],
         )
+        self.assertEqual(
+            config["ppo_lstm_command"],
+            ["python", "-m", "Training.PPO_lstm_server"],
+        )
 
     def test_python_command_uses_active_interpreter(self):
         command = normalize_command(["python", "-m", "example"])

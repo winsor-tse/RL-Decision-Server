@@ -28,6 +28,11 @@ ppo_command:
   - -m
   - Training.PPO_server
 
+ppo_lstm_command:
+  - python
+  - -m
+  - Training.PPO_lstm_server
+
 # Select either dqn_inference_command or ppo_inference_command.
 inference_algorithm: "ppo"
 

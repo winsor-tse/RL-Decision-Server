@@ -6,10 +6,11 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 
 - `Automation/Bridge/ws_zmq_bridge.py`: translates WebSocket messages from Yugen Saga into ZMQ backend requests.
 - `Training/PPO_server.py`: active PPO training loop and checkpoint writer.
+- `Training/PPO_lstm_server.py`: recurrent PPO training loop for the same live environment.
 - `Training/DQN_server.py`: legacy DQN training loop.
 - `Inference/ppo_eval.py`: evaluates PPO checkpoints deterministically or by policy sampling.
 - `Inference/dqn_eval.py`: evaluates DQN checkpoints with optional epsilon exploration.
-- `Automation/automation_config.yaml`: selects PPO or DQN independently for training and inference.
+- `Automation/automation_config.yaml`: selects the training and inference entry points.
 - `RunRL.ps1`: starts TensorBoard, the bridge, and the configured RL algorithm together.
 - `RunInference.ps1`: starts the bridge and the configured evaluator.
 - `Utils/buffers.py`: replay buffer used by DQN.
@@ -50,7 +51,9 @@ The training dashboard captures the learning signals produced during a demo run,
 |   `-- buffers.py
 |-- Training/
 |   |-- DQN_server.py
-|   `-- PPO_server.py
+|   |-- PPO_server.py
+|   |-- PPO_lstm_server.py
+|   `-- ppo_metrics.py
 |-- Inference/
 |   |-- dqn_eval.py
 |   `-- ppo_eval.py
@@ -65,6 +68,7 @@ The training dashboard captures the learning signals produced during a demo run,
 |   |-- test_automation.py
 |   |-- test_dqn_metrics.py
 |   |-- test_environment.py
+|   |-- test_ppo_lstm_server.py
 |   |-- test_ppo_server.py
 |   `-- test_ppo_eval.py
 `-- README.md
@@ -117,8 +121,8 @@ index `8` (`OBS_PLAYER_SIZE + 2`). Player and enemy HP metrics range from
 
 ## Current Env
 
-`Custom_enviornments/Test_Env/Env_16.py` is the active environment used by both
-training servers and both evaluators.
+`Custom_enviornments/Test_Env/Env_16.py` is the active environment used by all
+three training servers and both evaluators.
 
 It exposes 15 discrete actions:
 
@@ -143,10 +147,10 @@ python -m Automation.train
 
 The launcher reads `Automation/automation_config.yaml`, starts TensorBoard when
 enabled, starts the bridge, waits for its readiness signal, and then starts the
-command selected by `rl_algorithm`. Both algorithms remain available:
+command selected by `rl_algorithm`. All three trainers remain available:
 
 ```yaml
-rl_algorithm: "ppo" # change to "dqn" to train DQN
+rl_algorithm: "ppo" # use "ppo_lstm" for recurrent PPO or "dqn" for DQN
 
 dqn_command:
   - python
@@ -157,6 +161,11 @@ ppo_command:
   - python
   - -m
   - Training.PPO_server
+
+ppo_lstm_command:
+  - python
+  - -m
+  - Training.PPO_lstm_server
 ```
 
 Configured commands are YAML argument lists and use the active Python
@@ -191,12 +200,19 @@ Then start PPO training:
 python -m Training.PPO_server
 ```
 
+Or start recurrent PPO training:
+
+```bash
+python -m Training.PPO_lstm_server
+```
+
 The game must be running and sending `ai_tick` messages through the browser extension before the env can step.
 
-PPO uses one live `Env16` instance directly because the external simulator owns
-a single ZMQ request stream. It does not use `SyncVectorEnv` or
-`RecordEpisodeStatistics`. `PPO_server.py` handles episode resets, batching,
-and TensorBoard environment metrics itself.
+Both PPO trainers use one live `Env16` instance directly because the external
+simulator owns a single ZMQ request stream. They do not use `SyncVectorEnv` or
+`RecordEpisodeStatistics`; each trainer handles episode resets and batching.
+Their shared TensorBoard environment dashboard is implemented in
+`Training/ppo_metrics.py`.
 
 ## PPO Training
 
@@ -236,6 +252,44 @@ python -m Training.PPO_server \
 After every PPO rollout/update cycle, the current actor and critic state is
 written to `model_path`. The file is overwritten so Automation always points
 to one explicit, predictable PPO checkpoint.
+
+## Recurrent PPO (LSTM) Training
+
+The recurrent trainer collects one sequential `Env16` rollout and divides it
+into contiguous sequences for optimization. Each sequence starts with the
+hidden and cell state recorded at that point in the rollout, so LSTM context is
+preserved even though `Env16` supports only one live environment. Episode
+boundaries reset the recurrent state through the rollout's done mask.
+
+| Parameter | Default |
+|---|---:|
+| `total_timesteps` | 20,000 |
+| `learning_rate` | 0.00025 |
+| `num_envs` | 1 |
+| `num_steps` | 128 |
+| `num_minibatches` | 4 |
+| `update_epochs` | 4 |
+| `gamma` | 0.99 |
+| `gae_lambda` | 0.95 |
+| `clip_coef` | 0.2 |
+| `metrics_frequency` | 1 |
+| `save_model` | `true` |
+| `model_path` | `runs/PPO_lstm_server.pt` |
+
+`num_steps` must be divisible by `num_minibatches`. For example:
+
+```bash
+python -m Training.PPO_lstm_server \
+  --total-timesteps 20000 \
+  --num-steps 128 \
+  --num-minibatches 4 \
+  --metrics-frequency 10
+```
+
+The LSTM trainer emits the same step, episode, reward-component, environment,
+loss, and throughput charts as `PPO_server.py`, plus
+`lstm/hidden_state_norm` and `lstm/cell_state_norm`. Like `PPO_server.py`, it
+overwrites the configured model path after every rollout/update cycle.
 
 ## Legacy DQN Training
 
@@ -307,6 +361,8 @@ Useful metrics:
 - `losses/approx_kl`
 - `losses/clipfrac`
 - `losses/explained_variance`
+- `lstm/hidden_state_norm` (recurrent PPO only)
+- `lstm/cell_state_norm` (recurrent PPO only)
 - `environment/player_hp`
 - `environment/enemy_hp`
 - `environment/action_frequency/*`

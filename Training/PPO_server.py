@@ -14,6 +14,7 @@ from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
 from Custom_enviornments.Test_Env.Env_16 import Env16
+from Training.ppo_metrics import log_step_metrics
 
 
 @dataclass
@@ -81,56 +82,6 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
-
-
-def log_step_metrics(
-    writer,
-    *,
-    global_step: int,
-    reward: float,
-    observation: np.ndarray,
-    player_hp_index: int,
-    enemy_hp_index: int,
-    reward_components: dict[str, float],
-    action_counts: np.ndarray,
-    action_names: list[str],
-    recent_actions: list[int],
-) -> None:
-    """Write sampled environment metrics to TensorBoard."""
-    writer.add_scalar("charts/step_reward", reward, global_step)
-    writer.add_scalar(
-        "environment/player_hp",
-        float(observation[player_hp_index]),
-        global_step,
-    )
-    writer.add_scalar(
-        "environment/enemy_hp",
-        float(observation[enemy_hp_index]),
-        global_step,
-    )
-    for component_name, component_value in reward_components.items():
-        writer.add_scalar(
-            f"rewards/{component_name}",
-            float(component_value),
-            global_step,
-        )
-
-    total_actions = int(action_counts.sum())
-    if total_actions:
-        for index, action_name in enumerate(action_names):
-            metric_name = action_name.replace(":", "_").replace("/", "_")
-            writer.add_scalar(
-                f"environment/action_frequency/{metric_name}",
-                action_counts[index] / total_actions,
-                global_step,
-            )
-    if recent_actions:
-        writer.add_histogram(
-            "environment/action_frequency",
-            np.asarray(recent_actions, dtype=np.int64),
-            global_step,
-            bins=np.arange(len(action_names) + 1) - 0.5,
-        )
 
 
 def save_agent(agent: nn.Module, model_path: str) -> Path:
