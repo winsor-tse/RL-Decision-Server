@@ -90,6 +90,8 @@ def save_agent(agent: nn.Module, model_path: str) -> Path:
     checkpoint_path = Path(model_path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(agent.state_dict(), checkpoint_path)
+    torch.onnx.export #export to onnx
+    print(f"model saved to {model_path}")
     return checkpoint_path
 
 
@@ -137,6 +139,7 @@ if __name__ == "__main__":
             "PPO_server.pt",
         )
     )
+    
     writer = SummaryWriter(str(run_directory))
     writer.add_text(
         "hyperparameters",
@@ -397,7 +400,7 @@ if __name__ == "__main__":
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
-        if args.save_model:
+        if global_step % 100 == 0 and args.save_model:
             checkpoint_path = save_agent(agent, args.model_path)
             print(f"model saved to {checkpoint_path}")
 

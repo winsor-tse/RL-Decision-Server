@@ -3,7 +3,7 @@
 # The bridge starts first. The launcher waits until bridge_ready_signal appears
 # in bridge output, then starts the configured algorithm command.
 
-rl_algorithm: "ppo_lstm"
+rl_algorithm: "ppo"
 bridge_command:
   - python
   - -m
@@ -34,7 +34,7 @@ ppo_lstm_command:
   - Training.PPO_lstm_server
 
 # Select dqn, ppo, or ppo_lstm independently from the training algorithm.
-inference_algorithm: "ppo_lstm"
+inference_algorithm: "ppo"
 
 dqn_inference_command:
   - python
