@@ -35,7 +35,7 @@ class Args:
     """checkpoint override; defaults to runs/<run_name>/PPO_lstm_server.pt"""
 
     # Algorithm specific arguments
-    total_timesteps: int = 20000
+    total_timesteps: int = 100000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""

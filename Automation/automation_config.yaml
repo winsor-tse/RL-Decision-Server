@@ -55,4 +55,4 @@ ppo_lstm_inference_command:
   - -m
   - Inference.ppo_lstm_eval
   - --model-path
-  - runs/XXXX/PPO_lstm_server.pt
+  - runs/Env16__PPO_lstm_server__1__1785994846/PPO_lstm_server.pt
