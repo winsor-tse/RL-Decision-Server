@@ -85,14 +85,32 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
-def save_agent(agent: nn.Module, model_path: str) -> Path:
+def save_agent(agent: nn.Module, model_path: str | Path) -> Path:
     """Save the PPO actor and critic state to a deterministic checkpoint path."""
     checkpoint_path = Path(model_path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(agent.state_dict(), checkpoint_path)
-    torch.onnx.export #export to onnx
-    print(f"model saved to {model_path}")
     return checkpoint_path
+
+
+def create_run_paths(
+    args: Args,
+    *,
+    timestamp: int | None = None,
+    runs_directory: str | Path = "runs",
+) -> tuple[str, Path, Path]:
+    """Create one run directory and resolve its PyTorch checkpoint path."""
+    run_timestamp = int(time.time()) if timestamp is None else timestamp
+    run_name = f"Env16__{args.exp_name}__{args.seed}__{run_timestamp}"
+    run_directory = Path(runs_directory) / run_name
+    checkpoint_path = training_checkpoint_path(
+        run_directory,
+        args.model_path,
+        "PPO_server.pt",
+    )
+    run_directory.mkdir(parents=True, exist_ok=True)
+    args.model_path = str(checkpoint_path)
+    return run_name, run_directory, checkpoint_path
 
 
 class Agent(nn.Module):
@@ -130,16 +148,10 @@ if __name__ == "__main__":
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
-    run_name = f"Env16__{args.exp_name}__{args.seed}__{int(time.time())}"
-    run_directory = Path("runs") / run_name
-    args.model_path = str(
-        training_checkpoint_path(
-            run_directory,
-            args.model_path,
-            "PPO_server.pt",
-        )
-    )
-    
+    run_name, run_directory, checkpoint_path = create_run_paths(args)
+    print(f"Run directory: {run_directory.resolve()}", flush=True)
+    print(f"Model checkpoint: {checkpoint_path.resolve()}", flush=True)
+
     writer = SummaryWriter(str(run_directory))
     writer.add_text(
         "hyperparameters",
@@ -400,9 +412,9 @@ if __name__ == "__main__":
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
-        if global_step % 100 == 0 and args.save_model:
-            checkpoint_path = save_agent(agent, args.model_path)
-            print(f"model saved to {checkpoint_path}")
+        if args.save_model:
+            saved_checkpoint = save_agent(agent, checkpoint_path)
+            print(f"model saved to {saved_checkpoint}")
 
     envs.close()
     writer.close()

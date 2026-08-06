@@ -6,7 +6,13 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 
-from Training.PPO_server import Agent, Args, log_step_metrics, save_agent
+from Training.PPO_server import (
+    Agent,
+    Args,
+    create_run_paths,
+    log_step_metrics,
+    save_agent,
+)
 
 
 class FakeWriter:
@@ -27,6 +33,25 @@ class PPOMetricTests(unittest.TestCase):
 
     def test_metrics_frequency_defaults_to_every_step(self):
         self.assertEqual(Args().metrics_frequency, 1)
+
+    def test_default_checkpoint_is_created_under_current_run_name(self):
+        args = Args()
+
+        with tempfile.TemporaryDirectory() as directory:
+            run_name, run_directory, checkpoint_path = create_run_paths(
+                args,
+                timestamp=1234,
+                runs_directory=directory,
+            )
+
+            self.assertEqual(run_name, "Env16__PPO_server__1__1234")
+            self.assertEqual(run_directory, Path(directory) / run_name)
+            self.assertTrue(run_directory.is_dir())
+            self.assertEqual(
+                checkpoint_path,
+                run_directory / "PPO_server.pt",
+            )
+            self.assertEqual(Path(args.model_path), checkpoint_path)
 
     def test_step_metrics_match_environment_dashboard(self):
         writer = FakeWriter()
