@@ -8,6 +8,7 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 - `Training/PPO_server.py`: active PPO training loop and checkpoint writer.
 - `Training/PPO_lstm_server.py`: recurrent PPO training loop for the same live environment.
 - `Training/DQN_server.py`: legacy DQN training loop.
+- `Inference/ppo_lstm_eval.py`: evaluates recurrent PPO checkpoints on `Env16`.
 - `Inference/ppo_eval.py`: evaluates PPO checkpoints deterministically or by policy sampling.
 - `Inference/dqn_eval.py`: evaluates DQN checkpoints with optional epsilon exploration.
 - `Automation/automation_config.yaml`: selects the training and inference entry points.
@@ -56,7 +57,8 @@ The training dashboard captures the learning signals produced during a demo run,
 |   `-- ppo_metrics.py
 |-- Inference/
 |   |-- dqn_eval.py
-|   `-- ppo_eval.py
+|   |-- ppo_eval.py
+|   `-- ppo_lstm_eval.py
 |-- Custom_enviornments/
 |   |-- BaseEnv.py
 |   |-- Config.yaml
@@ -68,6 +70,7 @@ The training dashboard captures the learning signals produced during a demo run,
 |   |-- test_automation.py
 |   |-- test_dqn_metrics.py
 |   |-- test_environment.py
+|   |-- test_ppo_lstm_eval.py
 |   |-- test_ppo_lstm_server.py
 |   |-- test_ppo_server.py
 |   `-- test_ppo_eval.py
@@ -150,7 +153,7 @@ enabled, starts the bridge, waits for its readiness signal, and then starts the
 command selected by `rl_algorithm`. All three trainers remain available:
 
 ```yaml
-rl_algorithm: "ppo" # use "ppo_lstm" for recurrent PPO or "dqn" for DQN
+rl_algorithm: "ppo_lstm" # use "ppo" for feed-forward PPO or "dqn" for DQN
 
 dqn_command:
   - python
@@ -424,8 +427,24 @@ logging instead of per-step printing.
 
 ## Evaluation
 
-PPO training saves its current actor and critic to `runs/PPO_server.pt`.
-Evaluate it deterministically with:
+Recurrent PPO training saves its model to `runs/PPO_lstm_server.pt`. The
+evaluator defaults to that path, so the direct `Env16` command is:
+
+```bash
+python -m Inference.ppo_lstm_eval
+```
+
+It resets the LSTM hidden and cell state at every `Env16` episode boundary. To
+sample actions or change the run length:
+
+```bash
+python -m Inference.ppo_lstm_eval --no-deterministic
+python -m Inference.ppo_lstm_eval --eval-episodes 20
+python -m Inference.ppo_lstm_eval --no-cuda
+```
+
+Feed-forward PPO training saves its model to `runs/PPO_server.pt`. Evaluate it
+deterministically with:
 
 ```bash
 python -m Inference.ppo_eval --model-path runs/PPO_server.pt
@@ -438,11 +457,11 @@ action:
 python -m Inference.ppo_eval --model-path runs/PPO_server.pt --no-deterministic
 ```
 
-Other PPO examples:
+Other feed-forward PPO examples:
 
 ```bash
 python -m Inference.ppo_eval --model-path runs/PPO_server.pt --eval-episodes 20
-python -m Inference.ppo_eval --model-path runs/PPO_server.pt --cuda false
+python -m Inference.ppo_eval --model-path runs/PPO_server.pt --no-cuda
 ```
 
 DQN checkpoints are evaluated separately:
@@ -459,16 +478,16 @@ python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_serve
 python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt --cuda false
 ```
 
-Both evaluators use the direct external `Env16` flow and report episode
+All three evaluators use the direct external `Env16` flow and report episode
 returns, outcomes, wins, win rate, and elapsed time. The bridge and game must
 be running and producing `ai_tick` messages.
 
 ### Automated inference
 
-The default Automation configuration evaluates PPO:
+The default Automation configuration evaluates recurrent PPO:
 
 ```yaml
-inference_algorithm: "ppo" # change to "dqn" to evaluate DQN
+inference_algorithm: "ppo_lstm" # "ppo" and "dqn" are also supported
 
 dqn_inference_command:
   - python
@@ -483,6 +502,13 @@ ppo_inference_command:
   - Inference.ppo_eval
   - --model-path
   - runs/PPO_server.pt
+
+ppo_lstm_inference_command:
+  - python
+  - -m
+  - Inference.ppo_lstm_eval
+  - --model-path
+  - runs/PPO_lstm_server.pt
 ```
 
 The launcher selects the matching explicit command and never searches for the
@@ -495,12 +521,12 @@ newest `.pt` file. Start the configured evaluator with:
 You can still override the configured evaluator for one run:
 
 ```powershell
-.\RunInference.ps1 -Command "python -m Inference.ppo_eval --model-path runs/PPO_server.pt"
+.\RunInference.ps1 -Command "python -m Inference.ppo_lstm_eval --model-path runs/PPO_lstm_server.pt"
 ```
 
 ## Notes
 
-- PPO is the active training path for the current discrete action space.
+- Recurrent PPO is the default training path for the current discrete action space.
 - Run Python entry points with `python -m ...`; package imports no longer depend on script-relative `sys.path` changes.
 - `Load_env_config.py` should remain the single place that parses shared env config.
 - `Automation/automation_config.yaml` controls TensorBoard startup, bridge startup, training command, and inference command.

@@ -5,12 +5,13 @@ import unittest
 from Automation.infer import resolve_inference_command
 from Automation.processes import load_config, normalize_command
 from Automation.tensorboard_server import FilteredStderr, NO_TENSORFLOW_NOTICE
+from Automation.train import resolve_training_command
 
 
 class AutomationConfigTests(unittest.TestCase):
-    def test_default_config_selects_ppo_server(self):
+    def test_default_config_selects_ppo_lstm_server(self):
         config = load_config("Automation/automation_config.yaml")
-        self.assertEqual(config["rl_algorithm"], "ppo")
+        self.assertEqual(config["rl_algorithm"], "ppo_lstm")
         self.assertEqual(
             config["dqn_command"],
             ["python", "-m", "Training.DQN_server"],
@@ -23,6 +24,10 @@ class AutomationConfigTests(unittest.TestCase):
             config["ppo_lstm_command"],
             ["python", "-m", "Training.PPO_lstm_server"],
         )
+
+        algorithm, command = resolve_training_command(config)
+        self.assertEqual(algorithm, "ppo_lstm")
+        self.assertEqual(command, config["ppo_lstm_command"])
 
     def test_python_command_uses_active_interpreter(self):
         command = normalize_command(["python", "-m", "example"])
@@ -43,8 +48,26 @@ class AutomationConfigTests(unittest.TestCase):
         )
         self.assertEqual(command[-1], "runs/model file.pt")
 
-    def test_inference_uses_explicit_configured_command(self):
+    def test_inference_uses_configured_ppo_lstm_command(self):
         config = load_config("Automation/automation_config.yaml")
+
+        command = resolve_inference_command(config)
+
+        self.assertEqual(command, config["ppo_lstm_inference_command"])
+        self.assertEqual(
+            command,
+            [
+                "python",
+                "-m",
+                "Inference.ppo_lstm_eval",
+                "--model-path",
+                "runs/PPO_lstm_server.pt",
+            ],
+        )
+
+    def test_feedforward_ppo_inference_command_is_selectable(self):
+        config = load_config("Automation/automation_config.yaml")
+        config["inference_algorithm"] = "ppo"
 
         command = resolve_inference_command(config)
 

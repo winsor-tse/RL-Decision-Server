@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import torch
@@ -120,6 +120,18 @@ class PPOLSTMTests(unittest.TestCase):
                 getattr(ppo_args, field_name),
                 field_name,
             )
+
+    def test_main_parses_args_and_starts_training(self):
+        parsed_args = Args(total_timesteps=128)
+        train_mock = Mock()
+
+        with (
+            patch.object(PPO_lstm_server.tyro, "cli", return_value=parsed_args),
+            patch.object(PPO_lstm_server, "train", train_mock),
+        ):
+            PPO_lstm_server.main()
+
+        train_mock.assert_called_once_with(parsed_args)
 
     def test_recurrent_minibatches_cover_contiguous_rollout_sequences(self):
         minibatches = recurrent_minibatches(8, 4)

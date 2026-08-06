@@ -154,7 +154,14 @@ Open http://localhost:6006.
 
 ## 11. Evaluate A Checkpoint
 
-Evaluate PPO:
+Evaluate recurrent PPO on the custom `Env16` environment:
+
+```bash
+python -m Inference.ppo_lstm_eval
+python -m Inference.ppo_lstm_eval --no-deterministic
+```
+
+Evaluate feed-forward PPO:
 
 ```bash
 python -m Inference.ppo_eval --model-path runs/PPO_server.pt
@@ -182,9 +189,10 @@ To run inference with bridge automation:
 ```
 
 The launcher uses `inference_algorithm` plus the matching explicit
-`dqn_inference_command` or `ppo_inference_command` from
-`Automation/automation_config.yaml`. It does not scan for the newest
-checkpoint. Pass `-Command` to override the configured evaluator.
+`dqn_inference_command`, `ppo_inference_command`, or
+`ppo_lstm_inference_command` from `Automation/automation_config.yaml`. It does
+not scan for the newest checkpoint. Pass `-Command` to override the configured
+evaluator.
 
 ## Troubleshooting
 

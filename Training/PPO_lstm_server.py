@@ -213,6 +213,11 @@ def train(args: Args) -> None:
     device = torch.device(
         "cuda" if torch.cuda.is_available() and args.cuda else "cpu"
     )
+    print(f"Using device: {device}", flush=True)
+    print(
+        "Initializing Env16; waiting for the first game ai_tick...",
+        flush=True,
+    )
 
     env = None
     try:
@@ -625,3 +630,11 @@ def train(args: Args) -> None:
         if env is not None:
             env.close()
         writer.close()
+
+
+def main() -> None:
+    train(tyro.cli(Args))
+
+
+if __name__ == "__main__":
+    main()
