@@ -1,8 +1,20 @@
 """Start the bridge and configured training algorithm."""
 
 import argparse
+from typing import Sequence
 
 from Automation.processes import DEFAULT_CONFIG, load_config, run_stack
+
+
+def resolve_training_command(
+    config: dict,
+) -> tuple[str, str | Sequence[object]]:
+    """Resolve the command for the configured training algorithm."""
+    algorithm = str(config.get("rl_algorithm", "ppo_lstm")).lower()
+    algorithm_command = config.get(f"{algorithm}_command")
+    if not algorithm_command:
+        raise ValueError(f"No command configured for rl_algorithm={algorithm!r}.")
+    return algorithm, algorithm_command
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -11,10 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     config = load_config(args.config)
-    algorithm = str(config.get("rl_algorithm", "dqn")).lower()
-    algorithm_command = config.get(f"{algorithm}_command")
-    if not algorithm_command:
-        raise ValueError(f"No command configured for rl_algorithm={algorithm!r}.")
+    algorithm, algorithm_command = resolve_training_command(config)
 
     return run_stack(
         config,

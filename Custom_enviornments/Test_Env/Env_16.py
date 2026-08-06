@@ -9,15 +9,15 @@ from Custom_enviornments.Test_Env import Env_conditions
 LOGGER = logging.getLogger(__name__)
 
 
-ACTIONS_15 = [
+ACTIONS_11 = [
     "up",
     "down",
     "left",
     "right",
-    "direction:up",
-    "direction:down",
-    "direction:left",
-    "direction:right",
+    #"direction:up",
+    #"direction:down",
+    #"direction:left",
+    #"direction:right",
     "attack",
     "castSpell:1",
     "castSpell:2",
@@ -35,7 +35,7 @@ class Env16(BaseEnv):
     """Yugen Saga environment with the current 15-action discrete action space."""
 
     def __init__(self):
-        super().__init__(actions=ACTIONS_15, config=load_env_config())
+        super().__init__(actions=ACTIONS_11, config=load_env_config())
         self.kill_counter = 0
         self.next_Ent_state = {}
 

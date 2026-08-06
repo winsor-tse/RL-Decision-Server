@@ -3,7 +3,7 @@
 # The bridge starts first. The launcher waits until bridge_ready_signal appears
 # in bridge output, then starts the configured algorithm command.
 
-rl_algorithm: "dqn"
+rl_algorithm: "ppo_lstm"
 bridge_command:
   - python
   - -m
@@ -23,5 +23,36 @@ dqn_command:
   - -m
   - Training.DQN_server
 
-# Use the newest .pt file under runs/. This can also be a specific model path.
-inference_model_path: latest
+ppo_command:
+  - python
+  - -m
+  - Training.PPO_server
+
+ppo_lstm_command:
+  - python
+  - -m
+  - Training.PPO_lstm_server
+
+# Select dqn, ppo, or ppo_lstm independently from the training algorithm.
+inference_algorithm: "ppo_lstm"
+
+dqn_inference_command:
+  - python
+  - -m
+  - Inference.dqn_eval
+  - --model-path
+  - runs/DQN_server__1783138095/DQN_server.pt
+
+ppo_inference_command:
+  - python
+  - -m
+  - Inference.ppo_eval
+  - --model-path
+  - runs/PPO_server.pt
+
+ppo_lstm_inference_command:
+  - python
+  - -m
+  - Inference.ppo_lstm_eval
+  - --model-path
+  - runs/PPO_lstm_server.pt

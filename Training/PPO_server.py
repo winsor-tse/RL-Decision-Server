@@ -3,8 +3,8 @@ import os
 import random
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
-import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
@@ -12,7 +12,9 @@ import torch.optim as optim
 import tyro
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
-#from Custom_env import Dummy_env
+
+from Custom_enviornments.Test_Env.Env_16 import Env16
+from Training.ppo_metrics import log_step_metrics
 
 
 @dataclass
@@ -25,26 +27,22 @@ class Args:
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
-    track: bool = False
-    """if toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "cleanRL"
-    """the wandb's project name"""
-    wandb_entity: str = "RL_Agent"
-    """the entity (team) of wandb's project"""
-    capture_video: bool = False
-    """whether to capture videos of the agent performances (check out `videos` folder)"""
+    save_model: bool = True
+    """whether to save the PPO agent checkpoint"""
+    model_path: str = "runs/PPO_server.pt"
+    """path used for the latest PPO agent checkpoint"""
 
     # Algorithm specific arguments
-    env_id: str = "CartPole-v1"
-    """the id of the environment"""
-    total_timesteps: int = 500000
+    total_timesteps: int = 20000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
-    num_envs: int = 4
-    """the number of parallel game environments"""
+    num_envs: int = 1
+    """the number of live game environments"""
     num_steps: int = 128
     """the number of steps to run in each environment per policy rollout"""
+    metrics_frequency: int = 1
+    """environment steps between regular TensorBoard writes"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
     gamma: float = 0.99
@@ -67,7 +65,7 @@ class Args:
     """coefficient of the value function"""
     max_grad_norm: float = 0.5
     """the maximum norm for the gradient clipping"""
-    target_kl: float = None
+    target_kl: float | None = None
     """the target KL divergence threshold"""
 
     # to be filled in runtime
@@ -86,22 +84,30 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
+def save_agent(agent: nn.Module, model_path: str) -> Path:
+    """Save the PPO actor and critic state to a deterministic checkpoint path."""
+    checkpoint_path = Path(model_path)
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(agent.state_dict(), checkpoint_path)
+    return checkpoint_path
+
+
 class Agent(nn.Module):
     def __init__(self, envs):
         super().__init__()
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 128)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init(nn.Linear(128, 128)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
+            layer_init(nn.Linear(128, 1), std=1.0),
         )
         self.actor = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 128)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init(nn.Linear(128, 128)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, envs.single_action_space.n), std=0.01),
+            layer_init(nn.Linear(128, envs.single_action_space.n), std=0.01),
         )
 
     def get_value(self, x):
@@ -117,22 +123,11 @@ class Agent(nn.Module):
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
+    assert args.num_envs == 1, "vectorized envs are not supported at the moment"
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    if args.track:
-        import wandb
-
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=run_name,
-            monitor_gym=True,
-            save_code=True,
-        )
+    run_name = f"Env16__{args.exp_name}__{args.seed}__{int(time.time())}"
     writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(
         "hyperparameters",
@@ -148,14 +143,13 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    envs = Dummy_env.CustomBlankEnv()
+    envs = Env16()
 
     agent = Agent(envs).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
-    #actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     actions = torch.zeros((args.num_steps, args.num_envs), dtype=torch.long).to(device)
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -166,8 +160,21 @@ if __name__ == "__main__":
     global_step = 0
     start_time = time.time()
     next_obs, _ = envs.reset()
-    next_obs = torch.Tensor(next_obs).to(device)
+    next_obs = torch.as_tensor(
+        next_obs,
+        dtype=torch.float32,
+        device=device,
+    ).unsqueeze(0)
     next_done = torch.zeros(args.num_envs).to(device)
+    episode_return = 0.0
+    episode_length = 0
+    episode_reward_components = {}
+    completed_episodes = 0
+    wins = 0
+    action_counts = np.zeros(envs.single_action_space.n, dtype=np.int64)
+    recent_actions = []
+    player_hp_index = 3
+    enemy_hp_index = int(envs.config["OBS_PLAYER_SIZE"]) + 2
 
     for iteration in range(1, args.num_iterations + 1):
         # Annealing the rate if instructed to do so.
@@ -187,19 +194,99 @@ if __name__ == "__main__":
                 values[step] = value.flatten()
             actions[step] = action
             logprobs[step] = logprob
+            action_index = int(action.item())
+            action_counts[action_index] += 1
+            recent_actions.append(action_index)
 
             # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
-            next_done = np.logical_or(terminations, truncations)
+            next_observation, reward, termination, truncation, info = envs.step(
+                action.cpu().numpy()
+            )
+            done = bool(termination or truncation)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
-            next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
+            episode_return += float(reward)
+            episode_length += 1
+            reward_components = info.get("reward_components", {})
+            for component_name, component_value in reward_components.items():
+                episode_reward_components[component_name] = (
+                    episode_reward_components.get(component_name, 0.0)
+                    + float(component_value)
+                )
 
-            if "final_info" in infos:
-                for info in infos["final_info"]:
-                    if info and "episode" in info:
-                        print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                        writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                        writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+            has_reward_event = any(
+                float(component_value) != 0.0
+                for component_value in reward_components.values()
+            )
+            if (
+                global_step % args.metrics_frequency == 0
+                or done
+                or has_reward_event
+            ):
+                log_step_metrics(
+                    writer,
+                    global_step=global_step,
+                    reward=float(reward),
+                    observation=next_observation,
+                    player_hp_index=player_hp_index,
+                    enemy_hp_index=enemy_hp_index,
+                    reward_components=reward_components,
+                    action_counts=action_counts,
+                    action_names=envs.Actions,
+                    recent_actions=recent_actions,
+                )
+                recent_actions.clear()
+
+            if done:
+                outcome = info.get("episode_outcome")
+                is_win = outcome == "win"
+                completed_episodes += 1
+                wins += int(is_win)
+                win_percentage = 100.0 * wins / completed_episodes
+
+                writer.add_scalar(
+                    "charts/episodic_return",
+                    episode_return,
+                    global_step,
+                )
+                writer.add_scalar(
+                    "charts/episode_length",
+                    episode_length,
+                    global_step,
+                )
+                writer.add_scalar(
+                    "charts/win_rate",
+                    win_percentage,
+                    global_step,
+                )
+                for component_name, component_total in (
+                    episode_reward_components.items()
+                ):
+                    writer.add_scalar(
+                        f"rewards/episode_{component_name}",
+                        component_total,
+                        global_step,
+                    )
+
+                print(
+                    f"episode={completed_episodes}, outcome={outcome}, "
+                    f"length={episode_length}, return={episode_return:.2f}, "
+                    f"win_rate={win_percentage:.2f}%"
+                )
+                episode_return = 0.0
+                episode_length = 0
+                episode_reward_components.clear()
+                next_observation, _ = envs.reset()
+
+            next_obs = torch.as_tensor(
+                next_observation,
+                dtype=torch.float32,
+                device=device,
+            ).unsqueeze(0)
+            next_done = torch.as_tensor(
+                [done],
+                dtype=torch.float32,
+                device=device,
+            )
 
         # bootstrap value if not done
         with torch.no_grad():
@@ -301,6 +388,9 @@ if __name__ == "__main__":
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        if args.save_model:
+            checkpoint_path = save_agent(agent, args.model_path)
+            print(f"model saved to {checkpoint_path}")
 
     envs.close()
     writer.close()
