@@ -49,7 +49,8 @@ The training dashboard captures the learning signals produced during a demo run,
 |   `-- Bridge/
 |       `-- ws_zmq_bridge.py
 |-- Utils/
-|   `-- buffers.py
+|   |-- buffers.py
+|   `-- model_paths.py
 |-- Training/
 |   |-- DQN_server.py
 |   |-- PPO_server.py
@@ -70,6 +71,7 @@ The training dashboard captures the learning signals produced during a demo run,
 |   |-- test_automation.py
 |   |-- test_dqn_metrics.py
 |   |-- test_environment.py
+|   |-- test_model_paths.py
 |   |-- test_ppo_lstm_eval.py
 |   |-- test_ppo_lstm_server.py
 |   |-- test_ppo_server.py
@@ -239,7 +241,7 @@ rollout horizon; it does not create additional environments.
 | `vf_coef` | 0.5 |
 | `metrics_frequency` | 1 |
 | `save_model` | `true` |
-| `model_path` | `runs/PPO_server.pt` |
+| `model_path` | `None` (the current `runs/<run_name>/PPO_server.pt`) |
 
 Example:
 
@@ -248,13 +250,12 @@ python -m Training.PPO_server \
   --total-timesteps 20000 \
   --num-steps 128 \
   --num-minibatches 4 \
-  --metrics-frequency 10 \
-  --model-path runs/PPO_server.pt
+  --metrics-frequency 10
 ```
 
 After every PPO rollout/update cycle, the current actor and critic state is
-written to `model_path`. The file is overwritten so Automation always points
-to one explicit, predictable PPO checkpoint.
+written to `runs/<run_name>/PPO_server.pt`, beside that run's TensorBoard event
+files. Passing `--model-path` overrides this location.
 
 ## Recurrent PPO (LSTM) Training
 
@@ -277,7 +278,7 @@ boundaries reset the recurrent state through the rollout's done mask.
 | `clip_coef` | 0.2 |
 | `metrics_frequency` | 1 |
 | `save_model` | `true` |
-| `model_path` | `runs/PPO_lstm_server.pt` |
+| `model_path` | `None` (the current `runs/<run_name>/PPO_lstm_server.pt`) |
 
 `num_steps` must be divisible by `num_minibatches`. For example:
 
@@ -292,7 +293,8 @@ python -m Training.PPO_lstm_server \
 The LSTM trainer emits the same step, episode, reward-component, environment,
 loss, and throughput charts as `PPO_server.py`, plus
 `lstm/hidden_state_norm` and `lstm/cell_state_norm`. Like `PPO_server.py`, it
-overwrites the configured model path after every rollout/update cycle.
+overwrites `runs/<run_name>/PPO_lstm_server.pt` after every rollout/update
+cycle unless `--model-path` provides an explicit override.
 
 ## Legacy DQN Training
 
@@ -427,8 +429,14 @@ logging instead of per-step printing.
 
 ## Evaluation
 
-Recurrent PPO training saves its model to `runs/PPO_lstm_server.pt`. The
-evaluator defaults to that path, so the direct `Env16` command is:
+Recurrent PPO training saves each model under its matching TensorBoard run:
+
+```text
+runs/Env16__PPO_lstm_server__<seed>__<timestamp>/PPO_lstm_server.pt
+```
+
+The evaluator automatically selects the newest matching run checkpoint, so the
+direct `Env16` command is:
 
 ```bash
 python -m Inference.ppo_lstm_eval
@@ -443,25 +451,30 @@ python -m Inference.ppo_lstm_eval --eval-episodes 20
 python -m Inference.ppo_lstm_eval --no-cuda
 ```
 
-Feed-forward PPO training saves its model to `runs/PPO_server.pt`. Evaluate it
-deterministically with:
+Feed-forward PPO uses the equivalent run-local path:
+
+```text
+runs/Env16__PPO_server__<seed>__<timestamp>/PPO_server.pt
+```
+
+Evaluate the newest checkpoint deterministically with:
 
 ```bash
-python -m Inference.ppo_eval --model-path runs/PPO_server.pt
+python -m Inference.ppo_eval
 ```
 
 To sample from the learned policy instead of selecting its highest-probability
 action:
 
 ```bash
-python -m Inference.ppo_eval --model-path runs/PPO_server.pt --no-deterministic
+python -m Inference.ppo_eval --no-deterministic
 ```
 
 Other feed-forward PPO examples:
 
 ```bash
-python -m Inference.ppo_eval --model-path runs/PPO_server.pt --eval-episodes 20
-python -m Inference.ppo_eval --model-path runs/PPO_server.pt --no-cuda
+python -m Inference.ppo_eval --eval-episodes 20
+python -m Inference.ppo_eval --no-cuda
 ```
 
 DQN checkpoints are evaluated separately:
@@ -501,18 +514,20 @@ ppo_inference_command:
   - -m
   - Inference.ppo_eval
   - --model-path
-  - runs/PPO_server.pt
+  - runs/XXXX/PPO_server.pt
 
 ppo_lstm_inference_command:
   - python
   - -m
   - Inference.ppo_lstm_eval
   - --model-path
-  - runs/PPO_lstm_server.pt
+  - runs/XXXX/PPO_lstm_server.pt
 ```
 
-The launcher selects the matching explicit command and never searches for the
-newest `.pt` file. Start the configured evaluator with:
+Automation uses the explicit checkpoint paths above, so replace `XXXX` with the
+run directory you want to evaluate. Direct PPO evaluator commands still select
+the newest matching checkpoint when `--model-path` is omitted. Start the
+configured evaluator with:
 
 ```powershell
 .\RunInference.ps1
@@ -521,7 +536,7 @@ newest `.pt` file. Start the configured evaluator with:
 You can still override the configured evaluator for one run:
 
 ```powershell
-.\RunInference.ps1 -Command "python -m Inference.ppo_lstm_eval --model-path runs/PPO_lstm_server.pt"
+.\RunInference.ps1 -Command "python -m Inference.ppo_lstm_eval --model-path runs/Env16__PPO_lstm_server__1__<timestamp>/PPO_lstm_server.pt"
 ```
 
 ## Notes

@@ -61,7 +61,7 @@ class AutomationConfigTests(unittest.TestCase):
                 "-m",
                 "Inference.ppo_lstm_eval",
                 "--model-path",
-                "runs/PPO_lstm_server.pt",
+                "runs/XXXX/PPO_lstm_server.pt",
             ],
         )
 
@@ -79,7 +79,7 @@ class AutomationConfigTests(unittest.TestCase):
                 "-m",
                 "Inference.ppo_eval",
                 "--model-path",
-                "runs/PPO_server.pt",
+                "runs/XXXX/PPO_server.pt",
             ],
         )
 

@@ -16,6 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from Custom_enviornments.Test_Env.Env_16 import Env16
 from Training.ppo_metrics import log_step_metrics
+from Utils.model_paths import training_checkpoint_path
 
 
 @dataclass
@@ -30,8 +31,8 @@ class Args:
     """if toggled, cuda will be enabled by default"""
     save_model: bool = True
     """whether to save the recurrent PPO agent checkpoint"""
-    model_path: str = "runs/PPO_lstm_server.pt"
-    """path used for the latest recurrent PPO agent checkpoint"""
+    model_path: str | None = None
+    """checkpoint override; defaults to runs/<run_name>/PPO_lstm_server.pt"""
 
     # Algorithm specific arguments
     total_timesteps: int = 20000
@@ -198,8 +199,16 @@ def train(args: Args) -> None:
     args.minibatch_size = args.batch_size // args.num_minibatches
     args.num_iterations = args.total_timesteps // args.batch_size
     run_name = f"Env16__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_directory = Path("runs") / run_name
+    args.model_path = str(
+        training_checkpoint_path(
+            run_directory,
+            args.model_path,
+            "PPO_lstm_server.pt",
+        )
+    )
 
-    writer = SummaryWriter(f"runs/{run_name}")
+    writer = SummaryWriter(str(run_directory))
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s"

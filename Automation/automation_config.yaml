@@ -48,11 +48,11 @@ ppo_inference_command:
   - -m
   - Inference.ppo_eval
   - --model-path
-  - runs/PPO_server.pt
+  - runs/XXXX/PPO_server.pt
 
 ppo_lstm_inference_command:
   - python
   - -m
   - Inference.ppo_lstm_eval
   - --model-path
-  - runs/PPO_lstm_server.pt
+  - runs/XXXX/PPO_lstm_server.pt

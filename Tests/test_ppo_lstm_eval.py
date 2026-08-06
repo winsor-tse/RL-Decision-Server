@@ -60,8 +60,8 @@ class FakeEnv16:
 
 
 class PPOLSTMEvaluationTests(unittest.TestCase):
-    def test_default_checkpoint_matches_lstm_training(self):
-        self.assertEqual(EvalArgs().model_path, "runs/PPO_lstm_server.pt")
+    def test_default_checkpoint_selects_latest_lstm_run(self):
+        self.assertIsNone(EvalArgs().model_path)
 
     def test_deterministic_action_advances_recurrent_state(self):
         model = FakeRecurrentAgent()

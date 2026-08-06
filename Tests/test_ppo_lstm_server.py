@@ -20,7 +20,8 @@ from Training.PPO_server import Args as PPOArgs
 class FakeWriter:
     instances = []
 
-    def __init__(self, _log_directory):
+    def __init__(self, log_directory):
+        self.log_directory = log_directory
         self.scalar_tags = []
         self.histogram_tags = []
         self.closed = False
@@ -199,6 +200,32 @@ class PPOLSTMTests(unittest.TestCase):
         self.assertTrue(expected_scalar_tags.issubset(writer.scalar_tags))
         self.assertIn("environment/action_frequency", writer.histogram_tags)
         self.assertTrue(writer.closed)
+
+    @patch.object(PPO_lstm_server, "save_agent")
+    @patch.object(PPO_lstm_server, "SummaryWriter", FakeWriter)
+    @patch.object(PPO_lstm_server, "Env16", FakeEnv16)
+    def test_default_model_is_saved_inside_tensorboard_run(
+        self,
+        save_agent_mock,
+    ):
+        args = Args(
+            total_timesteps=4,
+            num_steps=4,
+            num_minibatches=2,
+            update_epochs=1,
+            cuda=False,
+            save_model=True,
+        )
+
+        PPO_lstm_server.train(args)
+
+        run_directory = Path(FakeWriter.instances[-1].log_directory)
+        expected_checkpoint = run_directory / "PPO_lstm_server.pt"
+        self.assertEqual(Path(args.model_path), expected_checkpoint)
+        self.assertEqual(
+            Path(save_agent_mock.call_args.args[1]),
+            expected_checkpoint,
+        )
 
 
 if __name__ == "__main__":

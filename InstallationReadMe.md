@@ -62,6 +62,19 @@ Expected output includes:
 Env16
 ```
 
+### Check NVIDIA/PyTorch compatibility
+
+Run the diagnostic with the same virtual environment used for training:
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Tests.pytorch_gpu_check
+```
+
+It compares the NVIDIA driver's maximum CUDA version, GPU compute capability,
+installed PyTorch CUDA runtime, compiled architectures, and a real CUDA matrix
+operation. If the environment has a CPU-only or incompatible PyTorch build, it
+prints a suitable project-version install command without executing it.
+
 ## 5. Check Shared Env Config
 
 Shared state-space config lives here:
@@ -164,9 +177,12 @@ python -m Inference.ppo_lstm_eval --no-deterministic
 Evaluate feed-forward PPO:
 
 ```bash
-python -m Inference.ppo_eval --model-path runs/PPO_server.pt
-python -m Inference.ppo_eval --model-path runs/PPO_server.pt --no-deterministic
+python -m Inference.ppo_eval
+python -m Inference.ppo_eval --no-deterministic
 ```
+
+Both PPO evaluators automatically load the newest matching checkpoint from
+`runs/<run_name>/`. Pass `--model-path` only when selecting a specific run.
 
 Evaluate DQN:
 
@@ -188,11 +204,13 @@ To run inference with bridge automation:
 .\RunInference.ps1
 ```
 
-The launcher uses `inference_algorithm` plus the matching explicit
+The launcher uses `inference_algorithm` plus the matching
 `dqn_inference_command`, `ppo_inference_command`, or
-`ppo_lstm_inference_command` from `Automation/automation_config.yaml`. It does
-not scan for the newest checkpoint. Pass `-Command` to override the configured
-evaluator.
+`ppo_lstm_inference_command` from `Automation/automation_config.yaml`. PPO
+automation commands use explicit run-local checkpoint paths, matching DQN;
+replace `XXXX` with the desired run directory. Direct PPO evaluator commands
+select the newest checkpoint when `--model-path` is omitted. Pass `-Command` to
+override the configured evaluator.
 
 ## Troubleshooting
 
