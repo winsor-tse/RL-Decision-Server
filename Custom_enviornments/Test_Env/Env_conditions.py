@@ -211,7 +211,7 @@ def get_reward_components(
     }
     player_hp_pct = float(obs[3])
     if action <= 3 and obs[0] == prev_obs[0] and obs[1] == prev_obs[1]:
-        components["positioning"] -= 1000
+        components["positioning"] -= 10
 
     if player_hp_pct < 0.25:
         components["health_state"] = -0.50
