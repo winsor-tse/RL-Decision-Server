@@ -12,6 +12,7 @@ from Training.PPO_lstm_server import (
     Agent,
     Args,
     recurrent_minibatches,
+    restore_agent,
     save_agent,
 )
 from Training.PPO_server import Args as PPOArgs
@@ -167,6 +168,23 @@ class PPOLSTMTests(unittest.TestCase):
             loaded_agent.parameters(),
         ):
             self.assertTrue(torch.equal(source_parameter, loaded_parameter))
+
+    def test_restore_agent_loads_existing_recurrent_checkpoint(self):
+        source_agent = Agent(FakeEnv16())
+
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint_path = save_agent(
+                source_agent,
+                str(Path(directory) / "PPO_lstm_server.pt"),
+            )
+            restored_agent = Agent(FakeEnv16())
+            restore_agent(restored_agent, checkpoint_path, torch.device("cpu"))
+
+        for source_parameter, restored_parameter in zip(
+            source_agent.parameters(),
+            restored_agent.parameters(),
+        ):
+            self.assertTrue(torch.equal(source_parameter, restored_parameter))
 
     @patch.object(PPO_lstm_server, "SummaryWriter", FakeWriter)
     @patch.object(PPO_lstm_server, "Env16", FakeEnv16)

@@ -32,6 +32,8 @@ class Args:
     """whether to save the PPO agent checkpoint"""
     model_path: str | None = None
     """checkpoint override; defaults to runs/<run_name>/PPO_server.pt"""
+    restore_model_path: str | None = None
+    """PyTorch checkpoint whose agent weights initialize this training run"""
 
     # Algorithm specific arguments
     total_timesteps: int = 20000
@@ -90,6 +92,27 @@ def save_agent(agent: nn.Module, model_path: str | Path) -> Path:
     checkpoint_path = Path(model_path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(agent.state_dict(), checkpoint_path)
+    return checkpoint_path
+
+
+def restore_agent(
+    agent: nn.Module,
+    restore_model_path: str | Path,
+    device: torch.device,
+) -> Path:
+    """Restore PPO agent weights from an existing PyTorch checkpoint."""
+    checkpoint_path = Path(restore_model_path)
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(
+            f"Restore checkpoint does not exist: {checkpoint_path}"
+        )
+    agent.load_state_dict(
+        torch.load(
+            checkpoint_path,
+            map_location=device,
+            weights_only=True,
+        )
+    )
     return checkpoint_path
 
 
@@ -170,6 +193,16 @@ if __name__ == "__main__":
     envs = Env16()
 
     agent = Agent(envs).to(device)
+    if args.restore_model_path:
+        restored_checkpoint = restore_agent(
+            agent,
+            args.restore_model_path,
+            device,
+        )
+        print(
+            f"Restored model from {restored_checkpoint.resolve()}",
+            flush=True,
+        )
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup

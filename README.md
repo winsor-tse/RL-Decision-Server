@@ -157,6 +157,10 @@ command selected by `rl_algorithm`. All three trainers remain available:
 ```yaml
 rl_algorithm: "ppo_lstm" # use "ppo" for feed-forward PPO or "dqn" for DQN
 
+# Optional: initialize PPO/PPO-LSTM from an existing checkpoint.
+restore_model_path: null
+# restore_model_path: runs/Env16__PPO_lstm_server__1__<timestamp>/PPO_lstm_server.pt
+
 dqn_command:
   - python
   - -m
@@ -242,6 +246,7 @@ rollout horizon; it does not create additional environments.
 | `metrics_frequency` | 1 |
 | `save_model` | `true` |
 | `model_path` | `None` (the current `runs/<run_name>/PPO_server.pt`) |
+| `restore_model_path` | `None` (start with newly initialized weights) |
 
 Example:
 
@@ -256,6 +261,9 @@ python -m Training.PPO_server \
 After every PPO rollout/update cycle, the current actor and critic state is
 written to `runs/<run_name>/PPO_server.pt`, beside that run's TensorBoard event
 files. Passing `--model-path` overrides this location.
+Passing `--restore-model-path runs/<run_name>/PPO_server.pt` initializes the
+new run from an existing checkpoint without changing where the new checkpoint
+is saved.
 
 ## Recurrent PPO (LSTM) Training
 
@@ -278,6 +286,7 @@ boundaries reset the recurrent state through the rollout's done mask.
 | `clip_coef` | 0.2 |
 | `metrics_frequency` | 1 |
 | `save_model` | `true` |
+| `restore_model_path` | `None` (start with newly initialized weights) |
 | `model_path` | `None` (the current `runs/<run_name>/PPO_lstm_server.pt`) |
 
 `num_steps` must be divisible by `num_minibatches`. For example:
@@ -289,6 +298,10 @@ python -m Training.PPO_lstm_server \
   --num-minibatches 4 \
   --metrics-frequency 10
 ```
+
+Use `--restore-model-path runs/<run_name>/PPO_lstm_server.pt` to initialize a
+new recurrent run from an existing checkpoint. As with feed-forward PPO, the
+restored run writes its updates to a new run-local checkpoint by default.
 
 The LSTM trainer emits the same step, episode, reward-component, environment,
 loss, and throughput charts as `PPO_server.py`, plus

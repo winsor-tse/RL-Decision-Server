@@ -4,6 +4,12 @@
 # in bridge output, then starts the configured algorithm command.
 
 rl_algorithm: "ppo_lstm"
+
+# Optional PPO/PPO-LSTM checkpoint used to initialize a new training run.
+# The new run still saves to its own runs/<run_name>/ checkpoint.
+# Example: runs/Env16__PPO_lstm_server__1__1234/PPO_lstm_server.pt
+restore_model_path: null
+
 bridge_command:
   - python
   - -m

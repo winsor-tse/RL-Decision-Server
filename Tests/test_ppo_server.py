@@ -11,6 +11,7 @@ from Training.PPO_server import (
     Args,
     create_run_paths,
     log_step_metrics,
+    restore_agent,
     save_agent,
 )
 
@@ -111,6 +112,27 @@ class PPOMetricTests(unittest.TestCase):
             loaded_agent.parameters(),
         ):
             self.assertTrue(torch.equal(source_parameter, loaded_parameter))
+
+    def test_restore_agent_loads_existing_checkpoint(self):
+        env = SimpleNamespace(
+            single_observation_space=SimpleNamespace(shape=(2,)),
+            single_action_space=SimpleNamespace(n=3),
+        )
+        source_agent = Agent(env)
+
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint_path = save_agent(
+                source_agent,
+                Path(directory) / "PPO_server.pt",
+            )
+            restored_agent = Agent(env)
+            restore_agent(restored_agent, checkpoint_path, torch.device("cpu"))
+
+        for source_parameter, restored_parameter in zip(
+            source_agent.parameters(),
+            restored_agent.parameters(),
+        ):
+            self.assertTrue(torch.equal(source_parameter, restored_parameter))
 
 
 if __name__ == "__main__":
