@@ -8,6 +8,7 @@ from torch.distributions.categorical import Categorical
 
 from Custom_enviornments.Test_Env.Env_16 import Env16
 from Training.PPO_lstm_server import Agent
+from Utils.model_paths import inference_checkpoint_path
 
 LSTMState = tuple[torch.Tensor, torch.Tensor]
 
@@ -104,8 +105,8 @@ def evaluate(
 
 @dataclass
 class EvalArgs:
-    model_path: str = "runs/PPO_lstm_server.pt"
-    """Path to the trained recurrent PPO checkpoint."""
+    model_path: str | None = None
+    """Checkpoint override; defaults to the newest PPO-LSTM run checkpoint."""
     eval_episodes: int = 10
     """Number of evaluation episodes to run."""
     deterministic: bool = True
@@ -120,14 +121,18 @@ def main() -> None:
         "cuda" if torch.cuda.is_available() and args.cuda else "cpu"
     )
     print(f"Using device: {device}")
+    model_path = inference_checkpoint_path(
+        args.model_path,
+        "PPO_lstm_server.pt",
+    )
 
     env = Env16()
     try:
-        print(f"Loading recurrent PPO model from {args.model_path}...")
+        print(f"Loading recurrent PPO model from {model_path}...")
         model = Agent(env).to(device)
         model.load_state_dict(
             torch.load(
-                args.model_path,
+                model_path,
                 map_location=device,
                 weights_only=True,
             )

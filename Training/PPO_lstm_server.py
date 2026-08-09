@@ -16,6 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from Custom_enviornments.Test_Env.Env_16 import Env16
 from Training.ppo_metrics import log_step_metrics
+from Utils.model_paths import training_checkpoint_path
 
 
 @dataclass
@@ -30,11 +31,13 @@ class Args:
     """if toggled, cuda will be enabled by default"""
     save_model: bool = True
     """whether to save the recurrent PPO agent checkpoint"""
-    model_path: str = "runs/PPO_lstm_server.pt"
-    """path used for the latest recurrent PPO agent checkpoint"""
+    model_path: str | None = None
+    """checkpoint override; defaults to runs/<run_name>/PPO_lstm_server.pt"""
+    restore_model_path: str | None = None
+    """PyTorch checkpoint whose agent weights initialize this training run"""
 
     # Algorithm specific arguments
-    total_timesteps: int = 20000
+    total_timesteps: int = 100000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
@@ -108,6 +111,27 @@ def save_agent(agent: nn.Module, model_path: str) -> Path:
     checkpoint_path = Path(model_path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(agent.state_dict(), checkpoint_path)
+    return checkpoint_path
+
+
+def restore_agent(
+    agent: nn.Module,
+    restore_model_path: str | Path,
+    device: torch.device,
+) -> Path:
+    """Restore recurrent PPO weights from an existing PyTorch checkpoint."""
+    checkpoint_path = Path(restore_model_path)
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(
+            f"Restore checkpoint does not exist: {checkpoint_path}"
+        )
+    agent.load_state_dict(
+        torch.load(
+            checkpoint_path,
+            map_location=device,
+            weights_only=True,
+        )
+    )
     return checkpoint_path
 
 
@@ -198,8 +222,16 @@ def train(args: Args) -> None:
     args.minibatch_size = args.batch_size // args.num_minibatches
     args.num_iterations = args.total_timesteps // args.batch_size
     run_name = f"Env16__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_directory = Path("runs") / run_name
+    args.model_path = str(
+        training_checkpoint_path(
+            run_directory,
+            args.model_path,
+            "PPO_lstm_server.pt",
+        )
+    )
 
-    writer = SummaryWriter(f"runs/{run_name}")
+    writer = SummaryWriter(str(run_directory))
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s"
@@ -223,6 +255,16 @@ def train(args: Args) -> None:
     try:
         env = Env16()
         agent = Agent(env).to(device)
+        if args.restore_model_path:
+            restored_checkpoint = restore_agent(
+                agent,
+                args.restore_model_path,
+                device,
+            )
+            print(
+                f"Restored model from {restored_checkpoint.resolve()}",
+                flush=True,
+            )
         optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
         obs = torch.zeros(

@@ -9,9 +9,8 @@ from Automation.train import resolve_training_command
 
 
 class AutomationConfigTests(unittest.TestCase):
-    def test_default_config_selects_ppo_lstm_server(self):
+    def test_configured_training_algorithm_resolves_its_command(self):
         config = load_config("Automation/automation_config.yaml")
-        self.assertEqual(config["rl_algorithm"], "ppo_lstm")
         self.assertEqual(
             config["dqn_command"],
             ["python", "-m", "Training.DQN_server"],
@@ -26,8 +25,35 @@ class AutomationConfigTests(unittest.TestCase):
         )
 
         algorithm, command = resolve_training_command(config)
-        self.assertEqual(algorithm, "ppo_lstm")
-        self.assertEqual(command, config["ppo_lstm_command"])
+        self.assertEqual(algorithm, config["rl_algorithm"])
+        self.assertEqual(command, config[f"{algorithm}_command"])
+
+    def test_restore_model_path_is_added_to_ppo_training_commands(self):
+        config = load_config("Automation/automation_config.yaml")
+        for algorithm_name, checkpoint_name in (
+            ("ppo", "PPO_server.pt"),
+            ("ppo_lstm", "PPO_lstm_server.pt"),
+        ):
+            with self.subTest(algorithm=algorithm_name):
+                restore_model_path = f"runs/existing/{checkpoint_name}"
+                config["rl_algorithm"] = algorithm_name
+                config["restore_model_path"] = restore_model_path
+
+                algorithm, command = resolve_training_command(config)
+
+                self.assertEqual(algorithm, algorithm_name)
+                self.assertEqual(
+                    command[-2:],
+                    ["--restore-model-path", restore_model_path],
+                )
+
+    def test_restore_model_path_is_rejected_for_dqn(self):
+        config = load_config("Automation/automation_config.yaml")
+        config["rl_algorithm"] = "dqn"
+        config["restore_model_path"] = "runs/existing/DQN_server.pt"
+
+        with self.assertRaisesRegex(ValueError, "only supported"):
+            resolve_training_command(config)
 
     def test_python_command_uses_active_interpreter(self):
         command = normalize_command(["python", "-m", "example"])
@@ -48,8 +74,20 @@ class AutomationConfigTests(unittest.TestCase):
         )
         self.assertEqual(command[-1], "runs/model file.pt")
 
-    def test_inference_uses_configured_ppo_lstm_command(self):
+    def test_configured_inference_algorithm_resolves_its_command(self):
         config = load_config("Automation/automation_config.yaml")
+
+        command = resolve_inference_command(config)
+
+        algorithm = config["inference_algorithm"]
+        self.assertEqual(
+            command,
+            config[f"{algorithm}_inference_command"],
+        )
+
+    def test_recurrent_ppo_inference_command_is_selectable(self):
+        config = load_config("Automation/automation_config.yaml")
+        config["inference_algorithm"] = "ppo_lstm"
 
         command = resolve_inference_command(config)
 
@@ -61,7 +99,7 @@ class AutomationConfigTests(unittest.TestCase):
                 "-m",
                 "Inference.ppo_lstm_eval",
                 "--model-path",
-                "runs/PPO_lstm_server.pt",
+                "runs/XXXX/PPO_lstm_server.pt",
             ],
         )
 
@@ -79,7 +117,7 @@ class AutomationConfigTests(unittest.TestCase):
                 "-m",
                 "Inference.ppo_eval",
                 "--model-path",
-                "runs/PPO_server.pt",
+                "runs/XXXX/PPO_server.pt",
             ],
         )
 

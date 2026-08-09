@@ -7,6 +7,7 @@ import tyro
 
 from Custom_enviornments.Test_Env.Env_16 import Env16
 from Training.PPO_server import Agent
+from Utils.model_paths import inference_checkpoint_path
 
 
 def select_action(
@@ -78,8 +79,8 @@ def evaluate(
 
 @dataclass
 class EvalArgs:
-    model_path: str
-    """Path to the trained PPO agent checkpoint (.pt file)."""
+    model_path: str | None = None
+    """Checkpoint override; defaults to the newest PPO run checkpoint."""
     eval_episodes: int = 10
     """Number of evaluation episodes to run."""
     deterministic: bool = True
@@ -94,15 +95,19 @@ def main() -> None:
         "cuda" if torch.cuda.is_available() and args.cuda else "cpu"
     )
     print(f"Using device: {device}")
+    model_path = inference_checkpoint_path(
+        args.model_path,
+        "PPO_server.pt",
+    )
 
     print("Initializing Custom_enviornments.Test_Env.Env_16.Env16...")
     env = Env16()
     try:
-        print(f"Loading model from {args.model_path}...")
+        print(f"Loading model from {model_path}...")
         model = Agent(env).to(device)
         model.load_state_dict(
             torch.load(
-                args.model_path,
+                model_path,
                 map_location=device,
                 weights_only=True,
             )

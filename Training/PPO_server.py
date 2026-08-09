@@ -15,6 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from Custom_enviornments.Test_Env.Env_16 import Env16
 from Training.ppo_metrics import log_step_metrics
+from Utils.model_paths import training_checkpoint_path
 
 
 @dataclass
@@ -29,8 +30,10 @@ class Args:
     """if toggled, cuda will be enabled by default"""
     save_model: bool = True
     """whether to save the PPO agent checkpoint"""
-    model_path: str = "runs/PPO_server.pt"
-    """path used for the latest PPO agent checkpoint"""
+    model_path: str | None = None
+    """checkpoint override; defaults to runs/<run_name>/PPO_server.pt"""
+    restore_model_path: str | None = None
+    """PyTorch checkpoint whose agent weights initialize this training run"""
 
     # Algorithm specific arguments
     total_timesteps: int = 20000
@@ -84,12 +87,53 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
-def save_agent(agent: nn.Module, model_path: str) -> Path:
+def save_agent(agent: nn.Module, model_path: str | Path) -> Path:
     """Save the PPO actor and critic state to a deterministic checkpoint path."""
     checkpoint_path = Path(model_path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(agent.state_dict(), checkpoint_path)
     return checkpoint_path
+
+
+def restore_agent(
+    agent: nn.Module,
+    restore_model_path: str | Path,
+    device: torch.device,
+) -> Path:
+    """Restore PPO agent weights from an existing PyTorch checkpoint."""
+    checkpoint_path = Path(restore_model_path)
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(
+            f"Restore checkpoint does not exist: {checkpoint_path}"
+        )
+    agent.load_state_dict(
+        torch.load(
+            checkpoint_path,
+            map_location=device,
+            weights_only=True,
+        )
+    )
+    return checkpoint_path
+
+
+def create_run_paths(
+    args: Args,
+    *,
+    timestamp: int | None = None,
+    runs_directory: str | Path = "runs",
+) -> tuple[str, Path, Path]:
+    """Create one run directory and resolve its PyTorch checkpoint path."""
+    run_timestamp = int(time.time()) if timestamp is None else timestamp
+    run_name = f"Env16__{args.exp_name}__{args.seed}__{run_timestamp}"
+    run_directory = Path(runs_directory) / run_name
+    checkpoint_path = training_checkpoint_path(
+        run_directory,
+        args.model_path,
+        "PPO_server.pt",
+    )
+    run_directory.mkdir(parents=True, exist_ok=True)
+    args.model_path = str(checkpoint_path)
+    return run_name, run_directory, checkpoint_path
 
 
 class Agent(nn.Module):
@@ -127,8 +171,11 @@ if __name__ == "__main__":
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
-    run_name = f"Env16__{args.exp_name}__{args.seed}__{int(time.time())}"
-    writer = SummaryWriter(f"runs/{run_name}")
+    run_name, run_directory, checkpoint_path = create_run_paths(args)
+    print(f"Run directory: {run_directory.resolve()}", flush=True)
+    print(f"Model checkpoint: {checkpoint_path.resolve()}", flush=True)
+
+    writer = SummaryWriter(str(run_directory))
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -146,6 +193,16 @@ if __name__ == "__main__":
     envs = Env16()
 
     agent = Agent(envs).to(device)
+    if args.restore_model_path:
+        restored_checkpoint = restore_agent(
+            agent,
+            args.restore_model_path,
+            device,
+        )
+        print(
+            f"Restored model from {restored_checkpoint.resolve()}",
+            flush=True,
+        )
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -389,8 +446,8 @@ if __name__ == "__main__":
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
         if args.save_model:
-            checkpoint_path = save_agent(agent, args.model_path)
-            print(f"model saved to {checkpoint_path}")
+            saved_checkpoint = save_agent(agent, checkpoint_path)
+            print(f"model saved to {saved_checkpoint}")
 
     envs.close()
     writer.close()

@@ -222,7 +222,11 @@ def get_reward_components(
         return components
 
     if obs[1] < 31:
-        components["positioning"] = -100 * (31 - float(obs[1]))
+        components["positioning"] += -100 * (31 - float(obs[1]))
+
+    if len(obs) > 6:
+        closest = obs[6]
+        components["positioning"] += min(3, 9 - min(abs(closest - 5),4)**2)
 
     prev_player_hp_pct = float(prev_obs[3])
     hp_lost = prev_player_hp_pct - player_hp_pct
