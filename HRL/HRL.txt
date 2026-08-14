@@ -1,0 +1,17 @@
+"""
+Advanced Option:
+
+Set Up HRL or Goal conditioned RL.
+
+BC/IL can intialise policies such as attack/defend/retreat from recorded traj?
+    This needs to be carefully done.
+    Although maybe u can even just use Advanced IL algorithms to just straight up mimic these experts?
+online RL can do so too ofc for  attack/defend/retreat policies.
+
+One environment step is a *high-level* step: the high level policy assigns a low-level
+    policy (Attack, Defend, or Retreat) for the duration of steps, and that policy is rolled out for
+    `hl_sim_steps` low-level steps. Rewards accumulate over the inner steps.
+
+(Attack, Defend, or Retreat).Low-Level GCRL Policy: Translates that mode into continuous executable actions by treating the mode's destination (e.g., enemy coordinates, defensive cover, or extraction zones) as the conditioned input goal g.
+
+"""
