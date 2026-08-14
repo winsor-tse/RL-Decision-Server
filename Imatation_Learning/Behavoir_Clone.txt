@@ -8,6 +8,15 @@ All we are going to do is build a CLI that message = self.socket.recv_json().
 
 No need to send an action back. The idea is to prompt on CLI when to record and record it into a SQL Lite Database.
 
+There might be two ways to do this? 
+
+Obviously just record the current payload, send something like a -1 or an action index that does not exist.
+Although i think you must record the actual action. Or just fill it in manually after recording payloads (state).
+
+REplay Buffers storing them while training into a place makes sense also. 
+behavior cloning only uses states and actions. The other values are present because the buffer follows a general reinforcement-learning dataset format.
+
+
 YOu can then custom parse obs based on something like running dataset from Env_16  parse_observation.
 
 This is going to the the expert trajectories to be intializing the policy with.
@@ -15,6 +24,13 @@ This is going to the the expert trajectories to be intializing the policy with.
 Store and train/intialize a policy doing this.
 
 """
+
+"""
+Couple of points i need to re evaulate:
+Yes, initializing a policy with Behavior Cloning (BC) and then fine-tuning it online with PPO (Proximal Policy Optimization) does work and is a common practical baseline, but it often suffers from severe performance drops or instability at the start of online training due to sudden distribution shifts. Specific offline-to-online RL methods are generally better because they explicitly account for value estimation and conservatism
+
+"""
+
 
 """
 Advanced Option:
@@ -29,17 +45,6 @@ One environment step is a *high-level* step: the high level policy assigns a low
 
 (Attack, Defend, or Retreat).Low-Level GCRL Policy: Translates that mode into continuous executable actions by treating the mode's destination (e.g., enemy coordinates, defensive cover, or extraction zones) as the conditioned input goal g.
 
-"""
-
-
-"""
-Collect expert or high-return transitions from DQN replay buffer.
-Build a dataset:
-X = states
-y = actions
-Train the Q-network or policy head with classification loss.
-Save the behavior-cloned model.
-Use that model as initialization for DQN or even for critic in PPO.
 """
 
 
