@@ -23,7 +23,10 @@ wandb/
 *.pth
 *.onnx
 *.sqlite3
+<<<<<<< Updated upstream
 *.sqlite3-shm
 *.sqlite3-wal
+=======
+>>>>>>> Stashed changes
 
 .gitignore

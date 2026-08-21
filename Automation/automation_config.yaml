@@ -3,7 +3,7 @@
 # The bridge starts first. The launcher waits until bridge_ready_signal appears
 # in bridge output, then starts the configured algorithm command.
 
-rl_algorithm: "ppo_lstm"
+rl_algorithm: "ppo"
 
 # Optional PPO/PPO-LSTM checkpoint used to initialize a new training run.
 # The new run still saves to its own runs/<run_name>/ checkpoint.
