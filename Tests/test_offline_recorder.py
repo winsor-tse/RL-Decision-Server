@@ -59,10 +59,12 @@ class OfflineRecorderTests(unittest.TestCase):
         self.database_path = Path(self.temporary_directory.name) / "recordings.db"
         self.store = RecordingStore(self.database_path)
         self.input_monitor = FakeInputMonitor()
+        self.debug_messages = []
         self.controller = RecorderController(
             self.store,
             self.input_monitor,
             no_op_action="NoOp",
+            debug_output=self.debug_messages.append,
         )
 
     def tearDown(self):
@@ -109,6 +111,25 @@ class OfflineRecorderTests(unittest.TestCase):
         )
         self.assertEqual(json.loads(frame["response_json"])["move"], "NoOp")
         self.assertIsNone(frame["action_label"])
+        self.assertEqual(len(self.debug_messages), 1)
+        self.assertIn("[RECORDED ai_tick FROM JS BRIDGE]", self.debug_messages[0])
+        self.assertIn('"keys_down":["W"]', self.debug_messages[0])
+        self.assertIn('worldState={"nested":{"x":12},"playerHp":75}', self.debug_messages[0])
+
+        status = self.controller.status()
+        self.assertEqual(status["received_tick_count"], 2)
+        self.assertIsNotNone(status["last_received_at_utc"])
+
+    def test_debug_output_can_be_disabled(self):
+        self.controller.start_recording("quiet recording")
+        self.controller.set_debug(False)
+        self.controller.handle_message(
+            {"type": "ai_tick", "requestId": 1, "worldState": {"x": 1}}
+        )
+        self.controller.stop_recording()
+
+        self.assertEqual(self.debug_messages, [])
+        self.assertFalse(self.controller.status()["debug_enabled"])
 
     def test_manual_annotation_updates_action_columns(self):
         self.controller.start_recording("manual actions")

@@ -446,14 +446,19 @@ class RecorderController:
         store: RecordingStore,
         input_monitor: InputMonitor,
         no_op_action: Any = "NoOp",
+        debug_output: Callable[[str], None] = print,
     ):
         self.store = store
         self.input_monitor = input_monitor
         self.no_op_action = no_op_action
+        self.debug_output = debug_output
         self._lock = threading.RLock()
         self._session_id: int | None = None
         self._session_name: str | None = None
         self._sequence_number = 0
+        self._received_tick_count = 0
+        self._last_received_at_utc: str | None = None
+        self._debug_enabled = True
 
     def start_recording(self, name: str | None = None) -> int:
         with self._lock:
@@ -488,7 +493,49 @@ class RecorderController:
                 "session_id": self._session_id,
                 "session_name": self._session_name,
                 "frame_count": self._sequence_number,
+                "received_tick_count": self._received_tick_count,
+                "last_received_at_utc": self._last_received_at_utc,
+                "debug_enabled": self._debug_enabled,
             }
+
+    def set_debug(self, enabled: bool) -> None:
+        with self._lock:
+            self._debug_enabled = enabled
+
+    def _format_recorded_frame(
+        self,
+        *,
+        frame_id: int,
+        session_id: int,
+        sequence_number: int,
+        message: dict[str, Any],
+        input_snapshot: dict[str, Any],
+    ) -> str:
+        captured_action = {
+            "keys_down": [
+                key.get("key", key.get("vk"))
+                for key in input_snapshot.get("keys_down", [])
+            ],
+            "events": [
+                {
+                    "event": event.get("event"),
+                    "key": event.get("key", event.get("vk")),
+                }
+                for event in input_snapshot.get("events", [])
+            ],
+        }
+        if "worldState" in message:
+            state_text = _json(message["worldState"])
+        else:
+            state_text = "<missing worldState>"
+        return (
+            "\n[RECORDED ai_tick FROM JS BRIDGE]\n"
+            f"  session={session_id} sequence={sequence_number} "
+            f"sqlite_frame_id={frame_id} requestId={message.get('requestId')!r}\n"
+            f"  captured_action={_json(captured_action)}\n"
+            f"  sent_move={self.no_op_action!r}\n"
+            f"  worldState={state_text}"
+        )
 
     def handle_message(self, message: Any) -> dict[str, Any]:
         if not isinstance(message, dict):
@@ -515,17 +562,32 @@ class RecorderController:
             "serverTime": time.time(),
         }
 
+        debug_message = None
         with self._lock:
+            self._received_tick_count += 1
+            self._last_received_at_utc = _utc_iso(received_at_ns)
             if self._session_id is not None:
                 self._sequence_number += 1
-                self.store.insert_frame(
+                input_snapshot = self.input_monitor.snapshot()
+                frame_id = self.store.insert_frame(
                     session_id=self._session_id,
                     sequence_number=self._sequence_number,
                     received_at_ns=received_at_ns,
                     message=message,
-                    input_snapshot=self.input_monitor.snapshot(),
+                    input_snapshot=input_snapshot,
                     response=response,
                 )
+                if self._debug_enabled:
+                    debug_message = self._format_recorded_frame(
+                        frame_id=frame_id,
+                        session_id=self._session_id,
+                        sequence_number=self._sequence_number,
+                        message=message,
+                        input_snapshot=input_snapshot,
+                    )
+
+        if debug_message is not None:
+            self.debug_output(debug_message)
 
         return response
 
@@ -614,6 +676,7 @@ HELP_TEXT = """Commands:
   start [name]              start a new recording session
   stop                      stop the active session
   status                    show current recording status
+  debug on|off              enable or disable per-frame state/action output
   sessions [count]          show recent sessions
   frames [count]            show recent recorded frames and held keys
   annotate <frame> <action> set a frame's mapped action label/index
@@ -640,6 +703,11 @@ def _show_status(controller: RecorderController) -> None:
         )
     else:
         print("Recorder is idle; incoming ticks receive no-op but are not saved.")
+    print(
+        f"JS ai_ticks received: {status['received_tick_count']}; "
+        f"last received: {status['last_received_at_utc'] or 'never'}; "
+        f"per-frame debug: {'on' if status['debug_enabled'] else 'off'}"
+    )
 
 
 def _show_sessions(store: RecordingStore, limit: int) -> None:
@@ -693,6 +761,10 @@ def run_command_shell(
                 name = " ".join(arguments) or None
                 session_id = controller.start_recording(name)
                 print(f"Recording session {session_id} started.")
+                print(
+                    "Waiting for ai_tick messages from the JS bridge; each "
+                    "saved state/action will print below."
+                )
             elif command == "stop":
                 session_id, frame_count = controller.stop_recording()
                 print(
@@ -701,6 +773,15 @@ def run_command_shell(
                 )
             elif command == "status":
                 _show_status(controller)
+            elif command == "debug":
+                if len(arguments) != 1 or arguments[0].lower() not in {
+                    "on",
+                    "off",
+                }:
+                    raise ValueError("Usage: debug on|off")
+                enabled = arguments[0].lower() == "on"
+                controller.set_debug(enabled)
+                print(f"Per-frame debug output {'enabled' if enabled else 'disabled'}.")
             elif command == "sessions":
                 limit = _positive_count(arguments[0] if arguments else "", 20)
                 _show_sessions(store, limit)

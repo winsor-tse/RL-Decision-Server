@@ -239,6 +239,13 @@ Every incoming `ai_tick` is still answered immediately with `move: "NoOp"`;
 ticks are saved only while a session is active. The default database is
 `Offline/recordings.sqlite3` and can be changed with `--database PATH`.
 
+Per-frame debugging is enabled by default. After `start`, every saved tick
+prints confirmation that the JS bridge delivered it, its SQLite frame ID, the
+captured keys/events, the `NoOp` reply, and the complete `worldState`. Run
+`status` to see the total ticks received and the latest receive time. Use
+`debug off` when the per-tick output is no longer needed and `debug on` to
+enable it again.
+
 Each `frames` row contains the untouched payload, extracted `worldState`, exact
 reply, and a global Windows input snapshot. `input_json` stores the keys/buttons
 held at that tick plus down/up events since the preceding recorded tick. This
@@ -249,6 +256,8 @@ Useful recorder commands:
 
 ```text
 status
+debug on
+debug off
 sessions 20
 frames 10
 annotate <frame-id> <action-index-or-label>
