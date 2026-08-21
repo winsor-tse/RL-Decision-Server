@@ -1,3 +1,0 @@
-# SQLite support (`sqlite3`) and Windows input capture (`ctypes`) are included
-# with Python; they must not be installed as third-party pip packages.
-pyzmq>=27,<28
