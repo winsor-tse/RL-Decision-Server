@@ -1,8 +1,12 @@
-"""Record live game states and player input for offline reinforcement learning.
+"""Record player demonstrations from the live Yugen Saga socket.
 
-This module is an alternative ZeroMQ backend for the existing WebSocket bridge.
-It always replies to ``ai_tick`` messages with a configurable no-op action and
-only writes frames while a CLI recording session is active.
+The loop intentionally mirrors ``Env16.step``:
+
+1. receive one ``ai_tick`` with ``socket.recv_json()``;
+2. read ``message["worldState"]``;
+3. snapshot the player's current keyboard input;
+4. reply with the ``NoOp`` move;
+5. save the state/action pair to SQLite.
 """
 
 from __future__ import annotations
@@ -11,32 +15,27 @@ import argparse
 import ctypes
 import json
 import os
-import socket as network_socket
-import shlex
 import sqlite3
-import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any
+
+from Custom_enviornments.Load_env_config import load_env_config
 
 
-DEFAULT_BIND_URL = "tcp://127.0.0.1:5555"
+DEFAULT_BIND_URL = str(load_env_config()["ZMQ_BIND_URL"])
 DEFAULT_DATABASE = Path(__file__).with_name("recordings.sqlite3")
-DEFAULT_BRIDGE_HOST = "127.0.0.1"
-DEFAULT_BRIDGE_PORT = 8765
 
 
-def _utc_iso(timestamp_ns: int | None = None) -> str:
-    if timestamp_ns is None:
-        timestamp_ns = time.time_ns()
+def utc_iso(timestamp_ns: int) -> str:
     return datetime.fromtimestamp(
         timestamp_ns / 1_000_000_000,
         tz=timezone.utc,
     ).isoformat(timespec="microseconds")
 
 
-def _json(value: Any) -> str:
+def json_text(value: Any) -> str:
     return json.dumps(
         value,
         ensure_ascii=False,
@@ -45,37 +44,7 @@ def _json(value: Any) -> str:
     )
 
 
-class InputMonitor(Protocol):
-    def start(self) -> None: ...
-
-    def stop(self) -> None: ...
-
-    def reset(self) -> None: ...
-
-    def snapshot(self) -> dict[str, Any]: ...
-
-
-class NullInputMonitor:
-    """Input source used when states will be annotated manually."""
-
-    def start(self) -> None:
-        return None
-
-    def stop(self) -> None:
-        return None
-
-    def reset(self) -> None:
-        return None
-
-    def snapshot(self) -> dict[str, Any]:
-        return {
-            "capture_available": False,
-            "keys_down": [],
-            "events": [],
-        }
-
-
-_VK_NAMES = {
+VK_NAMES = {
     0x01: "MOUSE_LEFT",
     0x02: "MOUSE_RIGHT",
     0x04: "MOUSE_MIDDLE",
@@ -84,8 +53,6 @@ _VK_NAMES = {
     0x08: "BACKSPACE",
     0x09: "TAB",
     0x0D: "ENTER",
-    0x13: "PAUSE",
-    0x14: "CAPS_LOCK",
     0x1B: "ESCAPE",
     0x20: "SPACE",
     0x21: "PAGE_UP",
@@ -96,28 +63,8 @@ _VK_NAMES = {
     0x26: "ARROW_UP",
     0x27: "ARROW_RIGHT",
     0x28: "ARROW_DOWN",
-    0x2C: "PRINT_SCREEN",
     0x2D: "INSERT",
     0x2E: "DELETE",
-    0x5B: "LEFT_WINDOWS",
-    0x5C: "RIGHT_WINDOWS",
-    0x60: "NUMPAD_0",
-    0x61: "NUMPAD_1",
-    0x62: "NUMPAD_2",
-    0x63: "NUMPAD_3",
-    0x64: "NUMPAD_4",
-    0x65: "NUMPAD_5",
-    0x66: "NUMPAD_6",
-    0x67: "NUMPAD_7",
-    0x68: "NUMPAD_8",
-    0x69: "NUMPAD_9",
-    0x6A: "NUMPAD_MULTIPLY",
-    0x6B: "NUMPAD_ADD",
-    0x6D: "NUMPAD_SUBTRACT",
-    0x6E: "NUMPAD_DECIMAL",
-    0x6F: "NUMPAD_DIVIDE",
-    0x90: "NUM_LOCK",
-    0x91: "SCROLL_LOCK",
     0xA0: "SHIFT_LEFT",
     0xA1: "SHIFT_RIGHT",
     0xA2: "CTRL_LEFT",
@@ -143,14 +90,28 @@ def virtual_key_name(virtual_key: int) -> str:
         return chr(virtual_key)
     if 0x70 <= virtual_key <= 0x87:
         return f"F{virtual_key - 0x6F}"
-    return _VK_NAMES.get(virtual_key, f"VK_{virtual_key:02X}")
+    return VK_NAMES.get(virtual_key, f"VK_{virtual_key:02X}")
 
 
-class WindowsInputMonitor:
-    """Snapshot global Windows key/button state on each received game tick."""
+class NoInputCapture:
+    """Return an empty action when data will be labeled manually."""
+
+    def reset(self) -> None:
+        return None
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "capture_available": False,
+            "keys_down": [],
+            "events": [],
+        }
+
+
+class WindowsInputCapture:
+    """Snapshot globally held Windows keys when each state arrives."""
 
     # Generic SHIFT/CTRL/ALT duplicate their left/right virtual keys.
-    _VIRTUAL_KEYS = tuple(
+    VIRTUAL_KEYS = tuple(
         virtual_key
         for virtual_key in range(1, 255)
         if virtual_key not in (0x10, 0x11, 0x12)
@@ -159,709 +120,332 @@ class WindowsInputMonitor:
     def __init__(self):
         if os.name != "nt":
             raise RuntimeError(
-                "Global key capture is currently supported on Windows only. "
-                "Use --no-keyboard to record states for manual annotation."
+                "Global input capture is supported on Windows only. "
+                "Use --no-keyboard for manual action labeling."
             )
+        self.get_async_key_state = ctypes.windll.user32.GetAsyncKeyState
+        self.get_async_key_state.argtypes = [ctypes.c_int]
+        self.get_async_key_state.restype = ctypes.c_short
+        self.previous_keys: set[int] = set()
+        self.reset()
 
-        self._get_async_key_state = ctypes.windll.user32.GetAsyncKeyState
-        self._get_async_key_state.argtypes = [ctypes.c_int]
-        self._get_async_key_state.restype = ctypes.c_short
-        self._keys_down: set[int] = set()
-
-    def _read_key_states(self) -> dict[int, int]:
+    def read_states(self) -> dict[int, int]:
         return {
-            virtual_key: int(self._get_async_key_state(virtual_key))
-            for virtual_key in self._VIRTUAL_KEYS
+            virtual_key: int(self.get_async_key_state(virtual_key))
+            for virtual_key in self.VIRTUAL_KEYS
         }
 
     @staticmethod
-    def _key(virtual_key: int) -> dict[str, Any]:
+    def describe_key(virtual_key: int) -> dict[str, Any]:
         return {
             "key": virtual_key_name(virtual_key),
             "vk": virtual_key,
         }
 
-    def start(self) -> None:
-        self.reset()
-
     def reset(self) -> None:
-        key_states = self._read_key_states()
-        self._keys_down = {
+        states = self.read_states()
+        self.previous_keys = {
             virtual_key
-            for virtual_key, state in key_states.items()
+            for virtual_key, state in states.items()
             if state & 0x8000
         }
 
     def snapshot(self) -> dict[str, Any]:
-        key_states = self._read_key_states()
+        states = self.read_states()
         current_keys = {
             virtual_key
-            for virtual_key, state in key_states.items()
+            for virtual_key, state in states.items()
             if state & 0x8000
         }
-        # The low bit reports a press since the preceding GetAsyncKeyState call,
-        # which retains most taps that start and finish between game ticks.
-        pressed = (current_keys - self._keys_down) | {
+        pressed_keys = (current_keys - self.previous_keys) | {
             virtual_key
-            for virtual_key, state in key_states.items()
+            for virtual_key, state in states.items()
             if state & 0x0001
         }
-        released = self._keys_down - current_keys
+        released_keys = self.previous_keys - current_keys
         timestamp_ns = time.time_ns()
+
         events = [
             {
-                **self._key(virtual_key),
+                **self.describe_key(virtual_key),
                 "event": "key_down",
                 "timestamp_unix_ns": timestamp_ns,
             }
-            for virtual_key in sorted(pressed)
+            for virtual_key in sorted(pressed_keys)
         ]
         events.extend(
             {
-                **self._key(virtual_key),
+                **self.describe_key(virtual_key),
                 "event": "key_up",
                 "timestamp_unix_ns": timestamp_ns,
             }
-            for virtual_key in sorted(released)
+            for virtual_key in sorted(released_keys)
         )
-        self._keys_down = current_keys
+        self.previous_keys = current_keys
+
         return {
             "capture_available": True,
             "keys_down": [
-                self._key(virtual_key)
+                self.describe_key(virtual_key)
                 for virtual_key in sorted(current_keys)
             ],
             "events": events,
         }
 
-    def stop(self) -> None:
-        return None
 
+class RecordingDatabase:
+    """SQLite storage used by the synchronous recording loop."""
 
-class RecordingStore:
-    """Thread-safe SQLite storage for recording sessions and frames."""
-
-    def __init__(self, database_path: str | Path):
-        self.path = Path(database_path).expanduser().resolve()
+    def __init__(self, path: str | Path):
+        self.path = Path(path).expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.RLock()
-        self._connection = sqlite3.connect(
-            self.path,
-            check_same_thread=False,
-            timeout=10,
+        self.connection = sqlite3.connect(self.path, timeout=10)
+        self.connection.execute("PRAGMA journal_mode = WAL")
+        self.connection.execute("PRAGMA foreign_keys = ON")
+        self.connection.execute("PRAGMA busy_timeout = 10000")
+        self.connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS recording_sessions (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                started_at_utc TEXT NOT NULL,
+                started_at_unix_ns INTEGER NOT NULL,
+                ended_at_utc TEXT,
+                ended_at_unix_ns INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS frames (
+                id INTEGER PRIMARY KEY,
+                session_id INTEGER NOT NULL,
+                sequence_number INTEGER NOT NULL,
+                received_at_utc TEXT NOT NULL,
+                received_at_unix_ns INTEGER NOT NULL,
+                request_id_json TEXT,
+                payload_json TEXT NOT NULL,
+                world_state_json TEXT NOT NULL,
+                input_json TEXT NOT NULL,
+                action_label TEXT,
+                action_source TEXT,
+                response_json TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES recording_sessions(id),
+                UNIQUE (session_id, sequence_number)
+            );
+
+            CREATE INDEX IF NOT EXISTS frames_session_id_index
+            ON frames(session_id, sequence_number);
+
+            PRAGMA user_version = 1;
+            """
         )
-        self._connection.row_factory = sqlite3.Row
-        with self._lock:
-            self._connection.execute("PRAGMA journal_mode = WAL")
-            self._connection.execute("PRAGMA foreign_keys = ON")
-            self._connection.execute("PRAGMA busy_timeout = 10000")
-            self._connection.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS recording_sessions (
-                    id INTEGER PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    started_at_utc TEXT NOT NULL,
-                    started_at_unix_ns INTEGER NOT NULL,
-                    ended_at_utc TEXT,
-                    ended_at_unix_ns INTEGER
-                );
+        self.connection.commit()
 
-                CREATE TABLE IF NOT EXISTS frames (
-                    id INTEGER PRIMARY KEY,
-                    session_id INTEGER NOT NULL,
-                    sequence_number INTEGER NOT NULL,
-                    received_at_utc TEXT NOT NULL,
-                    received_at_unix_ns INTEGER NOT NULL,
-                    request_id_json TEXT,
-                    payload_json TEXT NOT NULL,
-                    world_state_json TEXT,
-                    input_json TEXT NOT NULL,
-                    action_label TEXT,
-                    action_source TEXT,
-                    response_json TEXT NOT NULL,
-                    FOREIGN KEY (session_id) REFERENCES recording_sessions(id),
-                    UNIQUE (session_id, sequence_number)
-                );
-
-                CREATE INDEX IF NOT EXISTS frames_session_id_index
-                ON frames(session_id, sequence_number);
-
-                PRAGMA user_version = 1;
-                """
-            )
-            self._connection.commit()
-
-    def create_session(self, name: str) -> int:
+    def start_session(self, name: str) -> int:
         timestamp_ns = time.time_ns()
-        with self._lock:
-            cursor = self._connection.execute(
-                """
-                INSERT INTO recording_sessions (
-                    name, started_at_utc, started_at_unix_ns
-                ) VALUES (?, ?, ?)
-                """,
-                (name, _utc_iso(timestamp_ns), timestamp_ns),
-            )
-            self._connection.commit()
-            return int(cursor.lastrowid)
+        cursor = self.connection.execute(
+            """
+            INSERT INTO recording_sessions (
+                name, started_at_utc, started_at_unix_ns
+            ) VALUES (?, ?, ?)
+            """,
+            (name, utc_iso(timestamp_ns), timestamp_ns),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
 
     def finish_session(self, session_id: int) -> None:
         timestamp_ns = time.time_ns()
-        with self._lock:
-            self._connection.execute(
-                """
-                UPDATE recording_sessions
-                SET ended_at_utc = ?, ended_at_unix_ns = ?
-                WHERE id = ? AND ended_at_utc IS NULL
-                """,
-                (_utc_iso(timestamp_ns), timestamp_ns, session_id),
-            )
-            self._connection.commit()
+        self.connection.execute(
+            """
+            UPDATE recording_sessions
+            SET ended_at_utc = ?, ended_at_unix_ns = ?
+            WHERE id = ? AND ended_at_utc IS NULL
+            """,
+            (utc_iso(timestamp_ns), timestamp_ns, session_id),
+        )
+        self.connection.commit()
 
-    def insert_frame(
+    def save_frame(
         self,
         *,
         session_id: int,
         sequence_number: int,
         received_at_ns: int,
         message: dict[str, Any],
-        input_snapshot: dict[str, Any],
+        world_state: Any,
+        player_input: dict[str, Any],
         response: dict[str, Any],
     ) -> int:
         request_id = message.get("requestId")
-        world_state = message.get("worldState")
-        with self._lock:
-            cursor = self._connection.execute(
-                """
-                INSERT INTO frames (
-                    session_id,
-                    sequence_number,
-                    received_at_utc,
-                    received_at_unix_ns,
-                    request_id_json,
-                    payload_json,
-                    world_state_json,
-                    input_json,
-                    response_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    session_id,
-                    sequence_number,
-                    _utc_iso(received_at_ns),
-                    received_at_ns,
-                    _json(request_id) if request_id is not None else None,
-                    _json(message),
-                    _json(world_state) if world_state is not None else None,
-                    _json(input_snapshot),
-                    _json(response),
-                ),
-            )
-            self._connection.commit()
-            return int(cursor.lastrowid)
-
-    def annotate_frame(self, frame_id: int, action_label: str) -> None:
-        with self._lock:
-            cursor = self._connection.execute(
-                """
-                UPDATE frames
-                SET action_label = ?, action_source = 'manual'
-                WHERE id = ?
-                """,
-                (action_label, frame_id),
-            )
-            if cursor.rowcount != 1:
-                raise ValueError(f"Frame {frame_id} does not exist.")
-            self._connection.commit()
-
-    def count_frames(self, session_id: int) -> int:
-        with self._lock:
-            row = self._connection.execute(
-                "SELECT COUNT(*) AS count FROM frames WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()
-        return int(row["count"])
-
-    def list_sessions(self, limit: int = 20) -> list[sqlite3.Row]:
-        with self._lock:
-            return list(
-                self._connection.execute(
-                    """
-                    SELECT
-                        recording_sessions.*,
-                        COUNT(frames.id) AS frame_count
-                    FROM recording_sessions
-                    LEFT JOIN frames ON frames.session_id = recording_sessions.id
-                    GROUP BY recording_sessions.id
-                    ORDER BY recording_sessions.id DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                ).fetchall()
-            )
-
-    def list_recent_frames(self, limit: int = 10) -> list[sqlite3.Row]:
-        with self._lock:
-            return list(
-                self._connection.execute(
-                    """
-                    SELECT
-                        id,
-                        session_id,
-                        sequence_number,
-                        received_at_utc,
-                        input_json,
-                        action_label
-                    FROM frames
-                    ORDER BY id DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                ).fetchall()
-            )
+        cursor = self.connection.execute(
+            """
+            INSERT INTO frames (
+                session_id,
+                sequence_number,
+                received_at_utc,
+                received_at_unix_ns,
+                request_id_json,
+                payload_json,
+                world_state_json,
+                input_json,
+                response_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                sequence_number,
+                utc_iso(received_at_ns),
+                received_at_ns,
+                json_text(request_id) if request_id is not None else None,
+                json_text(message),
+                json_text(world_state),
+                json_text(player_input),
+                json_text(response),
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
 
     def close(self) -> None:
-        with self._lock:
-            self._connection.close()
+        self.connection.close()
 
 
-class RecorderController:
-    """Coordinate recording state, input snapshots, and database writes."""
+class PlayerRecorder:
+    """Receive and record one state/action pair per game ``ai_tick``."""
 
     def __init__(
         self,
-        store: RecordingStore,
-        input_monitor: InputMonitor,
+        database_path: str | Path,
+        bind_url: str = DEFAULT_BIND_URL,
         no_op_action: Any = "NoOp",
-        debug_output: Callable[[str], None] = print,
+        input_capture: Any | None = None,
+        socket: Any | None = None,
     ):
-        self.store = store
-        self.input_monitor = input_monitor
+        self.database = RecordingDatabase(database_path)
         self.no_op_action = no_op_action
-        self.debug_output = debug_output
-        self._lock = threading.RLock()
-        self._session_id: int | None = None
-        self._session_name: str | None = None
-        self._sequence_number = 0
-        self._received_tick_count = 0
-        self._last_received_at_utc: str | None = None
-        self._debug_enabled = True
+        self.input_capture = input_capture or WindowsInputCapture()
+        self.session_id: int | None = None
+        self.sequence_number = 0
+        self.owns_socket = socket is None
 
-    def start_recording(self, name: str | None = None) -> int:
-        with self._lock:
-            if self._session_id is not None:
-                raise RuntimeError(
-                    f"Session {self._session_id} is already recording."
-                )
-            if not name:
-                name = datetime.now().strftime("recording-%Y%m%d-%H%M%S")
-            self.input_monitor.reset()
-            self._session_id = self.store.create_session(name)
-            self._session_name = name
-            self._sequence_number = 0
-            return self._session_id
+        if socket is None:
+            import zmq
 
-    def stop_recording(self) -> tuple[int, int]:
-        with self._lock:
-            if self._session_id is None:
-                raise RuntimeError("No recording is active.")
-            session_id = self._session_id
-            frame_count = self._sequence_number
-            self.store.finish_session(session_id)
-            self._session_id = None
-            self._session_name = None
-            self._sequence_number = 0
-            return session_id, frame_count
-
-    def status(self) -> dict[str, Any]:
-        with self._lock:
-            return {
-                "recording": self._session_id is not None,
-                "session_id": self._session_id,
-                "session_name": self._session_name,
-                "frame_count": self._sequence_number,
-                "received_tick_count": self._received_tick_count,
-                "last_received_at_utc": self._last_received_at_utc,
-                "debug_enabled": self._debug_enabled,
-            }
-
-    def set_debug(self, enabled: bool) -> None:
-        with self._lock:
-            self._debug_enabled = enabled
-
-    def _format_recorded_frame(
-        self,
-        *,
-        frame_id: int,
-        session_id: int,
-        sequence_number: int,
-        message: dict[str, Any],
-        input_snapshot: dict[str, Any],
-    ) -> str:
-        captured_action = {
-            "keys_down": [
-                key.get("key", key.get("vk"))
-                for key in input_snapshot.get("keys_down", [])
-            ],
-            "events": [
-                {
-                    "event": event.get("event"),
-                    "key": event.get("key", event.get("vk")),
-                }
-                for event in input_snapshot.get("events", [])
-            ],
-        }
-        if "worldState" in message:
-            state_text = _json(message["worldState"])
+            self.context = zmq.Context.instance()
+            self.socket = self.context.socket(zmq.REP)
+            self.socket.setsockopt(zmq.LINGER, 0)
+            self.socket.bind(bind_url)
         else:
-            state_text = "<missing worldState>"
-        return (
-            "\n[RECORDED ai_tick FROM JS BRIDGE]\n"
-            f"  session={session_id} sequence={sequence_number} "
-            f"sqlite_frame_id={frame_id} requestId={message.get('requestId')!r}\n"
-            f"  captured_action={_json(captured_action)}\n"
-            f"  sent_move={self.no_op_action!r}\n"
-            f"  worldState={state_text}"
-        )
+            self.context = None
+            self.socket = socket
 
-    def handle_message(self, message: Any) -> dict[str, Any]:
+    def build_response(self, message: Any) -> dict[str, Any]:
         if not isinstance(message, dict):
             return {
                 "type": "error",
                 "requestId": None,
                 "error": "ZeroMQ payload must be a JSON object.",
             }
-
         message_type = message.get("type")
-        if message_type != "ai_tick":
+        if message_type == "ai_tick":
             return {
-                "type": "error",
+                "type": "ai_result",
                 "requestId": message.get("requestId"),
-                "error": f"Unknown message type: {message_type}",
+                "move": self.no_op_action,
+                "reset": False,
+                "serverTime": time.time(),
             }
-
-        received_at_ns = time.time_ns()
-        response = {
-            "type": "ai_result",
-            "requestId": message.get("requestId"),
-            "move": self.no_op_action,
-            "reset": False,
-            "serverTime": time.time(),
-        }
-
-        debug_message = None
-        with self._lock:
-            self._received_tick_count += 1
-            self._last_received_at_utc = _utc_iso(received_at_ns)
-            if self._session_id is not None:
-                self._sequence_number += 1
-                input_snapshot = self.input_monitor.snapshot()
-                frame_id = self.store.insert_frame(
-                    session_id=self._session_id,
-                    sequence_number=self._sequence_number,
-                    received_at_ns=received_at_ns,
-                    message=message,
-                    input_snapshot=input_snapshot,
-                    response=response,
-                )
-                if self._debug_enabled:
-                    debug_message = self._format_recorded_frame(
-                        frame_id=frame_id,
-                        session_id=self._session_id,
-                        sequence_number=self._sequence_number,
-                        message=message,
-                        input_snapshot=input_snapshot,
-                    )
-
-        if debug_message is not None:
-            self.debug_output(debug_message)
-
-        return response
-
-
-class RecorderServer:
-    """ZeroMQ REP worker used while the main thread reads CLI commands.
-
-    ``recv_json()`` is blocking, so one worker is required for ``status`` and
-    ``stop`` to remain usable while the recorder waits for game ticks.
-    """
-
-    def __init__(
-        self,
-        bind_url: str,
-        controller: RecorderController,
-        report_error: Callable[[str], None] = print,
-    ):
-        self.bind_url = bind_url
-        self.controller = controller
-        self.report_error = report_error
-        self._stop_event = threading.Event()
-        self._ready_event = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._startup_error: BaseException | None = None
-        self._runtime_error: BaseException | None = None
-
-    def start(self, timeout_seconds: float = 5) -> None:
-        self._stop_event.clear()
-        self._ready_event.clear()
-        self._startup_error = None
-        self._runtime_error = None
-        self._thread = threading.Thread(
-            target=self._serve,
-            name="offline-zmq-recorder",
-            daemon=True,
-        )
-        self._thread.start()
-        if not self._ready_event.wait(timeout_seconds):
-            raise TimeoutError(f"Timed out binding recorder to {self.bind_url}.")
-        if self._startup_error is not None:
-            raise RuntimeError(
-                f"Could not bind recorder to {self.bind_url}: "
-                f"{self._startup_error}"
-            ) from self._startup_error
-
-    def _serve(self) -> None:
-        socket = None
-        try:
-            import zmq
-
-            context = zmq.Context.instance()
-            socket = context.socket(zmq.REP)
-            socket.setsockopt(zmq.LINGER, 0)
-            socket.bind(self.bind_url)
-            poller = zmq.Poller()
-            poller.register(socket, zmq.POLLIN)
-            self._ready_event.set()
-
-            while not self._stop_event.is_set():
-                events = dict(poller.poll(timeout=100))
-                if socket not in events:
-                    continue
-                try:
-                    message = socket.recv_json()
-                    response = self.controller.handle_message(message)
-                except Exception as error:
-                    self.report_error(f"Recorder error: {error}")
-                    response = {
-                        "type": "ai_result",
-                        "requestId": None,
-                        "move": self.controller.no_op_action,
-                        "reset": False,
-                        "serverTime": time.time(),
-                        "error": str(error),
-                    }
-                socket.send_json(response)
-        except BaseException as error:
-            if self._ready_event.is_set():
-                self._runtime_error = error
-                self.report_error(f"\n[ZMQ BACKEND STOPPED] {error}")
-            else:
-                self._startup_error = error
-            self._ready_event.set()
-        finally:
-            if socket is not None:
-                socket.close(linger=0)
-
-    def stop(self) -> None:
-        self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=2)
-        self._thread = None
-
-    def status(self) -> dict[str, Any]:
         return {
-            "listening": self._thread is not None and self._thread.is_alive(),
-            "bind_url": self.bind_url,
-            "error": str(self._runtime_error) if self._runtime_error else None,
+            "type": "error",
+            "requestId": message.get("requestId"),
+            "error": f"Unknown message type: {message_type}",
         }
 
+    def start(self, session_name: str) -> int:
+        if self.session_id is not None:
+            raise RuntimeError("A recording session is already active.")
+        self.input_capture.reset()
+        self.session_id = self.database.start_session(session_name)
+        self.sequence_number = 0
+        return self.session_id
 
-def bridge_is_listening(
-    host: str = DEFAULT_BRIDGE_HOST,
-    port: int = DEFAULT_BRIDGE_PORT,
-) -> bool:
-    """Return whether another process owns the WebSocket bridge port."""
+    def stop(self) -> tuple[int, int]:
+        if self.session_id is None:
+            raise RuntimeError("No recording session is active.")
+        session_id = self.session_id
+        frame_count = self.sequence_number
+        self.database.finish_session(session_id)
+        self.session_id = None
+        return session_id, frame_count
 
-    probe = network_socket.socket(network_socket.AF_INET, network_socket.SOCK_STREAM)
-    try:
-        probe.bind((host, port))
-    except OSError:
-        return True
-    finally:
-        probe.close()
-    return False
+    def record_next(self) -> int | None:
+        """Block for one socket message, reply, and record an ``ai_tick``."""
+        if self.session_id is None:
+            raise RuntimeError("Start a recording session before receiving ticks.")
 
+        # This is the same receive pattern used by Env16.step().
+        message = self.socket.recv_json()
+        received_at_ns = time.time_ns()
+        response = self.build_response(message)
 
-def _show_connection_status(server: RecorderServer) -> None:
-    server_status = server.status()
-    if server_status["listening"]:
-        print(f"ZMQ recorder backend: LISTENING at {server_status['bind_url']}")
-    else:
-        detail = f" ({server_status['error']})" if server_status["error"] else ""
-        print(f"ZMQ recorder backend: NOT RUNNING{detail}")
+        if not isinstance(message, dict) or message.get("type") != "ai_tick":
+            self.socket.send_json(response)
+            print(f"Ignored non-ai_tick payload: {message!r}", flush=True)
+            return None
 
-    bridge_url = f"ws://{DEFAULT_BRIDGE_HOST}:{DEFAULT_BRIDGE_PORT}"
-    if bridge_is_listening():
-        print(f"WebSocket bridge: DETECTED at {bridge_url}")
-        print(
-            "Check the bridge terminal for 'Chrome extension connected' if "
-            "ai_tick count remains zero."
+        world_state = message.get("worldState", {})
+        player_input = self.input_capture.snapshot()
+
+        # REP sockets must reply after every successful receive.
+        self.socket.send_json(response)
+
+        self.sequence_number += 1
+        frame_id = self.database.save_frame(
+            session_id=self.session_id,
+            sequence_number=self.sequence_number,
+            received_at_ns=received_at_ns,
+            message=message,
+            world_state=world_state,
+            player_input=player_input,
+            response=response,
         )
-    else:
-        print(f"WebSocket bridge: NOT DETECTED at {bridge_url}")
         print(
-            "Start it in another terminal with: "
-            "python -m Automation.Bridge.ws_zmq_bridge"
+            f"\n[RECORDED] session={self.session_id} "
+            f"frame={frame_id} sequence={self.sequence_number}",
+            flush=True,
         )
+        print(f"  action={json_text(player_input)}", flush=True)
+        print(f"  state={json_text(world_state)}", flush=True)
+        print(f"  response={json_text(response)}", flush=True)
+        return frame_id
 
-
-HELP_TEXT = """Commands:
-  start [name]              start a new recording session
-  stop                      stop the active session
-  status                    show current recording status
-  debug on|off              enable or disable per-frame state/action output
-  sessions [count]          show recent sessions
-  frames [count]            show recent recorded frames and held keys
-  annotate <frame> <action> set a frame's mapped action label/index
-  help                      show this command list
-  quit                      stop recording and exit
-"""
-
-
-def _positive_count(value: str, default: int) -> int:
-    if not value:
-        return default
-    count = int(value)
-    if count <= 0:
-        raise ValueError("Count must be greater than zero.")
-    return count
-
-
-def _show_status(controller: RecorderController) -> None:
-    status = controller.status()
-    if status["recording"]:
-        print(
-            f"Recording session {status['session_id']} "
-            f"({status['session_name']!r}): {status['frame_count']} frames"
-        )
-    else:
-        print("Recorder is idle; incoming ticks receive no-op but are not saved.")
-    print(
-        f"JS ai_ticks received: {status['received_tick_count']}; "
-        f"last received: {status['last_received_at_utc'] or 'never'}; "
-        f"per-frame debug: {'on' if status['debug_enabled'] else 'off'}"
-    )
-    if status["received_tick_count"] == 0:
-        print(
-            "NO ai_tick has reached the recorder. Look above for "
-            "'[JS CONNECTED]' and '[JS MESSAGE]' bridge logs."
-        )
-
-
-def _show_sessions(store: RecordingStore, limit: int) -> None:
-    rows = store.list_sessions(limit)
-    if not rows:
-        print("No recording sessions yet.")
-        return
-    for row in rows:
-        state = "recording" if row["ended_at_utc"] is None else "stopped"
-        print(
-            f"{row['id']:>5}  {row['frame_count']:>7} frames  "
-            f"{state:<9}  {row['name']}"
-        )
-
-
-def _show_frames(store: RecordingStore, limit: int) -> None:
-    rows = store.list_recent_frames(limit)
-    if not rows:
-        print("No frames recorded yet.")
-        return
-    for row in reversed(rows):
-        input_snapshot = json.loads(row["input_json"])
-        keys = "+".join(key["key"] for key in input_snapshot["keys_down"])
-        print(
-            f"frame={row['id']} session={row['session_id']} "
-            f"seq={row['sequence_number']} keys={keys or '-'} "
-            f"action={row['action_label'] or '-'}"
-        )
-
-
-def run_command_shell(
-    controller: RecorderController,
-    store: RecordingStore,
-    server: RecorderServer,
-) -> None:
-    print(HELP_TEXT)
-    while True:
-        try:
-            raw_command = input("recorder> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return
-        if not raw_command:
-            continue
+    def run(self, session_name: str) -> int:
+        session_id = self.start(session_name)
+        print(f"Recording session {session_id} ({session_name!r}).", flush=True)
+        print("Waiting inside socket.recv_json() for ai_tick...", flush=True)
+        print("Press Ctrl+C to stop recording.", flush=True)
 
         try:
-            parts = shlex.split(raw_command)
-            command = parts[0].lower()
-            arguments = parts[1:]
+            while True:
+                self.record_next()
+        except KeyboardInterrupt:
+            print("\nStopping recording...", flush=True)
+        finally:
+            stopped_session, frame_count = self.stop()
+            print(
+                f"Session {stopped_session} saved {frame_count} frames.",
+                flush=True,
+            )
+        return frame_count
 
-            if command == "start":
-                name = " ".join(arguments) or None
-                session_id = controller.start_recording(name)
-                print(f"Recording session {session_id} started.")
-                print(
-                    "Waiting for ai_tick messages from the JS bridge; each "
-                    "saved state/action will print below."
-                )
-                print(
-                    "The plugin is connected only after '[JS CONNECTED]' "
-                    "appears, and it is sending state only after "
-                    "'[JS MESSAGE] type=' appears."
-                )
-                _show_connection_status(server)
-            elif command == "stop":
-                session_id, frame_count = controller.stop_recording()
-                print(
-                    f"Recording session {session_id} stopped "
-                    f"with {frame_count} frames."
-                )
-            elif command == "status":
-                _show_status(controller)
-                _show_connection_status(server)
-            elif command == "debug":
-                if len(arguments) != 1 or arguments[0].lower() not in {
-                    "on",
-                    "off",
-                }:
-                    raise ValueError("Usage: debug on|off")
-                enabled = arguments[0].lower() == "on"
-                controller.set_debug(enabled)
-                print(f"Per-frame debug output {'enabled' if enabled else 'disabled'}.")
-            elif command == "sessions":
-                limit = _positive_count(arguments[0] if arguments else "", 20)
-                _show_sessions(store, limit)
-            elif command == "frames":
-                limit = _positive_count(arguments[0] if arguments else "", 10)
-                _show_frames(store, limit)
-            elif command == "annotate":
-                if len(arguments) < 2:
-                    raise ValueError("Usage: annotate <frame> <action>")
-                frame_id = int(arguments[0])
-                action_label = " ".join(arguments[1:])
-                store.annotate_frame(frame_id, action_label)
-                print(f"Frame {frame_id} action set to {action_label!r}.")
-            elif command == "help":
-                print(HELP_TEXT)
-            elif command in {"quit", "exit"}:
-                return
-            else:
-                print(f"Unknown command: {command}. Enter 'help' for commands.")
-        except (RuntimeError, ValueError) as error:
-            print(f"Error: {error}")
+    def close(self) -> None:
+        if self.session_id is not None:
+            self.stop()
+        if self.owns_socket:
+            self.socket.close(linger=0)
+        self.database.close()
 
 
-def _parse_no_op_action(value: str) -> Any:
+def parse_no_op_action(value: str) -> Any:
     try:
         return json.loads(value)
     except json.JSONDecodeError:
@@ -870,7 +454,7 @@ def _parse_no_op_action(value: str) -> Any:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Record full game states and global player input to SQLite."
+        description="Record live state/action pairs to SQLite."
     )
     parser.add_argument(
         "--database",
@@ -885,49 +469,52 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--no-op-action",
-        type=_parse_no_op_action,
+        type=parse_no_op_action,
         default="NoOp",
-        help='JSON value returned as move on every tick (default: "NoOp")',
+        help='JSON value returned as move (default: "NoOp")',
+    )
+    parser.add_argument(
+        "--session-name",
+        help="Start immediately with this session name instead of prompting",
     )
     parser.add_argument(
         "--no-keyboard",
         action="store_true",
-        help="Disable global input capture and annotate actions manually",
+        help="Record empty inputs for manual action labeling",
     )
     return parser.parse_args(argv)
 
 
+def default_session_name() -> str:
+    return datetime.now().strftime("recording-%Y%m%d-%H%M%S")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    input_capture = NoInputCapture() if args.no_keyboard else WindowsInputCapture()
+    recorder = PlayerRecorder(
+        database_path=args.database,
+        bind_url=args.bind_url,
+        no_op_action=args.no_op_action,
+        input_capture=input_capture,
+    )
 
-    input_monitor: InputMonitor
-    if args.no_keyboard:
-        input_monitor = NullInputMonitor()
-    else:
-        input_monitor = WindowsInputMonitor()
-
-    store = RecordingStore(args.database)
-    controller = RecorderController(store, input_monitor, args.no_op_action)
-    server = RecorderServer(args.bind_url, controller)
-
-    input_monitor.start()
+    print(f"Recorder bound to {args.bind_url}", flush=True)
+    print(f"SQLite database: {recorder.database.path}", flush=True)
     try:
-        server.start()
-        print(f"Recorder backend listening at {args.bind_url}")
-        print(f"SQLite database: {store.path}")
-        print(f"No-op move sent to the game: {args.no_op_action!r}")
-        _show_connection_status(server)
-        run_command_shell(controller, store, server)
+        session_name = args.session_name
+        if not session_name:
+            suggested_name = default_session_name()
+            entered_name = input(
+                f"Recording name [{suggested_name}] "
+                "(press Enter to start): "
+            ).strip()
+            session_name = entered_name or suggested_name
+        recorder.run(session_name)
+    except KeyboardInterrupt:
+        print("\nRecorder cancelled.", flush=True)
     finally:
-        if controller.status()["recording"]:
-            session_id, frame_count = controller.stop_recording()
-            print(
-                f"Recording session {session_id} closed with "
-                f"{frame_count} frames."
-            )
-        server.stop()
-        input_monitor.stop()
-        store.close()
+        recorder.close()
     return 0
 
 

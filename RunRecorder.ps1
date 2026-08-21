@@ -46,8 +46,8 @@ try {
 
 $ProcessExitCode = 1
 try {
-    # Run directly so Offline.record_player retains an interactive stdin and
-    # displays its non-newline `recorder>` prompt immediately.
+    # Run directly so Offline.record_player retains interactive stdin for its
+    # recording-name prompt and Ctrl+C shutdown.
     & $ProjectPython @PythonArguments
     $ProcessExitCode = $LASTEXITCODE
     if ($null -eq $ProcessExitCode) {

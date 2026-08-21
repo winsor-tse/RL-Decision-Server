@@ -241,47 +241,42 @@ bridge. Recording output is saved under `logs/recording_*.txt` when the
 PowerShell wrapper is used. Manual two-terminal startup remains available for
 debugging.
 
-At the `recorder>` prompt, use `start [name]` and `stop` to delimit recordings.
-Every incoming `ai_tick` is still answered immediately with `move: "NoOp"`;
-ticks are saved only while a session is active. The default database is
-`Offline/recordings.sqlite3` and can be changed with `--database PATH`.
+Enter a recording name at the prompt (or press Enter for the generated name).
+Recording starts immediately and continues until `Ctrl+C`. There is no command
+shell or background server: the main loop directly performs the same sequence
+as `Env16.step`:
 
-Per-frame debugging is enabled by default. After `start`, every saved tick
-prints confirmation that the JS bridge delivered it, its SQLite frame ID, the
-captured keys/events, the `NoOp` reply, and the complete `worldState`. Run
-`status` to see the total ticks received, latest receive time, ZMQ backend
-health, and whether the WebSocket bridge is listening. If the bridge is not
-detected, start `python -m Automation.Bridge.ws_zmq_bridge` in a second
-terminal. If it is detected but the tick count remains zero, check that
-terminal for `[JS CONNECTED]` followed by `[JS MESSAGE] type='ai_tick'`. A
-missing `[JS CONNECTED]` means the browser plugin has not connected to
-`ws://127.0.0.1:8765`; a connection without messages means the plugin is not
-emitting its tick payload. Use `debug off` when the per-tick output is no longer
-needed and `debug on` to enable it again.
+```text
+socket.recv_json()
+world_state = message.get("worldState", {})
+capture current player input
+socket.send_json({"move": "NoOp", ...})
+insert the state/action row into SQLite
+```
+
+Every saved tick prints its SQLite frame ID, captured input, complete
+`worldState`, and exact response. The default database is
+`Offline/recordings.sqlite3` and can be changed with `--database PATH`.
 
 Each `frames` row contains the untouched payload, extracted `worldState`, exact
 reply, and a global Windows input snapshot. `input_json` stores the keys/buttons
 held at that tick plus down/up events since the preceding recorded tick. This
-keeps fast taps that happen between game ticks. Virtual-key numbers are retained
-alongside readable names so they can be mapped to environment actions later.
-
-Useful recorder commands:
-
-```text
-status
-debug on
-debug off
-sessions 20
-frames 10
-annotate <frame-id> <action-index-or-label>
-quit
-```
+captures held actions and transitions observed between state snapshots.
+Virtual-key numbers are retained alongside readable names so they can be mapped
+to environment actions later.
 
 Use `--no-keyboard` to collect state-only data for manual annotation, or
 `--no-op-action VALUE` if the JS no-op value changes. SQLite support comes from
 Python's standard-library `sqlite3` module, so it requires no separate pip
 package. Only one backend can bind port 5555, so do not run a trainer/evaluator
 at the same time as the recorder.
+
+To skip the name prompt, configure or override the recorder command with
+`--session-name`, for example:
+
+```powershell
+.\RunRecorder.ps1 -Command "python -m Offline.record_player --session-name demo-1"
+```
 
 Both PPO trainers use one live `Env16` instance directly because the external
 simulator owns a single ZMQ request stream. They do not use `SyncVectorEnv` or

@@ -61,6 +61,8 @@ Start the WebSocket bridge and offline recorder together with:
 ```
 
 The equivalent direct Python command is `python -m Automation.record`.
+Enter a session name when prompted; recording then blocks directly on
+`socket.recv_json()` until `Ctrl+C` is pressed.
 
 If TensorBoard is missing when running `Training/DQN_server.py`, install it into the same active environment:
 
