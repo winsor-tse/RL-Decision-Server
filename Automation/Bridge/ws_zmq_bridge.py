@@ -129,13 +129,19 @@ async def send_to_zmq_backend(message: Dict[str, Any]) -> Dict[str, Any]:
 
 async def handle_websocket(websocket):
     client = websocket.remote_address
-    logging.info("Chrome extension connected: %s", client)
+    logging.info("[JS CONNECTED] Chrome extension client=%s", client)
 
     try:
         async for raw_message in websocket:
+            logging.info(
+                "[JS MESSAGE] client=%s bytes=%s",
+                client,
+                len(raw_message),
+            )
             try:
                 message = json.loads(raw_message)
             except json.JSONDecodeError:
+                logging.warning("[JS MESSAGE] Invalid JSON from client=%s", client)
                 await websocket.send(json.dumps({
                     "requestId": None,
                     "move": None,
@@ -146,6 +152,12 @@ async def handle_websocket(websocket):
 
             request_id = message.get("requestId")
             message_type = message.get("type")
+            logging.info(
+                "[JS MESSAGE] type=%r requestId=%r hasWorldState=%s",
+                message_type,
+                request_id,
+                "worldState" in message,
+            )
 
             if message_type == "ping":
                 await websocket.send(json.dumps({
@@ -155,6 +167,10 @@ async def handle_websocket(websocket):
                 continue
 
             if message_type != "ai_tick":
+                logging.warning(
+                    "[JS MESSAGE REJECTED] expected='ai_tick' received=%r",
+                    message_type,
+                )
                 await websocket.send(json.dumps({
                     "requestId": request_id,
                     "move": None,
@@ -168,7 +184,7 @@ async def handle_websocket(websocket):
             await websocket.send(json.dumps(response))
 
     except ConnectionClosed:
-        logging.info("Chrome extension disconnected: %s", client)
+        logging.info("[JS DISCONNECTED] Chrome extension client=%s", client)
 
     except Exception:
         logging.exception("WebSocket handler crashed")
@@ -179,6 +195,9 @@ async def main():
 
     logging.info("WebSocket bridge listening on ws://%s:%s", WS_HOST, WS_PORT)
     logging.info("Forwarding to ZeroMQ backend at %s", ZMQ_BACKEND_URL)
+    logging.info(
+        "Waiting for [JS CONNECTED], then [JS MESSAGE] type='ai_tick'."
+    )
 
     async with websockets.serve(handle_websocket, WS_HOST, WS_PORT):
         await asyncio.Future()

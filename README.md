@@ -253,8 +253,11 @@ captured keys/events, the `NoOp` reply, and the complete `worldState`. Run
 health, and whether the WebSocket bridge is listening. If the bridge is not
 detected, start `python -m Automation.Bridge.ws_zmq_bridge` in a second
 terminal. If it is detected but the tick count remains zero, check that
-terminal for `Chrome extension connected`. Use `debug off` when the per-tick
-output is no longer needed and `debug on` to enable it again.
+terminal for `[JS CONNECTED]` followed by `[JS MESSAGE] type='ai_tick'`. A
+missing `[JS CONNECTED]` means the browser plugin has not connected to
+`ws://127.0.0.1:8765`; a connection without messages means the plugin is not
+emitting its tick payload. Use `debug off` when the per-tick output is no longer
+needed and `debug on` to enable it again.
 
 Each `frames` row contains the untouched payload, extracted `worldState`, exact
 reply, and a global Windows input snapshot. `input_json` stores the keys/buttons

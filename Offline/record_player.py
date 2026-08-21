@@ -751,6 +751,11 @@ def _show_status(controller: RecorderController) -> None:
         f"last received: {status['last_received_at_utc'] or 'never'}; "
         f"per-frame debug: {'on' if status['debug_enabled'] else 'off'}"
     )
+    if status["received_tick_count"] == 0:
+        print(
+            "NO ai_tick has reached the recorder. Look above for "
+            "'[JS CONNECTED]' and '[JS MESSAGE]' bridge logs."
+        )
 
 
 def _show_sessions(store: RecordingStore, limit: int) -> None:
@@ -808,6 +813,11 @@ def run_command_shell(
                 print(
                     "Waiting for ai_tick messages from the JS bridge; each "
                     "saved state/action will print below."
+                )
+                print(
+                    "The plugin is connected only after '[JS CONNECTED]' "
+                    "appears, and it is sending state only after "
+                    "'[JS MESSAGE] type=' appears."
                 )
                 _show_connection_status(server)
             elif command == "stop":
