@@ -26,6 +26,7 @@ include = [
     "Automation*",
     "Custom_enviornments*",
     "Inference*",
+    "Offline*",
     "Tests*",
     "Training*",
     "Utils*",

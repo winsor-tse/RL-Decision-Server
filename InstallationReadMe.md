@@ -5,6 +5,7 @@ Setup guide for running the RL Decision Server with the current custom environme
 ## Prerequisites
 
 - Python 3.8+
+- Python's standard-library SQLite module (`sqlite3`)
 - Yugen Saga local server running
 - Chrome extension installed from `Yugen-Battler-Custom`
 - PowerShell, Windows Terminal, or another shell from the project root
@@ -38,6 +39,19 @@ RL_venv\Scripts\activate.bat
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python -m pip install -e .
+```
+
+SQLite does not have a separate pip requirement. It is provided by Python's
+standard library. Verify that the active Python installation includes it with:
+
+```bash
+python -c "import sqlite3; print(sqlite3.sqlite_version)"
+```
+
+The recorder's minimal dependency list is also available separately:
+
+```bash
+python -m pip install -r Offline/requirements.txt
 ```
 
 If TensorBoard is missing when running `Training/DQN_server.py`, install it into the same active environment:

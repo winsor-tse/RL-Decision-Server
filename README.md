@@ -11,6 +11,7 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 - `Inference/ppo_lstm_eval.py`: evaluates recurrent PPO checkpoints on `Env16`.
 - `Inference/ppo_eval.py`: evaluates PPO checkpoints deterministically or by policy sampling.
 - `Inference/dqn_eval.py`: evaluates DQN checkpoints with optional epsilon exploration.
+- `Offline/record_player.py`: records full world-state payloads and global player input to SQLite.
 - `Automation/automation_config.yaml`: selects the training and inference entry points.
 - `RunRL.ps1`: starts TensorBoard, the bridge, and the configured RL algorithm together.
 - `RunInference.ps1`: starts the bridge and the configured evaluator.
@@ -216,6 +217,49 @@ python -m Training.PPO_lstm_server
 ```
 
 The game must be running and sending `ai_tick` messages through the browser extension before the env can step.
+
+## Recording Player Demonstrations
+
+The offline recorder replaces the training/evaluation backend on the same ZMQ
+endpoint. Start the existing bridge in one terminal:
+
+```bash
+python -m Automation.Bridge.ws_zmq_bridge
+```
+
+Then start the recorder in another terminal instead of a trainer:
+
+```bash
+python -m pip install -r Offline/requirements.txt
+python -m Offline.record_player
+```
+
+At the `recorder>` prompt, use `start [name]` and `stop` to delimit recordings.
+Every incoming `ai_tick` is still answered immediately with `move: "NoOp"`;
+ticks are saved only while a session is active. The default database is
+`Offline/recordings.sqlite3` and can be changed with `--database PATH`.
+
+Each `frames` row contains the untouched payload, extracted `worldState`, exact
+reply, and a global Windows input snapshot. `input_json` stores the keys/buttons
+held at that tick plus down/up events since the preceding recorded tick. This
+keeps fast taps that happen between game ticks. Virtual-key numbers are retained
+alongside readable names so they can be mapped to environment actions later.
+
+Useful recorder commands:
+
+```text
+status
+sessions 20
+frames 10
+annotate <frame-id> <action-index-or-label>
+quit
+```
+
+Use `--no-keyboard` to collect state-only data for manual annotation, or
+`--no-op-action VALUE` if the JS no-op value changes. SQLite support comes from
+Python's standard-library `sqlite3` module, so it requires no separate pip
+package. Only one backend can bind port 5555, so do not run a trainer/evaluator
+at the same time as the recorder.
 
 Both PPO trainers use one live `Env16` instance directly because the external
 simulator owns a single ZMQ request stream. They do not use `SyncVectorEnv` or

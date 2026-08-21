@@ -94,6 +94,7 @@ def distance_from_player(player: dict, entity: dict) -> float:
 
     dx = entity.get("mapX", 0) - player.get("mapX", 0)
     dy = entity.get("mapY", 0) - player.get("mapY", 0)
+    #manhattan
     return float(abs(dx) + abs(dy))
 
 

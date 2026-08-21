@@ -1,27 +1,20 @@
 #TODO: Use Past data from Off policy algorithms like DQN - DDPD/SAC with Experience Replay buffer to teach 
 """
-In online RL, we send payloads to take actions.
 
-In offline RL/ Behavoir cloning. I need to record what the player is doing in the parsed State and action.
+In offline RL, I need to record what the player given the Full World States.
 
-All we are going to do is build a CLI that message = self.socket.recv_json().
+All we are going to do is build a CLI that can start and stop as recordings.
 
-No need to send an action back. The idea is to prompt on CLI when to record and record it into a SQL Lite Database.
+This is done using this message = self.socket.recv_json().
 
-There might be two ways to do this? 
+Send a No Op actions like -1 (I will change that in the JS). 
+
+The idea is to prompt on CLI when to record and record it into a SQL Lite Database.
 
 Obviously just record the current payload, send something like a -1 or an action index that does not exist.
-Although i think you must record the actual action. Or just fill it in manually after recording payloads (state).
+You must record the actual action (Use a python program to record keystrokes, i will map this to actions in env). 
+Another option is to fill it in manually after recording payloads (state).
 
-REplay Buffers storing them while training into a place makes sense also. 
-behavior cloning only uses states and actions. The other values are present because the buffer follows a general reinforcement-learning dataset format.
-
-
-YOu can then custom parse obs based on something like running dataset from Env_16  parse_observation.
-
-This is going to the the expert trajectories to be intializing the policy with.
-
-Store and train/intialize a policy doing this.
 
 """
 
