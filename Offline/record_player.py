@@ -11,6 +11,7 @@ import argparse
 import ctypes
 import json
 import os
+import socket as network_socket
 import shlex
 import sqlite3
 import threading
@@ -22,6 +23,8 @@ from typing import Any, Callable, Protocol
 
 DEFAULT_BIND_URL = "tcp://127.0.0.1:5555"
 DEFAULT_DATABASE = Path(__file__).with_name("recordings.sqlite3")
+DEFAULT_BRIDGE_HOST = "127.0.0.1"
+DEFAULT_BRIDGE_PORT = 8765
 
 
 def _utc_iso(timestamp_ns: int | None = None) -> str:
@@ -144,7 +147,7 @@ def virtual_key_name(virtual_key: int) -> str:
 
 
 class WindowsInputMonitor:
-    """Capture global Windows key/button state without extra dependencies."""
+    """Snapshot global Windows key/button state on each received game tick."""
 
     # Generic SHIFT/CTRL/ALT duplicate their left/right virtual keys.
     _VIRTUAL_KEYS = tuple(
@@ -153,30 +156,22 @@ class WindowsInputMonitor:
         if virtual_key not in (0x10, 0x11, 0x12)
     )
 
-    def __init__(self, poll_interval_seconds: float = 0.005):
+    def __init__(self):
         if os.name != "nt":
             raise RuntimeError(
                 "Global key capture is currently supported on Windows only. "
                 "Use --no-keyboard to record states for manual annotation."
             )
-        if poll_interval_seconds <= 0:
-            raise ValueError("Keyboard poll interval must be greater than zero.")
 
-        self._poll_interval_seconds = poll_interval_seconds
         self._get_async_key_state = ctypes.windll.user32.GetAsyncKeyState
         self._get_async_key_state.argtypes = [ctypes.c_int]
         self._get_async_key_state.restype = ctypes.c_short
-        self._lock = threading.Lock()
-        self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
         self._keys_down: set[int] = set()
-        self._events: list[dict[str, Any]] = []
 
-    def _read_keys_down(self) -> set[int]:
+    def _read_key_states(self) -> dict[int, int]:
         return {
-            virtual_key
+            virtual_key: int(self._get_async_key_state(virtual_key))
             for virtual_key in self._VIRTUAL_KEYS
-            if self._get_async_key_state(virtual_key) & 0x8000
         }
 
     @staticmethod
@@ -187,68 +182,60 @@ class WindowsInputMonitor:
         }
 
     def start(self) -> None:
-        if self._thread is not None and self._thread.is_alive():
-            return
-        self._stop_event.clear()
-        with self._lock:
-            self._keys_down = self._read_keys_down()
-            self._events.clear()
-        self._thread = threading.Thread(
-            target=self._run,
-            name="offline-input-monitor",
-            daemon=True,
-        )
-        self._thread.start()
-
-    def _run(self) -> None:
-        while not self._stop_event.wait(self._poll_interval_seconds):
-            current_keys = self._read_keys_down()
-            timestamp_ns = time.time_ns()
-            with self._lock:
-                pressed = current_keys - self._keys_down
-                released = self._keys_down - current_keys
-                for virtual_key in sorted(pressed):
-                    self._events.append(
-                        {
-                            **self._key(virtual_key),
-                            "event": "key_down",
-                            "timestamp_unix_ns": timestamp_ns,
-                        }
-                    )
-                for virtual_key in sorted(released):
-                    self._events.append(
-                        {
-                            **self._key(virtual_key),
-                            "event": "key_up",
-                            "timestamp_unix_ns": timestamp_ns,
-                        }
-                    )
-                self._keys_down = current_keys
+        self.reset()
 
     def reset(self) -> None:
-        current_keys = self._read_keys_down()
-        with self._lock:
-            self._keys_down = current_keys
-            self._events.clear()
+        key_states = self._read_key_states()
+        self._keys_down = {
+            virtual_key
+            for virtual_key, state in key_states.items()
+            if state & 0x8000
+        }
 
     def snapshot(self) -> dict[str, Any]:
-        with self._lock:
-            snapshot = {
-                "capture_available": True,
-                "keys_down": [
-                    self._key(virtual_key)
-                    for virtual_key in sorted(self._keys_down)
-                ],
-                "events": list(self._events),
+        key_states = self._read_key_states()
+        current_keys = {
+            virtual_key
+            for virtual_key, state in key_states.items()
+            if state & 0x8000
+        }
+        # The low bit reports a press since the preceding GetAsyncKeyState call,
+        # which retains most taps that start and finish between game ticks.
+        pressed = (current_keys - self._keys_down) | {
+            virtual_key
+            for virtual_key, state in key_states.items()
+            if state & 0x0001
+        }
+        released = self._keys_down - current_keys
+        timestamp_ns = time.time_ns()
+        events = [
+            {
+                **self._key(virtual_key),
+                "event": "key_down",
+                "timestamp_unix_ns": timestamp_ns,
             }
-            self._events.clear()
-        return snapshot
+            for virtual_key in sorted(pressed)
+        ]
+        events.extend(
+            {
+                **self._key(virtual_key),
+                "event": "key_up",
+                "timestamp_unix_ns": timestamp_ns,
+            }
+            for virtual_key in sorted(released)
+        )
+        self._keys_down = current_keys
+        return {
+            "capture_available": True,
+            "keys_down": [
+                self._key(virtual_key)
+                for virtual_key in sorted(current_keys)
+            ],
+            "events": events,
+        }
 
     def stop(self) -> None:
-        self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=2)
-        self._thread = None
+        return None
 
 
 class RecordingStore:
@@ -593,7 +580,11 @@ class RecorderController:
 
 
 class RecorderServer:
-    """Background ZeroMQ REP server used while the CLI reads commands."""
+    """ZeroMQ REP worker used while the main thread reads CLI commands.
+
+    ``recv_json()`` is blocking, so one worker is required for ``status`` and
+    ``stop`` to remain usable while the recorder waits for game ticks.
+    """
 
     def __init__(
         self,
@@ -608,11 +599,13 @@ class RecorderServer:
         self._ready_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._startup_error: BaseException | None = None
+        self._runtime_error: BaseException | None = None
 
     def start(self, timeout_seconds: float = 5) -> None:
         self._stop_event.clear()
         self._ready_event.clear()
         self._startup_error = None
+        self._runtime_error = None
         self._thread = threading.Thread(
             target=self._serve,
             name="offline-zmq-recorder",
@@ -659,7 +652,11 @@ class RecorderServer:
                     }
                 socket.send_json(response)
         except BaseException as error:
-            self._startup_error = error
+            if self._ready_event.is_set():
+                self._runtime_error = error
+                self.report_error(f"\n[ZMQ BACKEND STOPPED] {error}")
+            else:
+                self._startup_error = error
             self._ready_event.set()
         finally:
             if socket is not None:
@@ -670,6 +667,52 @@ class RecorderServer:
         if self._thread is not None:
             self._thread.join(timeout=2)
         self._thread = None
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "listening": self._thread is not None and self._thread.is_alive(),
+            "bind_url": self.bind_url,
+            "error": str(self._runtime_error) if self._runtime_error else None,
+        }
+
+
+def bridge_is_listening(
+    host: str = DEFAULT_BRIDGE_HOST,
+    port: int = DEFAULT_BRIDGE_PORT,
+) -> bool:
+    """Return whether another process owns the WebSocket bridge port."""
+
+    probe = network_socket.socket(network_socket.AF_INET, network_socket.SOCK_STREAM)
+    try:
+        probe.bind((host, port))
+    except OSError:
+        return True
+    finally:
+        probe.close()
+    return False
+
+
+def _show_connection_status(server: RecorderServer) -> None:
+    server_status = server.status()
+    if server_status["listening"]:
+        print(f"ZMQ recorder backend: LISTENING at {server_status['bind_url']}")
+    else:
+        detail = f" ({server_status['error']})" if server_status["error"] else ""
+        print(f"ZMQ recorder backend: NOT RUNNING{detail}")
+
+    bridge_url = f"ws://{DEFAULT_BRIDGE_HOST}:{DEFAULT_BRIDGE_PORT}"
+    if bridge_is_listening():
+        print(f"WebSocket bridge: DETECTED at {bridge_url}")
+        print(
+            "Check the bridge terminal for 'Chrome extension connected' if "
+            "ai_tick count remains zero."
+        )
+    else:
+        print(f"WebSocket bridge: NOT DETECTED at {bridge_url}")
+        print(
+            "Start it in another terminal with: "
+            "python -m Automation.Bridge.ws_zmq_bridge"
+        )
 
 
 HELP_TEXT = """Commands:
@@ -741,6 +784,7 @@ def _show_frames(store: RecordingStore, limit: int) -> None:
 def run_command_shell(
     controller: RecorderController,
     store: RecordingStore,
+    server: RecorderServer,
 ) -> None:
     print(HELP_TEXT)
     while True:
@@ -765,6 +809,7 @@ def run_command_shell(
                     "Waiting for ai_tick messages from the JS bridge; each "
                     "saved state/action will print below."
                 )
+                _show_connection_status(server)
             elif command == "stop":
                 session_id, frame_count = controller.stop_recording()
                 print(
@@ -773,6 +818,7 @@ def run_command_shell(
                 )
             elif command == "status":
                 _show_status(controller)
+                _show_connection_status(server)
             elif command == "debug":
                 if len(arguments) != 1 or arguments[0].lower() not in {
                     "on",
@@ -838,25 +884,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Disable global input capture and annotate actions manually",
     )
-    parser.add_argument(
-        "--keyboard-poll-ms",
-        type=float,
-        default=5.0,
-        help="Global input polling interval in milliseconds (default: 5)",
-    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    if args.keyboard_poll_ms <= 0:
-        raise SystemExit("--keyboard-poll-ms must be greater than zero")
 
     input_monitor: InputMonitor
     if args.no_keyboard:
         input_monitor = NullInputMonitor()
     else:
-        input_monitor = WindowsInputMonitor(args.keyboard_poll_ms / 1000)
+        input_monitor = WindowsInputMonitor()
 
     store = RecordingStore(args.database)
     controller = RecorderController(store, input_monitor, args.no_op_action)
@@ -868,7 +906,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Recorder backend listening at {args.bind_url}")
         print(f"SQLite database: {store.path}")
         print(f"No-op move sent to the game: {args.no_op_action!r}")
-        run_command_shell(controller, store)
+        _show_connection_status(server)
+        run_command_shell(controller, store, server)
     finally:
         if controller.status()["recording"]:
             session_id, frame_count = controller.stop_recording()

@@ -15,6 +15,7 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 - `Automation/automation_config.yaml`: selects the training and inference entry points.
 - `RunRL.ps1`: starts TensorBoard, the bridge, and the configured RL algorithm together.
 - `RunInference.ps1`: starts the bridge and the configured evaluator.
+- `RunRecorder.ps1`: starts the bridge and offline recorder together.
 - `Utils/buffers.py`: replay buffer used by DQN.
 - `Custom_enviornments/`: shared env config, base env, and class-specific environments.
 
@@ -221,18 +222,24 @@ The game must be running and sending `ai_tick` messages through the browser exte
 ## Recording Player Demonstrations
 
 The offline recorder replaces the training/evaluation backend on the same ZMQ
-endpoint. Start the existing bridge in one terminal:
+endpoint. The recommended one-command startup is:
 
-```bash
-python -m Automation.Bridge.ws_zmq_bridge
+```powershell
+.\RunRecorder.ps1
 ```
 
-Then start the recorder in another terminal instead of a trainer:
+Or run the Python automation entry point directly:
 
 ```bash
 python -m pip install -r Offline/requirements.txt
-python -m Offline.record_player
+python -m Automation.record
 ```
+
+Both commands start `Automation.Bridge.ws_zmq_bridge`, wait for it to become
+ready, then start `Offline.record_player`. Exiting the recorder also stops the
+bridge. Recording output is saved under `logs/recording_*.txt` when the
+PowerShell wrapper is used. Manual two-terminal startup remains available for
+debugging.
 
 At the `recorder>` prompt, use `start [name]` and `stop` to delimit recordings.
 Every incoming `ai_tick` is still answered immediately with `move: "NoOp"`;
@@ -242,9 +249,12 @@ ticks are saved only while a session is active. The default database is
 Per-frame debugging is enabled by default. After `start`, every saved tick
 prints confirmation that the JS bridge delivered it, its SQLite frame ID, the
 captured keys/events, the `NoOp` reply, and the complete `worldState`. Run
-`status` to see the total ticks received and the latest receive time. Use
-`debug off` when the per-tick output is no longer needed and `debug on` to
-enable it again.
+`status` to see the total ticks received, latest receive time, ZMQ backend
+health, and whether the WebSocket bridge is listening. If the bridge is not
+detected, start `python -m Automation.Bridge.ws_zmq_bridge` in a second
+terminal. If it is detected but the tick count remains zero, check that
+terminal for `Chrome extension connected`. Use `debug off` when the per-tick
+output is no longer needed and `debug on` to enable it again.
 
 Each `frames` row contains the untouched payload, extracted `worldState`, exact
 reply, and a global Windows input snapshot. `input_json` stores the keys/buttons

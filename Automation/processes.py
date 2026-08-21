@@ -1,4 +1,4 @@
-"""Shared process supervision for training and inference launchers."""
+"""Shared process supervision for training, inference, and recording."""
 
 from __future__ import annotations
 
@@ -128,7 +128,7 @@ def run_stack(
     *,
     start_tensorboard: bool,
 ) -> int:
-    """Run bridge, optional TensorBoard, and one training/inference child."""
+    """Run bridge, optional TensorBoard, and one supervised child process."""
     bridge_command = config.get("bridge_command")
     if not bridge_command:
         raise ValueError("bridge_command is required.")

@@ -54,6 +54,14 @@ The recorder's minimal dependency list is also available separately:
 python -m pip install -r Offline/requirements.txt
 ```
 
+Start the WebSocket bridge and offline recorder together with:
+
+```powershell
+.\RunRecorder.ps1
+```
+
+The equivalent direct Python command is `python -m Automation.record`.
+
 If TensorBoard is missing when running `Training/DQN_server.py`, install it into the same active environment:
 
 ```bash

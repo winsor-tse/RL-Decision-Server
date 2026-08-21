@@ -4,6 +4,7 @@ import unittest
 
 from Automation.infer import resolve_inference_command
 from Automation.processes import load_config, normalize_command
+from Automation.record import resolve_recorder_command
 from Automation.tensorboard_server import FilteredStderr, NO_TENSORFLOW_NOTICE
 from Automation.train import resolve_training_command
 
@@ -84,6 +85,29 @@ class AutomationConfigTests(unittest.TestCase):
             command,
             config[f"{algorithm}_inference_command"],
         )
+
+    def test_offline_recorder_command_is_configured(self):
+        config = load_config("Automation/automation_config.yaml")
+
+        self.assertEqual(
+            resolve_recorder_command(config),
+            ["python", "-m", "Offline.record_player"],
+        )
+
+    def test_offline_recorder_command_can_be_overridden(self):
+        command = resolve_recorder_command(
+            {},
+            "python -m Offline.record_player --no-keyboard",
+        )
+
+        self.assertEqual(
+            command,
+            "python -m Offline.record_player --no-keyboard",
+        )
+
+    def test_missing_offline_recorder_command_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "recorder_command"):
+            resolve_recorder_command({})
 
     def test_recurrent_ppo_inference_command_is_selectable(self):
         config = load_config("Automation/automation_config.yaml")

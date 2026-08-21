@@ -1,8 +1,8 @@
 import json
+import socket
 import sqlite3
 import tempfile
 import unittest
-import uuid
 from contextlib import closing
 from pathlib import Path
 
@@ -12,6 +12,7 @@ from Offline.record_player import (
     RecorderController,
     RecorderServer,
     RecordingStore,
+    bridge_is_listening,
     virtual_key_name,
 )
 
@@ -167,8 +168,18 @@ class OfflineRecorderTests(unittest.TestCase):
         self.assertEqual(virtual_key_name(0x70), "F1")
         self.assertEqual(virtual_key_name(0xA2), "CTRL_LEFT")
 
-    def test_zmq_server_round_trip_uses_no_op(self):
-        endpoint = f"inproc://offline-recorder-{uuid.uuid4()}"
+    def test_bridge_port_diagnostic_detects_listener(self):
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            self.assertTrue(bridge_is_listening("127.0.0.1", port))
+
+    def test_tcp_zmq_server_round_trip_uses_no_op(self):
+        with socket.socket() as port_probe:
+            port_probe.bind(("127.0.0.1", 0))
+            port = port_probe.getsockname()[1]
+        endpoint = f"tcp://127.0.0.1:{port}"
         server = RecorderServer(endpoint, self.controller)
         server.start()
         context = zmq.Context.instance()
