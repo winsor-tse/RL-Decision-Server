@@ -10,7 +10,7 @@ from Custom_enviornments.Load_env_config import load_env_config
 class BaseEnv(gym.Env):
     """Example bare-bones Gym/ZMQ environment shared by concrete game envs."""
 
-    def __init__(self, actions, config=None):
+    def __init__(self, actions, config=None, socket=None):
         super().__init__()
         self.config = config or load_env_config()
         self.Actions = list(actions)
@@ -29,11 +29,16 @@ class BaseEnv(gym.Env):
         self.next_state = np.zeros(obs_size, dtype=np.float32)
         self.current_step = 0
 
-        import zmq
+        self._owns_socket = socket is None
+        if socket is None:
+            import zmq
 
-        self.context = zmq.Context.instance()
-        self.socket = self.context.socket(zmq.REP)
-        self.socket.bind(self.config["ZMQ_BIND_URL"])
+            self.context = zmq.Context.instance()
+            self.socket = self.context.socket(zmq.REP)
+            self.socket.bind(self.config["ZMQ_BIND_URL"])
+        else:
+            self.context = None
+            self.socket = socket
 
     def _get_obs(self):
         return self.next_state
@@ -65,4 +70,5 @@ class BaseEnv(gym.Env):
         }
 
     def close(self):
-        self.socket.close(linger=0)
+        if self._owns_socket:
+            self.socket.close(linger=0)

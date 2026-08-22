@@ -12,6 +12,8 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 - `Inference/ppo_eval.py`: evaluates PPO checkpoints deterministically or by policy sampling.
 - `Inference/dqn_eval.py`: evaluates DQN checkpoints with optional epsilon exploration.
 - `Offline/record_player.py`: records full world-state payloads and global player input to SQLite.
+- `Offline/record_minari.py`: records mapped human actions as a Minari behavior-cloning dataset.
+- `Custom_enviornments/Test_Env/Env_16_BC.py`: no-op, valid-action-only recording environment.
 - `Automation/automation_config.yaml`: selects the training and inference entry points.
 - `RunRL.ps1`: starts TensorBoard, the bridge, and the configured RL algorithm together.
 - `RunInference.ps1`: starts the bridge and the configured evaluator.
@@ -277,6 +279,36 @@ To skip the name prompt, configure or override the recorder command with
 ```powershell
 .\RunRecorder.ps1 -Command "python -m Offline.record_player --session-name demo-1"
 ```
+
+### Minari behavior-cloning recorder
+
+`Offline.record_minari` records the same live player interaction directly as a
+Minari dataset using `Env16BC`. Start it together with the WebSocket bridge:
+
+```powershell
+.\RunRecorder.ps1 -Command "python -m Offline.record_minari --dataset-id env16/BC-v0 --max-steps 500"
+```
+
+The dataset ID must include a Minari version suffix. Dataset IDs cannot be
+overwritten, so use `env16/BC-v1`, `env16/BC-v2`, and so on for later runs.
+Minari saves under `~/.minari/datasets` by default; pass `--datasets-path PATH`
+to select another root.
+
+The BC recorder sends `NoOp` to the game on every tick. It records only one
+unambiguous mapped action: `W=up(0)`, `A=left(1)`, `D=right(2)`, `S=down(3)`,
+`SPACE=attack(4)`, and spells `1,2,3,5,6,7` as indices `5..10`. Unmapped ticks
+and ambiguous multi-key ticks are acknowledged but never passed to Minari.
+The recorder buffers one labeled frame so each stored action is aligned with
+the observation from which the player chose it.
+
+Inspect a completed dataset and its episode fields with:
+
+```powershell
+python -c "import minari; d=minari.load_dataset('env16/BC-v0'); e=next(d.iterate_episodes()); print(d.total_episodes, d.total_steps); print(e.observations.shape, e.actions.shape, e.rewards.shape, e.terminations.shape, e.truncations.shape, e.infos.keys())"
+```
+
+This Minari dataset uses Minari's HDF5 storage. It is separate from the raw
+SQLite capture produced by `Offline.record_player`.
 
 Both PPO trainers use one live `Env16` instance directly because the external
 simulator owns a single ZMQ request stream. They do not use `SyncVectorEnv` or

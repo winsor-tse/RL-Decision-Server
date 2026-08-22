@@ -14,7 +14,7 @@ This will be the custom action logic:
     "key": "W" -> "up" or action_idx = 0
     "key": "A" -> "left" or action_idx = 1
     "key": "D" -> "right" or action_idx = 2
-    "key": "S" -> "right" or action_idx = 3
+    "key": "S" -> "down" or action_idx = 3
     "key": "space" -> "attack" or action_idx = 4
     "key": "1" -> "castSpell:1" or action_idx = 5
     "key": "2" -> "castSpell:2" or action_idx = 6
@@ -42,23 +42,27 @@ Minari dataset needs:
 Sample modified COde from Minari:
 
 import minari
-import gymnasium as gym
-from minari import DataCollector
-from Custom_enviornments.Test_Env.Env_16 import Env16 #this will be called Env16BC
+from Custom_enviornments.Test_Env.Env_16_BC import Env16BC
 
 
-env = Env16BC()
-env = DataCollector(env)
-Max_steps = 500
+raw_env = Env16BC()
+env = minari.DataCollector(raw_env, record_infos=True)
+max_steps = 500
 
-#Below logic needs to be adapted for Offline Recording we are not doing training.
-
-for _ in range(Max_steps):
-    action = env.action_space.sample()  # <- use your policy here
+env.reset(options={"minari_autoseed": False})
+for step in range(max_steps):
+    action = raw_env.next_action()
     obs, rew, terminated, truncated, info = env.step(action)
-    done = terminated or truncated
+    if (terminated or truncated) and step + 1 < max_steps:
+        env.reset(options={"minari_autoseed": False})
 
-dataset = env.create_dataset("env16/BC")
+dataset = env.create_dataset(
+    "env16/BC-v0",
+    algorithm_name="human behavior cloning demonstrations",
+)
+
+# Production entry point (also starts cleanly through RunRecorder.ps1):
+# python -m Offline.record_minari --dataset-id env16/BC-v0 --max-steps 500
 
 
 

@@ -64,6 +64,17 @@ The equivalent direct Python command is `python -m Automation.record`.
 Enter a session name when prompted; recording then blocks directly on
 `socket.recv_json()` until `Ctrl+C` is pressed.
 
+To record valid human actions as a Minari behavior-cloning dataset instead of
+raw SQLite frames, run:
+
+```powershell
+.\RunRecorder.ps1 -Command "python -m Offline.record_minari --dataset-id env16/BC-v0 --max-steps 500"
+```
+
+Choose a new `-vN` suffix if that dataset already exists. The default Minari
+location is `%USERPROFILE%\.minari\datasets`; use `--datasets-path PATH` to
+override it.
+
 If TensorBoard is missing when running `Training/DQN_server.py`, install it into the same active environment:
 
 ```bash
