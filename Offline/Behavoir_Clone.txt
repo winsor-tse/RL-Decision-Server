@@ -1,28 +1,64 @@
-#TODO: Use Past data from Off policy algorithms like DQN - DDPD/SAC with Experience Replay buffer to teach 
-"""
-
-In offline RL, I need to record what the player given the Full World States.
-
-All we are going to do is build a CLI that can start and stop as recordings.
-
-This is done using this message = self.socket.recv_json().
-
-Send a No Op actions like -1 (I will change that in the JS). 
-
-The idea is to prompt on CLI when to record and record it into a SQL Lite Database.
-
-Obviously just record the current payload, send something like a -1 or an action index that does not exist.
-You must record the actual action (Use a python program to record keystrokes, i will map this to actions in env). 
-Another option is to fill it in manually after recording payloads (state).
 
 
-"""
+The Current record players python script works but now i need to integrate it with an env.
 
-"""
-Couple of points i need to re evaulate:
-Yes, initializing a policy with Behavior Cloning (BC) and then fine-tuning it online with PPO (Proximal Policy Optimization) does work and is a common practical baseline, but it often suffers from severe performance drops or instability at the start of online training due to sudden distribution shifts. Specific offline-to-online RL methods are generally better because they explicitly account for value estimation and conservatism
+Minari does this with already built envs. I want to leverage pre existing env16 and env conditions.
 
-"""
+Reimplement Env_16 call it Env16BC for specific Minari Offline Dataset, eventually be used for offline RL.
+
+This will be the custom action logic:
+
+    We will send No Op actions back since we will be recording actions using WindowsInputCapture.
+    Translate the recorded action to the action space in Env_16 using a custom mapping logic.
+
+    "key": "W" -> "up" or action_idx = 0
+    "key": "A" -> "left" or action_idx = 1
+    "key": "D" -> "right" or action_idx = 2
+    "key": "S" -> "right" or action_idx = 3
+    "key": "space" -> "attack" or action_idx = 4
+    "key": "1" -> "castSpell:1" or action_idx = 5
+    "key": "2" -> "castSpell:2" or action_idx = 6
+    "key": "3" -> "castSpell:3" or action_idx = 7
+    "key": "5" -> "castSpell:5" or action_idx = 8
+    "key": "6" -> "castSpell:6" or action_idx = 9
+    "key": "7" -> "castSpell:7" or action_idx = 10
+
+    Invalid keys that do not map to an action, do not record and add.
+
+    In regards to stepping in this env, DO NOT step unless its a valid key.
+
+    action = env.action_space.sample() needs to be replaced with just a return of the action.
+
+Minari dataset needs:
+    observations = episode_data.observations (parse_observation from Env_conditions)
+    actions = episode_data.actions (Custom Logic as described above)
+    rewards = episode_data.rewards (get_reward_components from Env_conditions)
+    terminations = episode_data.terminations (follow logic inside Env_16)
+    truncations = episode_data.truncations (follow logic inside Env_16)
+    infos = episode_data.infos (follow logic inside Env_16)
+
+
+
+Sample modified COde from Minari:
+
+import minari
+import gymnasium as gym
+from minari import DataCollector
+from Custom_enviornments.Test_Env.Env_16 import Env16 #this will be called Env16BC
+
+
+env = Env16BC()
+env = DataCollector(env)
+Max_steps = 500
+
+#Below logic needs to be adapted for Offline Recording we are not doing training.
+
+for _ in range(Max_steps):
+    action = env.action_space.sample()  # <- use your policy here
+    obs, rew, terminated, truncated, info = env.step(action)
+    done = terminated or truncated
+
+dataset = env.create_dataset("env16/BC")
 
 
 
