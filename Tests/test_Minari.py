@@ -1,6 +1,8 @@
+import io
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 import minari
@@ -14,11 +16,11 @@ from Custom_enviornments.Test_Env.Env_16_BC import (
 from Offline.record_minari import record_minari_dataset
 
 
-def make_world_state(*, player_hp=100, enemy_hp=100):
+def make_world_state(*, player_hp=100, player_y=30, enemy_hp=100):
     return {
         "player": {
             "mapX": 10,
-            "mapY": 30,
+            "mapY": player_y,
             "direction": "up",
             "hp": player_hp,
             "maxHp": 100,
@@ -62,6 +64,14 @@ def input_snapshot(key, *, event=True):
     }
 
 
+def empty_input_snapshot():
+    return {
+        "capture_available": True,
+        "keys_down": [],
+        "events": [],
+    }
+
+
 class FakeInputCapture:
     def __init__(self, snapshots):
         self.snapshots = list(snapshots)
@@ -80,7 +90,10 @@ class FakeSocket:
         self.responses = []
 
     def recv_json(self):
-        return self.messages.pop(0)
+        message = self.messages.pop(0)
+        if isinstance(message, BaseException):
+            raise message
+        return message
 
     def send_json(self, response):
         self.responses.append(response)
@@ -218,6 +231,105 @@ class Env16BCCollectionTests(unittest.TestCase):
                 finally:
                     collector.close()
 
+    def test_keyless_death_tick_terminates_the_pending_action(self):
+        env, _, _ = self.make_env(
+            [tick("reset"), tick("death", player_hp=0)],
+            [input_snapshot("W"), empty_input_snapshot()],
+        )
+
+        env.reset(options={"minari_autoseed": False})
+        _, _, terminated, truncated, info = env.step(env.next_action())
+
+        self.assertTrue(terminated)
+        self.assertFalse(truncated)
+        self.assertEqual(info["episode_outcome"], "loss")
+        self.assertEqual(info["reward_components"]["terminal"], -100.0)
+        self.assertEqual(env.last_recorded_key, "W")
+        with self.assertRaisesRegex(RuntimeError, "reset"):
+            env.next_action()
+
+    def test_keyless_truncation_tick_ends_the_pending_action(self):
+        env, _, _ = self.make_env(
+            [tick("reset"), tick("boundary", player_y=24)],
+            [input_snapshot("W"), empty_input_snapshot()],
+        )
+
+        env.reset(options={"minari_autoseed": False})
+        _, _, terminated, truncated, info = env.step(env.next_action())
+
+        self.assertFalse(terminated)
+        self.assertTrue(truncated)
+        self.assertEqual(info["episode_outcome"], "truncated")
+        self.assertEqual(env.last_recorded_key, "W")
+
+    def test_completed_epoch_is_saved_before_reset_and_later_data_appends(self):
+        env, _, capture = self.make_env(
+            [
+                tick("reset-1"),
+                tick("death", player_hp=0),
+                tick("reset-2"),
+                tick("step-2"),
+            ],
+            [
+                input_snapshot("W"),
+                empty_input_snapshot(),
+                input_snapshot("A"),
+                input_snapshot("D"),
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as datasets_path:
+            with mock.patch.dict(
+                os.environ,
+                {"MINARI_DATASETS_PATH": datasets_path},
+            ):
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    dataset = record_minari_dataset(
+                        dataset_id="env16/boundary-save-v0",
+                        max_steps=2,
+                        author="test",
+                        raw_env=env,
+                    )
+
+                self.assertEqual(dataset.total_episodes, 2)
+                self.assertEqual(dataset.total_steps, 2)
+                self.assertEqual(capture.reset_count, 2)
+                episodes = list(dataset.iterate_episodes())
+                self.assertTrue(episodes[0].terminations[-1])
+                self.assertTrue(episodes[1].truncations[-1])
+                self.assertIn("reason=terminated", output.getvalue())
+                self.assertIn("reason=max_steps", output.getvalue())
+
+    def test_ctrl_c_flushes_partial_epoch_to_local_minari(self):
+        env, _, _ = self.make_env(
+            [tick("reset"), tick("step"), KeyboardInterrupt()],
+            [input_snapshot("W"), input_snapshot("SPACE")],
+        )
+
+        with tempfile.TemporaryDirectory() as datasets_path:
+            with mock.patch.dict(
+                os.environ,
+                {"MINARI_DATASETS_PATH": datasets_path},
+            ):
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    dataset = record_minari_dataset(
+                        dataset_id="env16/interrupt-save-v0",
+                        max_steps=5,
+                        author="test",
+                        raw_env=env,
+                    )
+
+                self.assertIsNotNone(dataset)
+                self.assertEqual(dataset.total_episodes, 1)
+                self.assertEqual(dataset.total_steps, 1)
+                episode = next(dataset.iterate_episodes())
+                self.assertTrue(episode.truncations[-1])
+                self.assertIn("dataset_saved=True reason=interrupt", output.getvalue())
+                reloaded = minari.load_dataset("env16/interrupt-save-v0")
+                self.assertEqual(reloaded.total_steps, 1)
+
     def test_recording_entrypoint_creates_a_versioned_dataset(self):
         env, socket, _ = self.make_env(
             [tick("reset"), tick("step", enemy_hp=50)],
@@ -229,17 +341,24 @@ class Env16BCCollectionTests(unittest.TestCase):
                 os.environ,
                 {"MINARI_DATASETS_PATH": datasets_path},
             ):
-                dataset = record_minari_dataset(
-                    dataset_id="env16/entrypoint-v0",
-                    max_steps=1,
-                    author="test",
-                    raw_env=env,
-                )
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    dataset = record_minari_dataset(
+                        dataset_id="env16/entrypoint-v0",
+                        max_steps=1,
+                        author="test",
+                        raw_env=env,
+                    )
 
                 self.assertIsNotNone(dataset)
                 self.assertEqual(dataset.total_steps, 1)
                 self.assertEqual(dataset.total_episodes, 1)
                 self.assertTrue(all(reply["move"] == "NoOp" for reply in socket.responses))
+                output_lines = output.getvalue().splitlines()
+                self.assertEqual(len(output_lines), 2)
+                self.assertTrue(output_lines[0].startswith("key=W state=["))
+                self.assertIn("terminated=False truncated=False", output_lines[0])
+                self.assertTrue(output_lines[1].startswith("dataset_saved=True"))
 
 
 if __name__ == "__main__":

@@ -3,7 +3,8 @@
 ``Env16BC`` never sends the captured player action back to the game. Every
 ZeroMQ tick receives a ``NoOp`` response; valid keyboard actions are only used
 as labels in the offline dataset. Ticks without a mapped key are acknowledged
-but are not exposed as Gym steps, so Minari cannot record invalid actions.
+but are not exposed as Gym steps, except when they finish the preceding valid
+action with a terminal or truncated state.
 """
 
 from __future__ import annotations
@@ -11,9 +12,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import numpy as np
 from gymnasium.envs.registration import EnvSpec
 
 from Custom_enviornments.BaseEnv import BaseEnv
+from Custom_enviornments.Test_Env import Env_conditions
 from Custom_enviornments.Test_Env.Env_16 import Env16
 from Offline.record_player import WindowsInputCapture
 
@@ -151,8 +154,9 @@ class Env16BC(Env16):
         self,
         *,
         reset: bool,
-    ) -> tuple[dict[str, Any], int, str]:
-        """Acknowledge ticks until one contains a mapped human action."""
+        accept_episode_boundary: bool = False,
+    ) -> tuple[dict[str, Any], int | None, str, np.ndarray | None]:
+        """Wait for a mapped action or an allowed keyless episode boundary."""
 
         reset_response_pending = reset
         while True:
@@ -173,6 +177,23 @@ class Env16BC(Env16):
             reset_response_pending = False
 
             if mapped_action is None:
+                if accept_episode_boundary:
+                    candidate_state = Env_conditions.parse_observation(
+                        message.get("worldState", {}),
+                        int(self.config["OBS_SIZE"]),
+                    )
+                    is_loss = Env_conditions.is_episode_loss(
+                        candidate_state,
+                        self.next_state,
+                    )
+                    is_truncated = Env_conditions.get_truncated(
+                        candidate_state,
+                        self.next_state,
+                        self.current_step + 1,
+                    )
+                    if is_loss or is_truncated:
+                        return message, None, "", candidate_state
+
                 self.ignored_ticks += 1
                 LOGGER.debug(
                     "Ignored tick %r without a mapped key.",
@@ -181,7 +202,7 @@ class Env16BC(Env16):
                 continue
 
             action_idx, key = mapped_action
-            return message, action_idx, key
+            return message, action_idx, key, None
 
     @staticmethod
     def _minari_info(info: dict[str, Any]) -> dict[str, Any]:
@@ -207,7 +228,8 @@ class Env16BC(Env16):
         self._pending_action = None
         self._pending_key = ""
 
-        message, action_idx, key = self._receive_valid_action_tick(reset=True)
+        message, action_idx, key, _ = self._receive_valid_action_tick(reset=True)
+        assert action_idx is not None
         observation, info = self._initialize_from_world_state(
             message.get("worldState", {})
         )
@@ -236,13 +258,17 @@ class Env16BC(Env16):
             )
 
         recorded_key = self._pending_key
-        message, next_action, next_key = self._receive_valid_action_tick(
-            reset=False
+        message, next_action, next_key, parsed_next_state = (
+            self._receive_valid_action_tick(
+                reset=False,
+                accept_episode_boundary=True,
+            )
         )
         observation, reward, terminated, truncated, info = (
             self._advance_from_world_state(
                 message.get("worldState", {}),
                 action_idx,
+                parsed_next_state=parsed_next_state,
             )
         )
         info = self._minari_info(info)
@@ -253,6 +279,10 @@ class Env16BC(Env16):
             self._pending_action = None
             self._pending_key = ""
         else:
+            if next_action is None:
+                raise RuntimeError(
+                    "A keyless tick was accepted without ending the episode."
+                )
             self._pending_action = next_action
             self._pending_key = next_key
 

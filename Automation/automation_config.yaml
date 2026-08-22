@@ -16,6 +16,8 @@ bridge_command:
   - Automation.Bridge.ws_zmq_bridge
 bridge_ready_signal: "WebSocket bridge listening"
 ready_timeout_seconds: 30
+# Let recorders flush SQLite/Minari data after Ctrl+C before force cleanup.
+interrupt_grace_seconds: 30
 start_tensorboard: true
 tensorboard_command:
   - python

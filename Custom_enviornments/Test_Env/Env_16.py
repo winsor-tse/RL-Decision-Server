@@ -87,13 +87,21 @@ class Env16(BaseEnv):
 
         return self._advance_from_world_state(world_state, action_idx)
 
-    def _advance_from_world_state(self, world_state, action_idx):
+    def _advance_from_world_state(
+        self,
+        world_state,
+        action_idx,
+        *,
+        parsed_next_state=None,
+    ):
         """Apply Env16 reward and episode rules to one received world state."""
         self.current_step += 1
-        real_next_state = Env_conditions.parse_observation(
-            world_state,
-            int(self.config["OBS_SIZE"]),
-        )
+        real_next_state = parsed_next_state
+        if real_next_state is None:
+            real_next_state = Env_conditions.parse_observation(
+                world_state,
+                int(self.config["OBS_SIZE"]),
+            )
         true_next_ent_state = Env_conditions.parse_entity_state(world_state)
         reward_components = Env_conditions.get_reward_components(
             real_next_state,

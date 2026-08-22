@@ -48,18 +48,23 @@ from Custom_enviornments.Test_Env.Env_16_BC import Env16BC
 raw_env = Env16BC()
 env = minari.DataCollector(raw_env, record_infos=True)
 max_steps = 500
+dataset = None
 
 env.reset(options={"minari_autoseed": False})
 for step in range(max_steps):
     action = raw_env.next_action()
     obs, rew, terminated, truncated, info = env.step(action)
-    if (terminated or truncated) and step + 1 < max_steps:
-        env.reset(options={"minari_autoseed": False})
-
-dataset = env.create_dataset(
-    "env16/BC-v0",
-    algorithm_name="human behavior cloning demonstrations",
-)
+    if terminated or truncated:
+        # Persist the completed episode before reset.
+        if dataset is None:
+            dataset = env.create_dataset(
+                "env16/BC-v0",
+                algorithm_name="human behavior cloning demonstrations",
+            )
+        else:
+            env.add_to_dataset(dataset)
+        if step + 1 < max_steps:
+            env.reset(options={"minari_autoseed": False})
 
 # Production entry point (also starts cleanly through RunRecorder.ps1):
 # python -m Offline.record_minari --dataset-id env16/BC-v0 --max-steps 500

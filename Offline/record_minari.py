@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
+import signal
+import threading
+import warnings
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -16,9 +21,158 @@ from Custom_enviornments.Test_Env.Env_16_BC import Env16BC
 from Offline.record_player import parse_no_op_action
 
 
-LOGGER = logging.getLogger(__name__)
 DEFAULT_DATASET_ID = "env16/BC-v0"
 DEFAULT_MAX_STEPS = 500
+
+
+@contextmanager
+def _defer_sigint():
+    """Defer Ctrl+C while Minari is mutating its on-disk dataset."""
+
+    state = {"received": False}
+    if threading.current_thread() is not threading.main_thread():
+        yield state
+        return
+
+    previous_handler = signal.getsignal(signal.SIGINT)
+
+    def remember_interrupt(_signum, _frame):
+        state["received"] = True
+
+    signal.signal(signal.SIGINT, remember_interrupt)
+    try:
+        yield state
+    finally:
+        signal.signal(signal.SIGINT, previous_handler)
+
+
+def _save_collector(
+    *,
+    collector: minari.DataCollector,
+    dataset,
+    dataset_id: str,
+    author: str,
+    reason: str,
+):
+    """Persist the collector's completed data and return a refreshed dataset."""
+
+    if dataset is None:
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r"`(code_permalink|author_email)` is set to None.*",
+            )
+            warnings.filterwarnings(
+                "ignore",
+                message=r"`eval_env` is set to None.*",
+            )
+            dataset = collector.create_dataset(
+                dataset_id=dataset_id,
+                algorithm_name="human behavior cloning demonstrations",
+                author=author,
+                description=(
+                    "Human Yugen Saga demonstrations recorded with Env16BC. "
+                    "The game received NoOp responses; only mapped keyboard "
+                    "actions were included."
+                ),
+                requirements=["minari==0.5.3"],
+            )
+    else:
+        collector.add_to_dataset(dataset)
+        # Minari caches total_steps on loaded dataset objects. Reload after an
+        # append so the printed counts reflect what is actually on disk.
+        dataset = minari.load_dataset(dataset_id)
+
+    print(
+        f"dataset_saved=True reason={reason} id={dataset.id} "
+        f"episodes={dataset.total_episodes} transitions={dataset.total_steps} "
+        f"path={dataset.spec.data_path}",
+        flush=True,
+    )
+    return dataset
+
+
+def _save_collector_safely(**kwargs):
+    with _defer_sigint() as interrupt_state:
+        dataset = _save_collector(**kwargs)
+    return dataset, bool(interrupt_state["received"])
+
+
+def _observation_text(observation: Any) -> str:
+    value = observation.tolist() if hasattr(observation, "tolist") else observation
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _collect_and_save(
+    *,
+    collector: minari.DataCollector,
+    base_env: Env16BC,
+    dataset_id: str,
+    max_steps: int,
+    author: str,
+):
+    recorded_steps = 0
+    unsaved_steps = 0
+    dataset = None
+    interrupted = False
+
+    try:
+        collector.reset(options={"minari_autoseed": False})
+
+        while recorded_steps < max_steps:
+            # The action was captured from the current observation. step()
+            # waits for the next labeled frame, preserving Minari's
+            # (observation_t, action_t, observation_t+1) alignment.
+            action = base_env.next_action()
+            observation, _, terminated, truncated, _ = collector.step(action)
+            recorded_steps += 1
+            unsaved_steps += 1
+            print(
+                f"key={base_env.last_recorded_key} "
+                f"state={_observation_text(observation)} "
+                f"terminated={bool(terminated)} truncated={bool(truncated)}",
+                flush=True,
+            )
+
+            if terminated or truncated:
+                if terminated and truncated:
+                    reason = "terminated+truncated"
+                elif terminated:
+                    reason = "terminated"
+                else:
+                    reason = "truncated"
+                # Mark this batch claimed before the non-transactional Minari
+                # write. Never blindly retry an interrupted create/append.
+                unsaved_steps = 0
+                dataset, save_was_interrupted = _save_collector_safely(
+                    collector=collector,
+                    dataset=dataset,
+                    dataset_id=dataset_id,
+                    author=author,
+                    reason=reason,
+                )
+                if save_was_interrupted:
+                    raise KeyboardInterrupt
+                if recorded_steps < max_steps:
+                    collector.reset(options={"minari_autoseed": False})
+    except KeyboardInterrupt:
+        interrupted = True
+
+    if unsaved_steps > 0:
+        dataset, _ = _save_collector_safely(
+            collector=collector,
+            dataset=dataset,
+            dataset_id=dataset_id,
+            author=author,
+            reason="interrupt" if interrupted else "max_steps",
+        )
+    elif dataset is None:
+        print(
+            "dataset_saved=False reason=no_complete_transitions",
+            flush=True,
+        )
+
+    return dataset
 
 
 def record_minari_dataset(
@@ -31,9 +185,11 @@ def record_minari_dataset(
 ):
     """Collect at most ``max_steps`` valid human actions and save a dataset.
 
-    Invalid-key ticks are serviced inside :class:`Env16BC` and never reach the
-    ``DataCollector``. A partial final episode is intentionally flushed by
-    Minari as truncated when collection stops or Ctrl+C is pressed.
+    Invalid-key ticks are serviced inside :class:`Env16BC` and never become
+    actions. Keyless death/truncation ticks may complete the preceding valid
+    action. Every episode boundary is persisted immediately, and a partial
+    final episode is flushed as truncated when collection stops or Ctrl+C is
+    pressed.
     """
 
     if max_steps <= 0:
@@ -51,70 +207,14 @@ def record_minari_dataset(
         raw_env if raw_env is not None else Env16BC(no_op_action=no_op_action)
     )
     collector = minari.DataCollector(base_env, record_infos=True)
-    recorded_steps = 0
-    completed_episodes = 0
-    current_return = 0.0
-    interrupted = False
-
     try:
-        print("Waiting for the first valid human action...", flush=True)
-        collector.reset(options={"minari_autoseed": False})
-
-        try:
-            while recorded_steps < max_steps:
-                # The action was captured from the current observation. step()
-                # waits for the next valid labeled frame, preserving Minari's
-                # (observation_t, action_t, observation_t+1) alignment.
-                action = base_env.next_action()
-                _, reward, terminated, truncated, info = collector.step(action)
-                recorded_steps += 1
-                current_return += float(reward)
-                print(
-                    f"[RECORDED] step={recorded_steps}/{max_steps} "
-                    f"key={base_env.last_recorded_key} action={action} "
-                    f"label={base_env.Actions[action]} reward={float(reward):.4f}",
-                    flush=True,
-                )
-
-                if terminated or truncated:
-                    completed_episodes += 1
-                    print(
-                        f"[EPISODE END] episode={completed_episodes} "
-                        f"return={current_return:.4f} "
-                        f"outcome={info['episode_outcome']}",
-                        flush=True,
-                    )
-                    current_return = 0.0
-                    if recorded_steps < max_steps:
-                        print("Waiting for the next episode...", flush=True)
-                        collector.reset(options={"minari_autoseed": False})
-        except KeyboardInterrupt:
-            interrupted = True
-            print("\nStopping collection and flushing recorded steps...", flush=True)
-
-        if recorded_steps == 0:
-            print("No complete transitions were recorded; no dataset was created.")
-            return None
-
-        dataset = collector.create_dataset(
+        return _collect_and_save(
+            collector=collector,
+            base_env=base_env,
             dataset_id=dataset_id,
-            algorithm_name="human behavior cloning demonstrations",
+            max_steps=max_steps,
             author=author,
-            description=(
-                "Human Yugen Saga demonstrations recorded with Env16BC. "
-                "The game received NoOp responses; only mapped keyboard "
-                "actions were included."
-            ),
-            requirements=["minari==0.5.3"],
         )
-        print(
-            f"Created {dataset.id!r}: {dataset.total_episodes} episodes, "
-            f"{dataset.total_steps} transitions at {dataset.spec.data_path}",
-            flush=True,
-        )
-        if interrupted:
-            LOGGER.info("Dataset creation followed a keyboard interrupt.")
-        return dataset
     finally:
         collector.close()
 
@@ -161,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["MINARI_DATASETS_PATH"] = str(datasets_path)
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.WARNING,
         format="[%(asctime)s] %(levelname)s: %(message)s",
     )
     record_minari_dataset(

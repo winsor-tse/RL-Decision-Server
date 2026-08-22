@@ -291,11 +291,9 @@ def is_episode_loss(obs, prev_obs):
     if prev_obs is None or not np.any(prev_obs):
         return False
 
-    map_id = obs[5]
-    if map_id != 53:
-        return True
-
-    return False
+    player_hp_pct = float(obs[3])
+    map_id = float(obs[5])
+    return bool(player_hp_pct <= 0.0 or map_id != 53.0)
 
 
 def get_truncated(obs, prev_obs, current_step):

@@ -1,9 +1,16 @@
 import io
+import subprocess
 import sys
 import unittest
+from unittest import mock
 
 from Automation.infer import resolve_inference_command
-from Automation.processes import load_config, normalize_command
+from Automation.processes import (
+    load_config,
+    normalize_command,
+    run_stack,
+    wait_for_interrupted_child,
+)
 from Automation.record import resolve_recorder_command
 from Automation.tensorboard_server import FilteredStderr, NO_TENSORFLOW_NOTICE
 from Automation.train import resolve_training_command
@@ -74,6 +81,67 @@ class AutomationConfigTests(unittest.TestCase):
             'python -m Inference.dqn_eval --model_path "runs/model file.pt"'
         )
         self.assertEqual(command[-1], "runs/model file.pt")
+
+    def test_interrupted_recorder_gets_time_to_save(self):
+        process = mock.Mock()
+        process.poll.return_value = None
+        process.wait.return_value = 0
+
+        return_code = wait_for_interrupted_child(
+            process,
+            "offline recorder",
+            timeout_seconds=30,
+        )
+
+        self.assertEqual(return_code, 0)
+        process.wait.assert_called_once_with(timeout=30)
+
+    def test_interrupted_recorder_timeout_falls_back_to_cleanup(self):
+        process = mock.Mock()
+        process.poll.return_value = None
+        process.wait.side_effect = subprocess.TimeoutExpired(
+            cmd="offline recorder",
+            timeout=1,
+        )
+
+        return_code = wait_for_interrupted_child(
+            process,
+            "offline recorder",
+            timeout_seconds=1,
+        )
+
+        self.assertIsNone(return_code)
+
+    def test_run_stack_waits_for_recorder_after_ctrl_c(self):
+        bridge_process = mock.Mock()
+        recorder_process = mock.Mock()
+        recorder_process.poll.return_value = None
+        recorder_process.wait.side_effect = [KeyboardInterrupt(), 0]
+        config = {
+            "bridge_command": ["python", "bridge.py"],
+            "interrupt_grace_seconds": 12,
+        }
+
+        with (
+            mock.patch(
+                "Automation.processes.start_process",
+                side_effect=[bridge_process, recorder_process],
+            ),
+            mock.patch("Automation.processes.wait_until_ready"),
+            mock.patch("Automation.processes.terminate_process"),
+        ):
+            return_code = run_stack(
+                config,
+                ["python", "-m", "Offline.record_minari"],
+                "offline recorder",
+                start_tensorboard=False,
+            )
+
+        self.assertEqual(return_code, 0)
+        self.assertEqual(
+            recorder_process.wait.call_args_list,
+            [mock.call(), mock.call(timeout=12)],
+        )
 
     def test_configured_inference_algorithm_resolves_its_command(self):
         config = load_config("Automation/automation_config.yaml")

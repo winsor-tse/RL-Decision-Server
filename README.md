@@ -301,6 +301,26 @@ and ambiguous multi-key ticks are acknowledged but never passed to Minari.
 The recorder buffers one labeled frame so each stored action is aligned with
 the observation from which the player chose it.
 
+Player HP reaching zero or leaving combat map `53` terminates the current
+episode as a loss. The existing maximum-step and map-position truncation rules
+still apply. A terminal/truncating world-state tick completes the preceding
+valid action even if no new mapped key is held, so a released keyboard cannot
+hide a death or boundary state.
+
+Every terminated or truncated episode is written to the local Minari dataset
+before the environment resets. Later episodes are appended to that dataset.
+`Ctrl+C` also flushes a partial episode with at least one complete transition;
+Minari marks its last transition truncated. The launcher gives this final save
+up to 30 seconds before forcing process cleanup.
+
+Recorder output is limited to the captured key, parsed state, termination and
+truncation flags, plus dataset-save confirmation:
+
+```text
+key=W state=[...] terminated=False truncated=False
+dataset_saved=True reason=truncated id=env16/BC-v0 episodes=1 transitions=256 path=...
+```
+
 Inspect a completed dataset and its episode fields with:
 
 ```powershell

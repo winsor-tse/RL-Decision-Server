@@ -73,7 +73,8 @@ raw SQLite frames, run:
 
 Choose a new `-vN` suffix if that dataset already exists. The default Minari
 location is `%USERPROFILE%\.minari\datasets`; use `--datasets-path PATH` to
-override it.
+override it. Completed terminated/truncated episodes are saved before reset,
+and `Ctrl+C` flushes any partial episode containing a complete transition.
 
 If TensorBoard is missing when running `Training/DQN_server.py`, install it into the same active environment:
 
