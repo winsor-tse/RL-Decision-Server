@@ -1,68 +1,59 @@
+import contextlib
 import os
 import random
 import uuid
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import d4rl
-import gym
+import gymnasium as gym
+import minari
 import numpy as np
 import pyrallis
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import wandb
+from tqdm.auto import trange
 
 TensorBatch = List[torch.Tensor]
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 @dataclass
 class TrainConfig:
-    # wandb project name
+    # wandb params
     project: str = "CORL"
-    # wandb group name
-    group: str = "BC-D4RL"
-    # wandb run name
-    name: str = "BC"
-    # training dataset and evaluation environment
-    env: str = "halfcheetah-medium-expert-v2"
-    # total gradient updates during training
-    max_timesteps: int = int(1e6)
-    # training batch size
-    batch_size: int = 256
-    # maximum size of the replay buffer
-    buffer_size: int = 2_000_000
-    # what top fraction of the dataset (sorted by return) to use
-    frac: float = 0.1
-    # maximum possible trajectory length
-    max_traj_len: int = 1000
-    # whether to normalize states
-    normalize: bool = True
-    # discount factor
-    discount: float = 0.99
-    # evaluation frequency, will evaluate eval_freq training steps
-    eval_freq: int = int(5e3)
-    # number of episodes to run during evaluation
-    n_episodes: int = 10
-    # path for checkpoints saving, optional
-    checkpoints_path: Optional[str] = None
-    # file name for loading a model, optional
-    load_model: str = ""
-    # training random seed
-    seed: int = 0
-    # training device
-    device: str = "cuda"
+    group: str = "BC-Minari"
+    name: str = "bc"
+    # model params
+    gamma: float = 0.99  # Discount factor
+    top_fraction: float = 0.1  # Best data fraction to use
+    # training params
+    dataset_id: str = "env16/BC-v0"  #This needs to pull from local
+    update_steps: int = int(1e6)  # Total training networks updates
+    buffer_size: int = 2_000_000  # Replay buffer size
+    batch_size: int = 256  # Batch size for all networks
+    normalize_state: bool = True  # Normalize states
+    # evaluation params
+    eval_every: int = int(5e3)  # How often (time steps) we evaluate
+    eval_episodes: int = 10  # How many episodes run during evaluation
+    # general params
+    train_seed: int = 0
+    eval_seed: int = 0
+    checkpoints_path: Optional[str] = None  # Save path
 
     def __post_init__(self):
-        self.name = f"{self.name}-{self.env}-{str(uuid.uuid4())[:8]}"
+        self.name = f"{self.name}-{self.dataset_id}-{str(uuid.uuid4())[:8]}"
         if self.checkpoints_path is not None:
             self.checkpoints_path = os.path.join(self.checkpoints_path, self.name)
 
 
-def soft_update(target: nn.Module, source: nn.Module, tau: float):
-    for target_param, source_param in zip(target.parameters(), source.parameters()):
-        target_param.data.copy_((1 - tau) * target_param.data + tau * source_param.data)
+def set_seed(seed: int, deterministic_torch: bool = False):
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.use_deterministic_algorithms(deterministic_torch)
 
 
 def compute_mean_std(states: np.ndarray, eps: float) -> Tuple[np.ndarray, np.ndarray]:
@@ -81,11 +72,8 @@ def wrap_env(
     state_std: Union[np.ndarray, float] = 1.0,
     reward_scale: float = 1.0,
 ) -> gym.Env:
-    # PEP 8: E731 do not assign a lambda expression, use a def
     def normalize_state(state):
-        return (
-            state - state_mean
-        ) / state_std  # epsilon should be already added in std.
+        return (state - state_mean) / state_std
 
     def scale_reward(reward):
         # Please be careful, here reward is multiplied by scale!
@@ -95,6 +83,49 @@ def wrap_env(
     if reward_scale != 1.0:
         env = gym.wrappers.TransformReward(env, scale_reward)
     return env
+
+
+def discounted_return(x: np.ndarray, gamma: float) -> np.ndarray:
+    total_return = x[-1]
+    for t in reversed(range(x.shape[0] - 1)):
+        total_return = x[t] + gamma * total_return
+    return total_return
+
+
+def best_trajectories_ids(
+    dataset: minari.MinariDataset, top_fraction: float, gamma: float
+) -> List[int]:
+    ids_and_return = [
+        (episode.id, discounted_return(episode.rewards, gamma)) for episode in dataset
+    ]
+    ids_and_returns = sorted(ids_and_return, key=lambda t: -t[1])
+
+    top_ids = [id for (id, r) in ids_and_returns]
+    top_ids = top_ids[: max(1, int(top_fraction * len(ids_and_returns)))]
+    assert len(top_ids) > 0
+    return top_ids
+
+
+# WARN: this will load full dataset in memory (which is OK for D4RL datasets)
+def qlearning_dataset(
+    dataset: minari.MinariDataset, traj_ids: List[int]
+) -> Dict[str, np.ndarray]:
+    obs, next_obs, actions, rewards, dones = [], [], [], [], []
+
+    for episode in dataset.iterate_episodes(episode_indices=traj_ids):
+        obs.append(episode.observations[:-1].astype(np.float32))
+        next_obs.append(episode.observations[1:].astype(np.float32))
+        actions.append(episode.actions.astype(np.float32))
+        rewards.append(episode.rewards)
+        dones.append(episode.terminations)
+
+    return {
+        "observations": np.concatenate(obs),
+        "actions": np.concatenate(actions),
+        "next_observations": np.concatenate(next_obs),
+        "rewards": np.concatenate(rewards),
+        "terminals": np.concatenate(dones),
+    }
 
 
 class ReplayBuffer:
@@ -125,10 +156,11 @@ class ReplayBuffer:
     def _to_tensor(self, data: np.ndarray) -> torch.Tensor:
         return torch.tensor(data, dtype=torch.float32, device=self._device)
 
-    # Loads data in d4rl format, i.e. from Dict[str, np.array].
-    def load_d4rl_dataset(self, data: Dict[str, np.ndarray]):
+    # Loads data in d4rl format, i.e. from Dict[str, np.array] after q_learning_dataset.
+    def load_dataset(self, data: Dict[str, np.ndarray]):
         if self._size != 0:
             raise ValueError("Trying to load data into non-empty replay buffer")
+
         n_transitions = data["observations"].shape[0]
         if n_transitions > self._buffer_size:
             raise ValueError(
@@ -139,9 +171,8 @@ class ReplayBuffer:
         self._rewards[:n_transitions] = self._to_tensor(data["rewards"][..., None])
         self._next_states[:n_transitions] = self._to_tensor(data["next_observations"])
         self._dones[:n_transitions] = self._to_tensor(data["terminals"][..., None])
-        self._size += n_transitions
-        self._pointer = min(self._size, n_transitions)
 
+        self._size = self._pointer = n_transitions
         print(f"Dataset size: {n_transitions}")
 
     def sample(self, batch_size: int) -> TensorBatch:
@@ -159,90 +190,9 @@ class ReplayBuffer:
         raise NotImplementedError
 
 
-def set_seed(
-    seed: int, env: Optional[gym.Env] = None, deterministic_torch: bool = False
-):
-    if env is not None:
-        env.seed(seed)
-        env.action_space.seed(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.manual_seed(seed)
-    torch.use_deterministic_algorithms(deterministic_torch)
-
-
-def wandb_init(config: dict) -> None:
-    wandb.init(
-        config=config,
-        project=config["project"],
-        group=config["group"],
-        name=config["name"],
-        id=str(uuid.uuid4()),
-    )
-    wandb.run.save()
-
-
-@torch.no_grad()
-def eval_actor(
-    env: gym.Env, actor: nn.Module, device: str, n_episodes: int, seed: int
-) -> np.ndarray:
-    env.seed(seed)
-    actor.eval()
-    episode_rewards = []
-    for _ in range(n_episodes):
-        state, done = env.reset(), False
-        episode_reward = 0.0
-        while not done:
-            action = actor.act(state, device)
-            state, reward, done, _ = env.step(action)
-            episode_reward += reward
-        episode_rewards.append(episode_reward)
-
-    actor.train()
-    return np.asarray(episode_rewards)
-
-
-def keep_best_trajectories(
-    dataset: Dict[str, np.ndarray],
-    frac: float,
-    discount: float,
-    max_episode_steps: int = 1000,
-):
-    ids_by_trajectories = []
-    returns = []
-    cur_ids = []
-    cur_return = 0
-    reward_scale = 1.0
-    for i, (reward, done) in enumerate(zip(dataset["rewards"], dataset["terminals"])):
-        cur_return += reward_scale * reward
-        cur_ids.append(i)
-        reward_scale *= discount
-        if done == 1.0 or len(cur_ids) == max_episode_steps:
-            ids_by_trajectories.append(list(cur_ids))
-            returns.append(cur_return)
-            cur_ids = []
-            cur_return = 0
-            reward_scale = 1.0
-
-    sort_ord = np.argsort(returns, axis=0)[::-1].reshape(-1)
-    top_trajs = sort_ord[: max(1, int(frac * len(sort_ord)))]
-
-    order = []
-    for i in top_trajs:
-        order += ids_by_trajectories[i]
-    order = np.array(order)
-    dataset["observations"] = dataset["observations"][order]
-    dataset["actions"] = dataset["actions"][order]
-    dataset["next_observations"] = dataset["next_observations"][order]
-    dataset["rewards"] = dataset["rewards"][order]
-    dataset["terminals"] = dataset["terminals"][order]
-
-
 class Actor(nn.Module):
     def __init__(self, state_dim: int, action_dim: int, max_action: float):
         super(Actor, self).__init__()
-
         self.net = nn.Sequential(
             nn.Linear(state_dim, 256),
             nn.ReLU(),
@@ -251,7 +201,6 @@ class Actor(nn.Module):
             nn.Linear(256, action_dim),
             nn.Tanh(),
         )
-
         self.max_action = max_action
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
@@ -266,24 +215,18 @@ class Actor(nn.Module):
 class BC:
     def __init__(
         self,
-        max_action: np.ndarray,
+        max_action: float,
         actor: nn.Module,
         actor_optimizer: torch.optim.Optimizer,
-        discount: float = 0.99,
         device: str = "cpu",
     ):
         self.actor = actor
         self.actor_optimizer = actor_optimizer
         self.max_action = max_action
-        self.discount = discount
-
-        self.total_it = 0
         self.device = device
 
     def train(self, batch: TensorBatch) -> Dict[str, float]:
         log_dict = {}
-        self.total_it += 1
-
         state, action, _, _, _ = batch
 
         # Compute actor loss
@@ -301,45 +244,76 @@ class BC:
         return {
             "actor": self.actor.state_dict(),
             "actor_optimizer": self.actor_optimizer.state_dict(),
-            "total_it": self.total_it,
         }
 
     def load_state_dict(self, state_dict: Dict[str, Any]):
         self.actor.load_state_dict(state_dict["actor"])
         self.actor_optimizer.load_state_dict(state_dict["actor_optimizer"])
-        self.total_it = state_dict["total_it"]
+
+
+@torch.no_grad()
+def evaluate(
+    env: gym.Env, actor: nn.Module, num_episodes: int, seed: int, device: str
+) -> np.ndarray:
+    actor.eval()
+    episode_rewards = []
+    for i in range(num_episodes):
+        done = False
+        state, info = env.reset(seed=seed + i)
+
+        episode_reward = 0.0
+        while not done:
+            action = actor.act(state, device)
+            state, reward, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
+            episode_reward += reward
+        episode_rewards.append(episode_reward)
+
+    actor.train()
+    return np.asarray(episode_rewards)
 
 
 @pyrallis.wrap()
 def train(config: TrainConfig):
-    env = gym.make(config.env)
+    wandb.init(
+        config=asdict(config),
+        project=config.project,
+        group=config.group,
+        name=config.name,
+        id=str(uuid.uuid4()),
+        save_code=True,
+    )
+    dataset = minari.load_dataset(config.dataset_id)
 
-    state_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.shape[0]
+    eval_env = dataset.recover_environment() #TODO: current dataset is local, and its replay gameplay. Do not recover enviornment.
+    #TODO: build the Env16
+    state_dim = eval_env.observation_space.shape[0]
+    action_dim = eval_env.action_space.shape[0]
+    max_action = float(eval_env.action_space.high[0])
 
-    dataset = d4rl.qlearning_dataset(env)
-
-    keep_best_trajectories(dataset, config.frac, config.discount)
-
-    if config.normalize:
-        state_mean, state_std = compute_mean_std(dataset["observations"], eps=1e-3)
+    qdataset = qlearning_dataset(
+        dataset=dataset,
+        traj_ids=best_trajectories_ids(dataset, config.top_fraction, config.gamma),
+    )
+    if config.normalize_state:
+        state_mean, state_std = compute_mean_std(qdataset["observations"], eps=1e-3)
     else:
         state_mean, state_std = 0, 1
 
-    dataset["observations"] = normalize_states(
-        dataset["observations"], state_mean, state_std
+    qdataset["observations"] = normalize_states(
+        qdataset["observations"], state_mean, state_std
     )
-    dataset["next_observations"] = normalize_states(
-        dataset["next_observations"], state_mean, state_std
+    qdataset["next_observations"] = normalize_states(
+        qdataset["next_observations"], state_mean, state_std
     )
-    env = wrap_env(env, state_mean=state_mean, state_std=state_std)
+    eval_env = wrap_env(eval_env, state_mean=state_mean, state_std=state_std)
     replay_buffer = ReplayBuffer(
         state_dim,
         action_dim,
         config.buffer_size,
-        config.device,
+        DEVICE,
     )
-    replay_buffer.load_d4rl_dataset(dataset)
+    replay_buffer.load_dataset(qdataset)
 
     if config.checkpoints_path is not None:
         print(f"Checkpoints path: {config.checkpoints_path}")
@@ -347,73 +321,48 @@ def train(config: TrainConfig):
         with open(os.path.join(config.checkpoints_path, "config.yaml"), "w") as f:
             pyrallis.dump(config, f)
 
-    max_action = float(env.action_space.high[0])
+    # Set seed #this seed is not necessary
+    set_seed(config.train_seed)
 
-    # Set seeds
-    seed = config.seed
-    set_seed(seed, env)
-
-    actor = Actor(state_dim, action_dim, max_action).to(config.device)
+    actor = Actor(state_dim, action_dim, max_action).to(DEVICE)
     actor_optimizer = torch.optim.Adam(actor.parameters(), lr=3e-4)
 
-    kwargs = {
-        "max_action": max_action,
-        "actor": actor,
-        "actor_optimizer": actor_optimizer,
-        "discount": config.discount,
-        "device": config.device,
-    }
+    trainer = BC(
+        max_action=max_action,
+        actor=actor,
+        actor_optimizer=actor_optimizer,
+        device=DEVICE,
+    )
 
-    print("---------------------------------------")
-    print(f"Training BC, Env: {config.env}, Seed: {seed}")
-    print("---------------------------------------")
-
-    # Initialize policy
-    trainer = BC(**kwargs)
-
-    if config.load_model != "":
-        policy_file = Path(config.load_model)
-        trainer.load_state_dict(torch.load(policy_file))
-        actor = trainer.actor
-
-    wandb_init(asdict(config))
-
-    evaluations = []
-    for t in range(int(config.max_timesteps)):
-        batch = replay_buffer.sample(config.batch_size)
-        batch = [b.to(config.device) for b in batch]
+    #TODO: we are not using wandb, we will use tensorboard
+    
+    for step in trange(config.update_steps):
+        batch = [b.to(DEVICE) for b in replay_buffer.sample(config.batch_size)]
         log_dict = trainer.train(batch)
-        wandb.log(log_dict, step=trainer.total_it)
-        # Evaluate episode
-        if (t + 1) % config.eval_freq == 0:
-            print(f"Time steps: {t + 1}")
-            eval_scores = eval_actor(
-                env,
-                actor,
-                device=config.device,
-                n_episodes=config.n_episodes,
-                seed=config.seed,
+
+        wandb.log(log_dict, step=step)
+
+        if (step + 1) % config.eval_every == 0:
+            eval_scores = evaluate(
+                env=eval_env,
+                actor=actor,
+                num_episodes=config.eval_episodes,
+                seed=config.eval_seed,
+                device=DEVICE,
             )
-            eval_score = eval_scores.mean()
-            normalized_eval_score = env.get_normalized_score(eval_score) * 100.0
-            evaluations.append(normalized_eval_score)
-            print("---------------------------------------")
-            print(
-                f"Evaluation over {config.n_episodes} episodes: "
-                f"{eval_score:.3f} , D4RL score: {normalized_eval_score:.3f}"
-            )
-            print("---------------------------------------")
+            wandb.log({"evaluation_return": eval_scores.mean()}, step=step)
+            # optional normalized score logging, only if dataset has reference scores
+            with contextlib.suppress(ValueError):
+                normalized_score = (
+                    minari.get_normalized_score(dataset, eval_scores).mean() * 100
+                )
+                wandb.log({"normalized_score": normalized_score}, step=step)
 
             if config.checkpoints_path is not None:
                 torch.save(
                     trainer.state_dict(),
-                    os.path.join(config.checkpoints_path, f"checkpoint_{t}.pt"),
+                    os.path.join(config.checkpoints_path, f"checkpoint_{step}.pt"),
                 )
-
-            wandb.log(
-                {"d4rl_normalized_score": normalized_eval_score},
-                step=trainer.total_it,
-            )
 
 
 if __name__ == "__main__":
