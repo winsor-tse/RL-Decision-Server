@@ -1,0 +1,17 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^& 'C:\\\\Users\\\\Cliff\\\\Documents\\\\Github\\\\RL-Decision-Server\\\\\\.venv\\\\scripts\\\\python\\.exe' \\.\\\\Offline\\\\run_inference_from_checkpoint\\.py$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^& 'C:\\\\Users\\\\Cliff\\\\Documents\\\\Github\\\\RL-Decision-Server\\\\\\.venv\\\\scripts\\\\python\\.exe' \\.\\\\Offline\\\\run_live_evaluation\\.py$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^& \\.\\\\RunInference\\.ps1 -Command \"python -m Offline\\.run_live_evaluation\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "&": true
+    }
+}
