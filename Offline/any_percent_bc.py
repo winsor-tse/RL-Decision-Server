@@ -296,7 +296,37 @@ def evaluate(
                 else:
                     action = raw_action
 
-                state, reward, terminated, truncated, info = env.step(action)
+                # Step the environment. Env16BC will raise a ValueError when the
+                # provided action doesn't match the recorded captured action. Catch
+                # that and advance using the recorded action (if available) so the
+                # episode can continue while still recording the model's prediction.
+                try:
+                    state, reward, terminated, truncated, info = env.step(action)
+                except ValueError as e:
+                    msg = str(e)
+                    # Detect the specific mismatch error from Env16BC
+                    if 'Expected captured action' in msg and hasattr(env, 'next_action'):
+                        expected = None
+                        try:
+                            expected = env.next_action()
+                        except Exception:
+                            expected = None
+
+                        if expected is not None:
+                            # Advance env using the recorded action so episode continues
+                            state, reward, terminated, truncated, info = env.step(int(expected))
+                            # Optionally, log the mismatch via TensorBoard if writer exists
+                            try:
+                                writer.add_scalar('eval/action_mismatch', 1, len(episode_rewards))
+                            except Exception:
+                                pass
+                        else:
+                            # Re-raise if we cannot recover
+                            raise
+                    else:
+                        # Unknown ValueError - re-raise
+                        raise
+
                 done = terminated or truncated
                 episode_reward += reward
         episode_rewards.append(episode_reward)

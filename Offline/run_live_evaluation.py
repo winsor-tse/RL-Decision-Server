@@ -41,28 +41,25 @@ max_action = float(max(1.0, np.max(np.abs(qdataset['actions']))))
 actor = Actor(state_dim, action_dim, max_action).to(DEVICE)
 actor.load_state_dict(state['actor'])
 
-# Recover environment for live evaluation
-print('Recovering environment from dataset (this will try to import and construct the custom env)...')
-eval_env = dataset.recover_environment()
-# If the recovered env is the BC variant (which enforces matching captured actions),
-# construct the live Env16 instead so the policy can act independently.
-try:
-    env_cls = None
-    # Try to detect Env16BC by name
-    if env_cls is None and eval_env.__class__.__name__ == 'Env16BC':
-        from Custom_enviornments.Test_Env.Env_16 import Env16
-        print('Recovered Env16BC; constructing Env16 for live policy evaluation')
-        eval_env = Env16(config=eval_env.config)
+# Construct a live Env16 and connect its socket to the bridge so model actions are applied
+print('Constructing live Env16 with a connected ZMQ socket (forcing autonomous execution)')
+from Custom_enviornments.Test_Env.Env_16 import Env16
+from Custom_enviornments.Load_env_config import load_env_config
+config = load_env_config()
+zmq_bind = config.get('ZMQ_BIND_URL')
+import zmq
+ctx = zmq.Context.instance()
+socket = ctx.socket(zmq.REP)
+socket.connect(zmq_bind)
+# Instantiate Env16 with the connected REP socket so it will send ai_result replies
+eval_env = Env16(config=config, socket=socket)
 
-    print('Wrapping environment with normalization')
-    eval_env = wrap_env(eval_env, state_mean=state_mean, state_std=state_std)
+print('Wrapping environment with normalization')
+eval_env = wrap_env(eval_env, state_mean=state_mean, state_std=state_std)
 
-    # Run evaluation episodes
-    print(f'Starting evaluation for {NUM_EPISODES} episodes. Make sure the game client/server is running and connected.')
-    results = evaluate(eval_env, actor, num_episodes=NUM_EPISODES, seed=0, device=DEVICE)
-except Exception as e:
-    print('Live evaluation failed during env construction or rollout:', e)
-    raise
+# Run evaluation episodes
+print(f'Starting evaluation for {NUM_EPISODES} episodes. Make sure the game client/server is running and connected.')
+results = evaluate(eval_env, actor, num_episodes=NUM_EPISODES, seed=0, device=DEVICE)
 
 print('Episode returns:', results)
 print('Mean return:', results.mean())
