@@ -1,4 +1,4 @@
-### Chnage Log
+### Change Log
 
 ## BC - IL Branch
 
