@@ -32,35 +32,42 @@ ACTIONS_11 = [
 # This action space is specific to Test_Env.
 # A different game class should define its own env file and action list.
 class Env16(BaseEnv):
-    """Yugen Saga environment with the current 15-action discrete action space."""
+    """Yugen Saga environment with the current 11-action discrete action space."""
 
-    def __init__(self):
-        super().__init__(actions=ACTIONS_11, config=load_env_config())
+    def __init__(self, *, actions=None, config=None, socket=None):
+        super().__init__(
+            actions=actions or ACTIONS_11,
+            config=config or load_env_config(),
+            socket=socket,
+        )
         self.kill_counter = 0
         self.next_Ent_state = {}
 
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
-        message = self.socket.recv_json()
-        LOGGER.debug("Reset message received: %s", message)
+    def _initialize_from_world_state(self, world_state):
         self.kill_counter = 0
-
-        response = self._build_response(
-            message=message,
-            move="direction:up",
-            reset=True,
-        )
-        self.socket.send_json(response)
-
-        world_state = message.get("worldState", {})
         self.next_state = Env_conditions.parse_observation(
             world_state,
             int(self.config["OBS_SIZE"]),
         )
         self.next_Ent_state = Env_conditions.parse_entity_state(world_state)
         self.current_step = 0
-        LOGGER.info("Environment reset")
         return self.next_state, self._get_info()
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        message = self.socket.recv_json()
+        LOGGER.debug("Reset message received: %s", message)
+        response = self._build_response(
+            message=message,
+            move="direction:up",
+            reset=True,
+        )
+        self.socket.send_json(response)
+        observation, info = self._initialize_from_world_state(
+            message.get("worldState", {})
+        )
+        LOGGER.info("Environment reset")
+        return observation, info
 
     def step(self, action):
         action_idx = self._normalize_action(action)
@@ -78,11 +85,23 @@ class Env16(BaseEnv):
         )
         self.socket.send_json(response)
 
+        return self._advance_from_world_state(world_state, action_idx)
+
+    def _advance_from_world_state(
+        self,
+        world_state,
+        action_idx,
+        *,
+        parsed_next_state=None,
+    ):
+        """Apply Env16 reward and episode rules to one received world state."""
         self.current_step += 1
-        real_next_state = Env_conditions.parse_observation(
-            world_state,
-            int(self.config["OBS_SIZE"]),
-        )
+        real_next_state = parsed_next_state
+        if real_next_state is None:
+            real_next_state = Env_conditions.parse_observation(
+                world_state,
+                int(self.config["OBS_SIZE"]),
+            )
         true_next_ent_state = Env_conditions.parse_entity_state(world_state)
         reward_components = Env_conditions.get_reward_components(
             real_next_state,
@@ -134,4 +153,4 @@ class Env16(BaseEnv):
         return self.next_state, reward, terminated, truncated, info
 
     def close(self):
-        self.socket.close(linger=0)
+        super().close()

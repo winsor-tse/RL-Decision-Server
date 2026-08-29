@@ -5,6 +5,7 @@ Setup guide for running the RL Decision Server with the current custom environme
 ## Prerequisites
 
 - Python 3.8+
+- Python's standard-library SQLite module (`sqlite3`)
 - Yugen Saga local server running
 - Chrome extension installed from `Yugen-Battler-Custom`
 - PowerShell, Windows Terminal, or another shell from the project root
@@ -39,6 +40,41 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python -m pip install -e .
 ```
+
+SQLite does not have a separate pip requirement. It is provided by Python's
+standard library. Verify that the active Python installation includes it with:
+
+```bash
+python -c "import sqlite3; print(sqlite3.sqlite_version)"
+```
+
+The recorder's minimal dependency list is also available separately:
+
+```bash
+python -m pip install -r Offline/requirements.txt
+```
+
+Start the WebSocket bridge and offline recorder together with:
+
+```powershell
+.\RunRecorder.ps1
+```
+
+The equivalent direct Python command is `python -m Automation.record`.
+Enter a session name when prompted; recording then blocks directly on
+`socket.recv_json()` until `Ctrl+C` is pressed.
+
+To record valid human actions as a Minari behavior-cloning dataset instead of
+raw SQLite frames, run:
+
+```powershell
+.\RunRecorder.ps1 -Command "python -m Offline.record_minari --dataset-id env16/BC-v0 --max-steps 500"
+```
+
+Choose a new `-vN` suffix if that dataset already exists. The default Minari
+location is `%USERPROFILE%\.minari\datasets`; use `--datasets-path PATH` to
+override it. Completed terminated/truncated episodes are saved before reset,
+and `Ctrl+C` flushes any partial episode containing a complete transition.
 
 If TensorBoard is missing when running `Training/DQN_server.py`, install it into the same active environment:
 

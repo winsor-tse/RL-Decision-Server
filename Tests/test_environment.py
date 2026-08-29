@@ -84,6 +84,44 @@ class EnvironmentCorrectnessTests(unittest.TestCase):
         self.assertEqual(env.socket.response["move"], "up")
         self.assertIn("reward_components", info)
 
+    def test_zero_player_hp_terminates_as_a_loss(self):
+        previous_world = make_world_state(player_hp=100)
+        death_world = make_world_state(player_hp=0)
+        previous = Env_conditions.parse_observation(previous_world)
+        death_state = Env_conditions.parse_observation(death_world)
+
+        self.assertTrue(Env_conditions.is_episode_loss(death_state, previous))
+
+        env = Env16.__new__(Env16)
+        env.Actions = list(ACTIONS_11)
+        env.config = load_env_config()
+        env.socket = FakeSocket(
+            {
+                "type": "ai_tick",
+                "requestId": "player-death",
+                "worldState": death_world,
+            }
+        )
+        env.next_state = previous
+        env.next_Ent_state = Env_conditions.parse_entity_state(previous_world)
+        env.current_step = 0
+        env.kill_counter = 0
+
+        _, _, terminated, truncated, info = env.step(0)
+
+        self.assertTrue(terminated)
+        self.assertFalse(truncated)
+        self.assertEqual(info["episode_outcome"], "loss")
+        self.assertEqual(info["reward_components"]["terminal"], -100.0)
+
+    def test_leaving_combat_map_still_terminates_as_a_loss(self):
+        previous = Env_conditions.parse_observation(make_world_state())
+        off_map_world = make_world_state()
+        off_map_world["player"]["mapID"] = "map3471"
+        off_map = Env_conditions.parse_observation(off_map_world)
+
+        self.assertTrue(Env_conditions.is_episode_loss(off_map, previous))
+
     def test_reward_components_sum_to_reward(self):
         previous = Env_conditions.parse_observation(make_world_state())
         current_world = make_world_state(player_hp=98, enemy_hp=50)

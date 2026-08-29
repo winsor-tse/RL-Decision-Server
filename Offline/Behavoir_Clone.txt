@@ -1,0 +1,73 @@
+
+
+The Current record players python script works but now i need to integrate it with an env.
+
+Minari does this with already built envs. I want to leverage pre existing env16 and env conditions.
+
+Reimplement Env_16 call it Env16BC for specific Minari Offline Dataset, eventually be used for offline RL.
+
+This will be the custom action logic:
+
+    We will send No Op actions back since we will be recording actions using WindowsInputCapture.
+    Translate the recorded action to the action space in Env_16 using a custom mapping logic.
+
+    "key": "W" -> "up" or action_idx = 0
+    "key": "A" -> "left" or action_idx = 1
+    "key": "D" -> "right" or action_idx = 2
+    "key": "S" -> "down" or action_idx = 3
+    "key": "space" -> "attack" or action_idx = 4
+    "key": "1" -> "castSpell:1" or action_idx = 5
+    "key": "2" -> "castSpell:2" or action_idx = 6
+    "key": "3" -> "castSpell:3" or action_idx = 7
+    "key": "5" -> "castSpell:5" or action_idx = 8
+    "key": "6" -> "castSpell:6" or action_idx = 9
+    "key": "7" -> "castSpell:7" or action_idx = 10
+
+    Invalid keys that do not map to an action, do not record and add.
+
+    In regards to stepping in this env, DO NOT step unless its a valid key.
+
+    action = env.action_space.sample() needs to be replaced with just a return of the action.
+
+Minari dataset needs:
+    observations = episode_data.observations (parse_observation from Env_conditions)
+    actions = episode_data.actions (Custom Logic as described above)
+    rewards = episode_data.rewards (get_reward_components from Env_conditions)
+    terminations = episode_data.terminations (follow logic inside Env_16)
+    truncations = episode_data.truncations (follow logic inside Env_16)
+    infos = episode_data.infos (follow logic inside Env_16)
+
+
+
+Sample modified COde from Minari:
+
+import minari
+from Custom_enviornments.Test_Env.Env_16_BC import Env16BC
+
+
+raw_env = Env16BC()
+env = minari.DataCollector(raw_env, record_infos=True)
+max_steps = 500
+dataset = None
+
+env.reset(options={"minari_autoseed": False})
+for step in range(max_steps):
+    action = raw_env.next_action()
+    obs, rew, terminated, truncated, info = env.step(action)
+    if terminated or truncated:
+        # Persist the completed episode before reset.
+        if dataset is None:
+            dataset = env.create_dataset(
+                "env16/BC-v0",
+                algorithm_name="human behavior cloning demonstrations",
+            )
+        else:
+            env.add_to_dataset(dataset)
+        if step + 1 < max_steps:
+            env.reset(options={"minari_autoseed": False})
+
+# Production entry point (also starts cleanly through RunRecorder.ps1):
+# python -m Offline.record_minari --dataset-id env16/BC-v0 --max-steps 500
+
+
+

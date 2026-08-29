@@ -3,7 +3,7 @@
 # The bridge starts first. The launcher waits until bridge_ready_signal appears
 # in bridge output, then starts the configured algorithm command.
 
-rl_algorithm: "ppo_lstm"
+rl_algorithm: "ppo"
 
 # Optional PPO/PPO-LSTM checkpoint used to initialize a new training run.
 # The new run still saves to its own runs/<run_name>/ checkpoint.
@@ -16,6 +16,8 @@ bridge_command:
   - Automation.Bridge.ws_zmq_bridge
 bridge_ready_signal: "WebSocket bridge listening"
 ready_timeout_seconds: 30
+# Let recorders flush SQLite/Minari data after Ctrl+C before force cleanup.
+interrupt_grace_seconds: 30
 start_tensorboard: true
 tensorboard_command:
   - python
@@ -38,6 +40,12 @@ ppo_lstm_command:
   - python
   - -m
   - Training.PPO_lstm_server
+
+# Offline recording uses the same bridge lifecycle as training and inference.
+recorder_command:
+  - python
+  - -m
+  - Offline.record_player
 
 # Select dqn, ppo, or ppo_lstm independently from the training algorithm.
 inference_algorithm: "ppo_lstm"

@@ -1,0 +1,73 @@
+param(
+    [string]$Config = "Automation\automation_config.yaml",
+    [string]$Command = "",
+    [string]$LogDirectory = "logs"
+)
+
+$ProjectPython = Join-Path $PSScriptRoot "RL_venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $ProjectPython)) {
+    $ProjectPython = "python"
+}
+
+if (-not [System.IO.Path]::IsPathRooted($LogDirectory)) {
+    $LogDirectory = Join-Path $PSScriptRoot $LogDirectory
+}
+New-Item -ItemType Directory -Path $LogDirectory -Force -ErrorAction Stop | Out-Null
+
+$RunTimestamp = Get-Date -Format "yyyyMMdd_HHmmss_fff"
+$LogPath = Join-Path $LogDirectory "recording_$RunTimestamp.txt"
+$PythonArguments = @("-m", "Automation.record", "--config", $Config)
+if ($Command) {
+    $PythonArguments += @("--command", $Command)
+}
+
+function Write-RunLog {
+    param([string]$Text)
+
+    Write-Host $Text
+}
+
+$TranscriptStarted = $false
+try {
+    Start-Transcript -LiteralPath $LogPath -Append -ErrorAction Stop | Out-Null
+    $TranscriptStarted = $true
+} catch {
+    Write-Warning "Could not start transcript at ${LogPath}: $($_.Exception.Message)"
+}
+
+@(
+    "Offline player recording run"
+    "Started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')"
+    "Working directory: $PSScriptRoot"
+    "Config: $Config"
+    "Command: $ProjectPython $($PythonArguments -join ' ')"
+    ("=" * 80)
+) | ForEach-Object { Write-RunLog $_ }
+
+$ProcessExitCode = 1
+try {
+    # Run directly so Offline.record_player retains interactive stdin for its
+    # recording-name prompt and Ctrl+C shutdown.
+    & $ProjectPython @PythonArguments
+    $ProcessExitCode = $LASTEXITCODE
+    if ($null -eq $ProcessExitCode) {
+        $ProcessExitCode = 0
+    }
+} catch {
+    Write-RunLog "PowerShell launcher error:"
+    Write-RunLog ($_ | Out-String).TrimEnd()
+    $ProcessExitCode = 1
+}
+
+Write-RunLog ("=" * 80)
+Write-RunLog "Finished: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')"
+Write-RunLog "Exit code: $ProcessExitCode"
+Write-RunLog "Log file: $LogPath"
+
+if ($TranscriptStarted) {
+    Stop-Transcript | Out-Null
+}
+
+if ($ProcessExitCode -ne 0) {
+    throw "Offline recording failed with exit code $ProcessExitCode. See $LogPath"
+}

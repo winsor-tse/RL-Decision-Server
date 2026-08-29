@@ -1,4 +1,4 @@
-"""Shared process supervision for training and inference launchers."""
+"""Shared process supervision for training, inference, and recording."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import yaml
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path(__file__).with_name("automation_config.yaml")
 PYTHON_COMMANDS = {"python", "python.exe", "python3", "py"}
+DEFAULT_INTERRUPT_GRACE_SECONDS = 30.0
 
 
 def load_config(config_path: str | Path) -> dict:
@@ -88,6 +89,25 @@ def terminate_process(process: subprocess.Popen | None, name: str) -> None:
         process.wait()
 
 
+def wait_for_interrupted_child(
+    process: subprocess.Popen | None,
+    name: str,
+    timeout_seconds: float = DEFAULT_INTERRUPT_GRACE_SECONDS,
+) -> int | None:
+    """Give a Ctrl+C-aware child time to flush data before forced cleanup."""
+
+    if process is None:
+        return None
+    return_code = process.poll()
+    if return_code is not None:
+        return int(return_code)
+
+    try:
+        return int(process.wait(timeout=timeout_seconds))
+    except (subprocess.TimeoutExpired, KeyboardInterrupt):
+        return None
+
+
 def wait_until_ready(
     process: subprocess.Popen,
     ready_signal: str,
@@ -128,7 +148,7 @@ def run_stack(
     *,
     start_tensorboard: bool,
 ) -> int:
-    """Run bridge, optional TensorBoard, and one training/inference child."""
+    """Run bridge, optional TensorBoard, and one supervised child process."""
     bridge_command = config.get("bridge_command")
     if not bridge_command:
         raise ValueError("bridge_command is required.")
@@ -156,7 +176,17 @@ def run_stack(
         child_process = start_process(child_command)
         return child_process.wait()
     except KeyboardInterrupt:
-        return 130
+        child_return_code = wait_for_interrupted_child(
+            child_process,
+            child_name,
+            float(
+                config.get(
+                    "interrupt_grace_seconds",
+                    DEFAULT_INTERRUPT_GRACE_SECONDS,
+                )
+            ),
+        )
+        return child_return_code if child_return_code is not None else 130
     finally:
         terminate_process(child_process, child_name)
         terminate_process(tensorboard_process, "TensorBoard")
