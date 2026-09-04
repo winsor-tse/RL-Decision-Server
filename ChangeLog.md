@@ -2,6 +2,14 @@
 
 ## BC-IL branch
 
+### 2026-09-03 - Numpad behavior-cloning actions
+
+- Added stable `NUMPAD0` through `NUMPAD9` names to Windows input capture.
+- Mapped `NUMPAD1`, `NUMPAD2`, `NUMPAD3`, `NUMPAD5`, `NUMPAD6`, and `NUMPAD7`
+  to BC spell action indices `5` through `10`, matching the top-row digits.
+- Treats top-row and numpad aliases pressed together as one action when both
+  map to the same spell, while different simultaneous actions remain invalid.
+
 ### 2026-09-03 - Behavior-cloning training entry point
 
 - Replaced the unavailable `pyrallis` command-line dependency in

@@ -113,6 +113,12 @@ class Env16BCMappingTests(unittest.TestCase):
             "5": "castSpell:5",
             "6": "castSpell:6",
             "7": "castSpell:7",
+            "NUMPAD1": "castSpell:1",
+            "NUMPAD2": "castSpell:2",
+            "NUMPAD3": "castSpell:3",
+            "NUMPAD5": "castSpell:5",
+            "NUMPAD6": "castSpell:6",
+            "NUMPAD7": "castSpell:7",
         }
 
         for key, action_idx in KEY_TO_ACTION_INDEX.items():
@@ -150,6 +156,16 @@ class Env16BCMappingTests(unittest.TestCase):
             ],
         }
         self.assertIsNone(action_from_input(snapshot))
+
+    def test_top_row_and_numpad_alias_for_same_spell_is_not_ambiguous(self):
+        snapshot = {
+            "keys_down": [{"key": "1"}, {"key": "NUMPAD1"}],
+            "events": [
+                {"key": "1", "event": "key_down"},
+                {"key": "NUMPAD1", "event": "key_down"},
+            ],
+        }
+        self.assertEqual(action_from_input(snapshot), (5, "1"))
 
 
 class Env16BCCollectionTests(unittest.TestCase):

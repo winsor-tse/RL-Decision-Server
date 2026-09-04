@@ -299,8 +299,10 @@ to select another root.
 
 The BC recorder sends `NoOp` to the game on every tick. It records only one
 unambiguous mapped action: `W=up(0)`, `A=left(1)`, `D=right(2)`, `S=down(3)`,
-`SPACE=attack(4)`, and spells `1,2,3,5,6,7` as indices `5..10`. Unmapped ticks
-and ambiguous multi-key ticks are acknowledged but never passed to Minari.
+`SPACE=attack(4)`, and spells `1,2,3,5,6,7` as indices `5..10`. The matching
+numpad keys (`NUMPAD1`, `NUMPAD2`, `NUMPAD3`, `NUMPAD5`, `NUMPAD6`, and
+`NUMPAD7`) use the same spell indices. Unmapped ticks and ambiguous
+multi-action ticks are acknowledged but never passed to Minari.
 The recorder buffers one labeled frame so each stored action is aligned with
 the observation from which the player chose it.
 

@@ -88,6 +88,8 @@ VK_NAMES = {
 def virtual_key_name(virtual_key: int) -> str:
     if 0x30 <= virtual_key <= 0x39 or 0x41 <= virtual_key <= 0x5A:
         return chr(virtual_key)
+    if 0x60 <= virtual_key <= 0x69:
+        return f"NUMPAD{virtual_key - 0x60}"
     if 0x70 <= virtual_key <= 0x87:
         return f"F{virtual_key - 0x6F}"
     return VK_NAMES.get(virtual_key, f"VK_{virtual_key:02X}")

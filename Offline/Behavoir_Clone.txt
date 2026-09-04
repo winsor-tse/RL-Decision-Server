@@ -23,6 +23,9 @@ This will be the custom action logic:
     "key": "6" -> "castSpell:6" or action_idx = 9
     "key": "7" -> "castSpell:7" or action_idx = 10
 
+    The numpad keys NUMPAD1, NUMPAD2, NUMPAD3, NUMPAD5, NUMPAD6, and NUMPAD7
+    map to the same action indices as their top-row number equivalents.
+
     Invalid keys that do not map to an action, do not record and add.
 
     In regards to stepping in this env, DO NOT step unless its a valid key.
