@@ -21,6 +21,7 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 - `RunInference.ps1`: starts the bridge and the configured evaluator.
 - `RunOfflineRL.ps1`: trains or evaluates an any-percent BC model.
 - `RunRecorder.ps1`: starts the bridge and offline recorder together.
+- `PS1_COMMANDS.md`: complete PowerShell launcher CLI and examples.
 - `Utils/buffers.py`: replay buffer used by DQN.
 - `Custom_enviornments/`: shared env config, base env, and class-specific environments.
 

@@ -2,6 +2,11 @@
 
 ## BC-IL branch
 
+### 2026-09-03 - PowerShell command reference
+
+- Added `PS1_COMMANDS.md` with syntax, defaults, mode applicability, output
+  details, and examples for every project-level PowerShell launcher.
+
 ### 2026-09-03 - Numpad behavior-cloning actions
 
 - Added stable `NUMPAD0` through `NUMPAD9` names to Windows input capture.
