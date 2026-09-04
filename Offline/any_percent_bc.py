@@ -36,7 +36,7 @@ class TrainConfig:
     batch_size: int = 256  # Batch size for all networks
     normalize_state: bool = True  # Normalize states
     # evaluation params
-    eval_every: int = int(5e3)  # Periodic checkpoint interval
+    eval_every: int = int(5e3)  # Reserved evaluation interval; no model save
     eval_episodes: int = 10  # How many episodes run during evaluation
     # general params
     train_seed: int = 0
@@ -416,12 +416,6 @@ def train(config: TrainConfig):
             except Exception:
                 # if a non-scalar is logged, skip
                 pass
-
-        if config.eval_every > 0 and (step + 1) % config.eval_every == 0:
-            torch.save(
-                trainer.state_dict(),
-                os.path.join(config.checkpoints_path, f"checkpoint_{step}.pt"),
-            )
 
     model_path = os.path.join(config.checkpoints_path, BC_MODEL_FILENAME)
     torch.save(trainer.state_dict(), model_path)

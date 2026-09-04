@@ -47,9 +47,10 @@ class AnyPercentBCTrainingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             config = TrainConfig(
                 dataset_id="env16/BC-v0",
-                update_steps=0,
+                update_steps=2,
                 buffer_size=8,
                 batch_size=2,
+                eval_every=1,
                 top_fraction=1.0,
                 checkpoints_path=temp_dir,
             )
@@ -64,6 +65,7 @@ class AnyPercentBCTrainingTests(unittest.TestCase):
             self.assertTrue(Path(run_directory, BC_MODEL_FILENAME).is_file())
             self.assertTrue(Path(run_directory, "config.yaml").is_file())
             self.assertFalse(Path(run_directory, "final_checkpoint.pt").exists())
+            self.assertEqual(list(run_directory.glob("checkpoint_*.pt")), [])
 
 
 if __name__ == "__main__":

@@ -2,6 +2,11 @@
 
 ## BC-IL branch
 
+### 2026-09-03 - Single BC model output
+
+- Removed periodic `checkpoint_<step>.pt` writes from behavior-cloning
+  training. A run now writes only the final `BC_model.pt` PyTorch model.
+
 ### 2026-09-03 - PowerShell command reference
 
 - Added `PS1_COMMANDS.md` with syntax, defaults, mode applicability, output
@@ -26,7 +31,7 @@
   `Dataset`, and `Live` modes. Training and dataset evaluation run without the
   bridge; live evaluation starts the supervised bridge.
 - Renamed the final PyTorch artifact from `final_checkpoint.pt` to
-  `BC_model.pt`. Periodic checkpoints retain the `checkpoint_<step>.pt` name.
+  `BC_model.pt`.
 - Added documented full-dataset and shorter training commands.
 
 ### 2026-09-03 - Streamlined offline checkpoint evaluation

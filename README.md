@@ -21,7 +21,7 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 - `RunInference.ps1`: starts the bridge and the configured evaluator.
 - `RunOfflineRL.ps1`: trains or evaluates an any-percent BC model.
 - `RunRecorder.ps1`: starts the bridge and offline recorder together.
-- `PS1_COMMANDS.md`: complete PowerShell launcher CLI and examples.
+- [`PS1_COMMANDS.md`](PS1_COMMANDS.md): complete PowerShell launcher CLI and examples.
 - `Utils/buffers.py`: replay buffer used by DQN.
 - `Custom_enviornments/`: shared env config, base env, and class-specific environments.
 
@@ -336,19 +336,21 @@ python -c "import minari; d=minari.load_dataset('env16/BC-v0'); e=next(d.iterate
 This Minari dataset uses Minari's HDF5 storage. It is separate from the raw
 SQLite capture produced by `Offline.record_player`.
 
-### Any-percent BC checkpoint evaluation
+### Any-percent behavior-cloning workflow
 
 `RunOfflineRL.ps1` replaces the old hard-coded
 `Offline/run_inference_from_checkpoint.py` and
-`Offline/run_live_evaluation.py` scripts. It supports three modes:
+`Offline/run_live_evaluation.py` scripts. Training and both evaluation paths
+now use the same automation entry point:
 
-- `Train` trains from a local Minari dataset and writes `BC_model.pt`.
-- `Dataset` runs locally without the game bridge. It reports prediction MSE,
-  rounded discrete-action accuracy, and writes `predicted_actions.csv` beside
-  the checkpoint unless `-OutputCsv` is supplied.
-- `Live` starts the WebSocket bridge and evaluates the checkpoint against
-  `Env16`. BC action indices are translated into the different `Env16` action
-  ordering before being sent to the game.
+| Mode | Bridge | Result |
+| --- | --- | --- |
+| `Train` | No | Trains from Minari and writes one final `BC_model.pt`. |
+| `Dataset` | No | Reports MSE/accuracy and writes `predicted_actions.csv`. |
+| `Live` | Yes | Runs the BC model against the live `Env16` game stream. |
+
+Live evaluation translates BC action indices into the different `Env16`
+movement ordering before sending actions to the game.
 
 Evaluate the checkpoint against recorded transitions:
 
@@ -391,15 +393,16 @@ For a shorter first run:
   -UpdateSteps 10000 `
   -BatchSize 256 `
   -TopFraction 1.0 `
-  -EvalEvery 1000 `
   -CheckpointsPath "runs"
 ```
 
 Training creates a uniquely named `runs/bc-BC-v0-<id>` directory containing
-TensorBoard events, `config.yaml`, periodic `checkpoint_<step>.pt` files, and
-the final `BC_model.pt`. `RunOfflineRL.ps1` defaults to `-TopFraction 1.0` so
-all recorded episodes are used. Offline training does not start the game
-bridge. Use `-Mode Live` afterward for live evaluation.
+TensorBoard events, `config.yaml`, and one final `BC_model.pt`. It does not
+write intermediate PyTorch models at evaluation intervals. `RunOfflineRL.ps1`
+defaults to `-TopFraction 1.0` so all recorded episodes are used. Offline
+training does not start the game bridge. Use `-Mode Live` afterward for live
+evaluation. See the complete parameter and command reference in
+[`PS1_COMMANDS.md`](PS1_COMMANDS.md).
 
 Both PPO trainers use one live `Env16` instance directly because the external
 simulator owns a single ZMQ request stream. They do not use `SyncVectorEnv` or

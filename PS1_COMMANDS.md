@@ -186,7 +186,7 @@ mode starts and supervises the bridge.
 | `-UpdateSteps` | `1000000` | Train | Number of gradient updates. |
 | `-BufferSize` | `2000000` | Train | Maximum replay-buffer transitions. |
 | `-BatchSize` | `256` | Train | Training batch size. |
-| `-EvalEvery` | `5000` | Train | Periodic checkpoint interval. |
+| `-EvalEvery` | `5000` | Train | Reserved evaluation interval; does not save models. |
 | `-TopFraction` | `1.0` | All | Highest-return fraction of episodes to use. |
 | `-Gamma` | `0.99` | All | Discount used to rank episode returns. |
 | `-Device` | `auto` | Dataset, Live | Evaluation device. |
@@ -223,10 +223,12 @@ Training creates a unique directory such as `runs/bc-BC-v0-a1b2c3d4` with:
 
 ```text
 BC_model.pt
-checkpoint_<step>.pt
 config.yaml
 events.out.tfevents...
 ```
+
+Only `BC_model.pt` is written after training completes. BC training does not
+save intermediate `.pt` models at evaluation intervals.
 
 ### Evaluate against the dataset
 
