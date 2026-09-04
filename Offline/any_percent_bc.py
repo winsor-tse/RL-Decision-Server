@@ -1,4 +1,3 @@
-import contextlib
 import os
 import random
 import uuid
@@ -8,15 +7,17 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import gymnasium as gym
 import minari
 import numpy as np
-import pyrallis
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import tyro
+import yaml
 from tqdm.auto import trange
 from torch.utils.tensorboard import SummaryWriter
 
 TensorBatch = List[torch.Tensor]
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+BC_MODEL_FILENAME = "BC_model.pt"
 
 
 @dataclass
@@ -35,20 +36,19 @@ class TrainConfig:
     batch_size: int = 256  # Batch size for all networks
     normalize_state: bool = True  # Normalize states
     # evaluation params
-    eval_every: int = int(5e3)  # How often (time steps) we evaluate
+    eval_every: int = int(5e3)  # Periodic checkpoint interval
     eval_episodes: int = 10  # How many episodes run during evaluation
     # general params
     train_seed: int = 0
     eval_seed: int = 0
-    checkpoints_path: str = None  # Save path (Optional)
+    checkpoints_path: str = "runs"  # Root for checkpoints and TensorBoard logs
 
     def __post_init__(self):
         # Sanitize dataset identifier for use in filenames (remove path separators and drive letters)
         dataset_label = os.path.basename(self.dataset_id.replace('\\', '/'))
         dataset_label = dataset_label.replace(':', '')
         self.name = f"{self.name}-{dataset_label}-{str(uuid.uuid4())[:8]}"
-        if self.checkpoints_path is not None:
-            self.checkpoints_path = os.path.join(self.checkpoints_path, self.name)
+        self.checkpoints_path = os.path.join(self.checkpoints_path, self.name)
 
 
 def set_seed(seed: int, deterministic_torch: bool = False):
@@ -335,7 +335,6 @@ def evaluate(
     return np.asarray(episode_rewards)
 
 
-@pyrallis.wrap()
 def train(config: TrainConfig):
     dataset = minari.load_dataset(config.dataset_id)
 
@@ -370,14 +369,6 @@ def train(config: TrainConfig):
         qdataset["next_observations"], state_mean, state_std
     )
 
-    # Try to recover the environment for evaluation; if it fails, skip evaluation.
-    try:
-        eval_env = dataset.recover_environment()
-        eval_env = wrap_env(eval_env, state_mean=state_mean, state_std=state_std)
-    except Exception:
-        eval_env = None
-        print("Warning: could not recover environment from dataset; evaluation disabled.")
-
     replay_buffer = ReplayBuffer(
         state_dim,
         action_dim,
@@ -386,17 +377,17 @@ def train(config: TrainConfig):
     )
     replay_buffer.load_dataset(qdataset)
 
-    if config.checkpoints_path is not None:
-        print(f"Checkpoints path: {config.checkpoints_path}")
-        os.makedirs(config.checkpoints_path, exist_ok=True)
-        with open(os.path.join(config.checkpoints_path, "config.yaml"), "w") as f:
-            pyrallis.dump(config, f)
+    print(f"Checkpoints path: {config.checkpoints_path}")
+    os.makedirs(config.checkpoints_path, exist_ok=True)
+    with open(
+        os.path.join(config.checkpoints_path, "config.yaml"),
+        "w",
+        encoding="utf-8",
+    ) as config_file:
+        yaml.safe_dump(asdict(config), config_file, sort_keys=False)
 
-    # Create TensorBoard writer. If checkpoints_path provided, use it; otherwise use runs/<name>
-    if config.checkpoints_path is not None:
-        log_dir = config.checkpoints_path
-    else:
-        log_dir = os.path.join("runs", config.name)
+    # Keep TensorBoard events and model checkpoints together for this run.
+    log_dir = config.checkpoints_path
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir=log_dir)
 
@@ -426,40 +417,19 @@ def train(config: TrainConfig):
                 # if a non-scalar is logged, skip
                 pass
 
-        if (step + 1) % config.eval_every == 0:
-            eval_scores = evaluate(
-                env=eval_env,
-                actor=actor,
-                num_episodes=config.eval_episodes,
-                seed=config.eval_seed,
-                device=DEVICE,
+        if config.eval_every > 0 and (step + 1) % config.eval_every == 0:
+            torch.save(
+                trainer.state_dict(),
+                os.path.join(config.checkpoints_path, f"checkpoint_{step}.pt"),
             )
-            writer.add_scalar("eval/return", float(eval_scores.mean()), step)
-            # optional normalized score logging, only if dataset has reference scores
-            with contextlib.suppress(ValueError):
-                normalized_score = (
-                    minari.get_normalized_score(dataset, eval_scores).mean() * 100
-                )
-                writer.add_scalar("eval/normalized_score", float(normalized_score), step)
 
-            if config.checkpoints_path is not None:
-                torch.save(
-                    trainer.state_dict(),
-                    os.path.join(config.checkpoints_path, f"checkpoint_{step}.pt"),
-                )
-
-    # Save a final checkpoint even if evaluation was disabled
-    if config.checkpoints_path is not None:
-        final_path = os.path.join(config.checkpoints_path, "final_checkpoint.pt")
-        try:
-            torch.save(trainer.state_dict(), final_path)
-            print(f"Saved final checkpoint to: {final_path}")
-        except Exception as e:
-            print(f"Warning: failed to save final checkpoint: {e}")
+    model_path = os.path.join(config.checkpoints_path, BC_MODEL_FILENAME)
+    torch.save(trainer.state_dict(), model_path)
+    print(f"Saved BC model to: {model_path}")
 
     # Close TensorBoard writer
     writer.close()
 
 
 if __name__ == "__main__":
-    train()
+    train(tyro.cli(TrainConfig))

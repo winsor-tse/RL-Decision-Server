@@ -2,6 +2,39 @@
 
 ## BC-IL branch
 
+### 2026-09-03 - Behavior-cloning training entry point
+
+- Replaced the unavailable `pyrallis` command-line dependency in
+  `Offline/any_percent_bc.py` with the project's installed `tyro` dependency.
+- BC training now defaults to a unique run directory below `runs`, writes its
+  effective configuration and TensorBoard events there, and does not attempt
+  to open a live game environment during offline training.
+- Extended `Automation/offline_rl.py` and `RunOfflineRL.ps1` with `Train`,
+  `Dataset`, and `Live` modes. Training and dataset evaluation run without the
+  bridge; live evaluation starts the supervised bridge.
+- Renamed the final PyTorch artifact from `final_checkpoint.pt` to
+  `BC_model.pt`. Periodic checkpoints retain the `checkpoint_<step>.pt` name.
+- Added documented full-dataset and shorter training commands.
+
+### 2026-09-03 - Streamlined offline checkpoint evaluation
+
+- Replaced the hard-coded `Offline/run_inference_from_checkpoint.py` and
+  `Offline/run_live_evaluation.py` scripts with
+  `Inference/any_percent_bc_eval.py`.
+- Added configurable dataset and live evaluation modes. Dataset mode reports
+  action MSE and discrete-action accuracy and exports a prediction CSV. Live
+  mode evaluates directly against `Env16`.
+- Corrected live behavior-cloning action translation: the BC dataset orders
+  movement as up, left, right, down, while `Env16` orders it as up, down, left,
+  right.
+- Added `Automation/offline_rl.py` to run dataset evaluation without the bridge
+  and live evaluation with the supervised WebSocket bridge.
+- Added `RunOfflineRL.ps1` as the shared PowerShell entry point with explicit
+  checkpoint, dataset, episode, trajectory-selection, normalization, device,
+  output, config, and log options.
+- Added synthetic checkpoint, dataset preparation, action conversion, CSV, and
+  automation-routing tests.
+
 ### 2026-08-09 through 2026-08-29 - Minari and offline-learning foundations
 
 This branch adds the first end-to-end path for capturing human Yugen Saga

@@ -141,6 +141,22 @@ def wait_until_ready(
         ready_event.wait(timeout=min(0.1, max(0, deadline - time.monotonic())))
 
 
+def run_process(
+    command: str | Sequence[object],
+    name: str,
+) -> int:
+    """Run one supervised process without starting the live-game bridge."""
+
+    process = None
+    try:
+        process = start_process(command)
+        return process.wait()
+    except KeyboardInterrupt:
+        return 130
+    finally:
+        terminate_process(process, name)
+
+
 def run_stack(
     config: dict,
     child_command: str | Sequence[object],

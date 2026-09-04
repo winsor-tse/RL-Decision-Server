@@ -11,12 +11,15 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 - `Inference/ppo_lstm_eval.py`: evaluates recurrent PPO checkpoints on `Env16`.
 - `Inference/ppo_eval.py`: evaluates PPO checkpoints deterministically or by policy sampling.
 - `Inference/dqn_eval.py`: evaluates DQN checkpoints with optional epsilon exploration.
+- `Inference/any_percent_bc_eval.py`: evaluates BC checkpoints on Minari data or `Env16`.
 - `Offline/record_player.py`: records full world-state payloads and global player input to SQLite.
 - `Offline/record_minari.py`: records mapped human actions as a Minari behavior-cloning dataset.
 - `Custom_enviornments/Test_Env/Env_16_BC.py`: no-op, valid-action-only recording environment.
 - `Automation/automation_config.yaml`: selects the training and inference entry points.
+- `Automation/offline_rl.py`: routes BC training, dataset analysis, and live evaluation.
 - `RunRL.ps1`: starts TensorBoard, the bridge, and the configured RL algorithm together.
 - `RunInference.ps1`: starts the bridge and the configured evaluator.
+- `RunOfflineRL.ps1`: trains or evaluates an any-percent BC model.
 - `RunRecorder.ps1`: starts the bridge and offline recorder together.
 - `Utils/buffers.py`: replay buffer used by DQN.
 - `Custom_enviornments/`: shared env config, base env, and class-specific environments.
@@ -329,6 +332,71 @@ python -c "import minari; d=minari.load_dataset('env16/BC-v0'); e=next(d.iterate
 
 This Minari dataset uses Minari's HDF5 storage. It is separate from the raw
 SQLite capture produced by `Offline.record_player`.
+
+### Any-percent BC checkpoint evaluation
+
+`RunOfflineRL.ps1` replaces the old hard-coded
+`Offline/run_inference_from_checkpoint.py` and
+`Offline/run_live_evaluation.py` scripts. It supports three modes:
+
+- `Train` trains from a local Minari dataset and writes `BC_model.pt`.
+- `Dataset` runs locally without the game bridge. It reports prediction MSE,
+  rounded discrete-action accuracy, and writes `predicted_actions.csv` beside
+  the checkpoint unless `-OutputCsv` is supplied.
+- `Live` starts the WebSocket bridge and evaluates the checkpoint against
+  `Env16`. BC action indices are translated into the different `Env16` action
+  ordering before being sent to the game.
+
+Evaluate the checkpoint against recorded transitions:
+
+```powershell
+.\RunOfflineRL.ps1 -Mode Dataset `
+  -CheckpointPath "runs\bc-BC-v0-example\BC_model.pt" `
+  -DatasetId "env16/BC-v0"
+```
+
+Run five live episodes:
+
+```powershell
+.\RunOfflineRL.ps1 -Mode Live `
+  -CheckpointPath "runs\bc-BC-v0-example\BC_model.pt" `
+  -DatasetId "env16/BC-v0" `
+  -EvalEpisodes 5
+```
+
+Use the same `-TopFraction`, `-Gamma`, and normalization setting used during
+training. Pass `-NoNormalizeState` when the checkpoint was trained without
+state normalization. `-Device` accepts `auto`, `cpu`, or `cuda`. Logs are
+written under `logs` by default.
+
+### Any-percent behavior-cloning training
+
+Train the BC model from every episode in the local Minari dataset:
+
+```powershell
+.\RunOfflineRL.ps1 -Mode Train `
+  -DatasetId "env16/BC-v0" `
+  -TopFraction 1.0 `
+  -CheckpointsPath "runs"
+```
+
+For a shorter first run:
+
+```powershell
+.\RunOfflineRL.ps1 -Mode Train `
+  -DatasetId "env16/BC-v0" `
+  -UpdateSteps 10000 `
+  -BatchSize 256 `
+  -TopFraction 1.0 `
+  -EvalEvery 1000 `
+  -CheckpointsPath "runs"
+```
+
+Training creates a uniquely named `runs/bc-BC-v0-<id>` directory containing
+TensorBoard events, `config.yaml`, periodic `checkpoint_<step>.pt` files, and
+the final `BC_model.pt`. `RunOfflineRL.ps1` defaults to `-TopFraction 1.0` so
+all recorded episodes are used. Offline training does not start the game
+bridge. Use `-Mode Live` afterward for live evaluation.
 
 Both PPO trainers use one live `Env16` instance directly because the external
 simulator owns a single ZMQ request stream. They do not use `SyncVectorEnv` or

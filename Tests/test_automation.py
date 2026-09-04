@@ -5,6 +5,11 @@ import unittest
 from unittest import mock
 
 from Automation.infer import resolve_inference_command
+from Automation.offline_rl import (
+    build_evaluation_command,
+    build_training_command,
+    run_offline_rl,
+)
 from Automation.processes import (
     load_config,
     normalize_command,
@@ -17,6 +22,104 @@ from Automation.train import resolve_training_command
 
 
 class AutomationConfigTests(unittest.TestCase):
+    def test_offline_training_does_not_start_bridge(self):
+        with (
+            mock.patch(
+                "Automation.offline_rl.run_process",
+                return_value=0,
+            ) as run_process_mock,
+            mock.patch("Automation.offline_rl.run_stack") as run_stack_mock,
+        ):
+            return_code = run_offline_rl(
+                {},
+                ["python", "-m", "Offline.any_percent_bc"],
+                mode="train",
+            )
+
+        self.assertEqual(return_code, 0)
+        run_process_mock.assert_called_once()
+        run_stack_mock.assert_not_called()
+
+    def test_offline_training_command_contains_dataset_and_output(self):
+        command = build_training_command(
+            dataset_id="env16/BC-v2",
+            update_steps=10_000,
+            buffer_size=50_000,
+            batch_size=128,
+            top_fraction=1.0,
+            gamma=0.99,
+            eval_every=1_000,
+            normalize_state=True,
+            checkpoints_path="runs",
+        )
+
+        self.assertEqual(
+            command[:3],
+            ["python", "-m", "Offline.any_percent_bc"],
+        )
+        self.assertIn("env16/BC-v2", command)
+        self.assertIn("10000", command)
+        self.assertIn("--normalize-state", command)
+        self.assertIn("runs", command)
+
+    def test_offline_dataset_evaluation_does_not_start_bridge(self):
+        with (
+            mock.patch(
+                "Automation.offline_rl.run_process",
+                return_value=0,
+            ) as run_process_mock,
+            mock.patch("Automation.offline_rl.run_stack") as run_stack_mock,
+        ):
+            return_code = run_offline_rl(
+                {},
+                ["python", "-m", "Inference.any_percent_bc_eval"],
+                mode="dataset",
+            )
+
+        self.assertEqual(return_code, 0)
+        run_process_mock.assert_called_once()
+        run_stack_mock.assert_not_called()
+
+    def test_offline_live_evaluation_starts_bridge(self):
+        with (
+            mock.patch("Automation.offline_rl.run_process") as run_process_mock,
+            mock.patch(
+                "Automation.offline_rl.run_stack",
+                return_value=0,
+            ) as run_stack_mock,
+        ):
+            return_code = run_offline_rl(
+                {"bridge_command": ["python", "bridge.py"]},
+                ["python", "-m", "Inference.any_percent_bc_eval"],
+                mode="live",
+            )
+
+        self.assertEqual(return_code, 0)
+        run_process_mock.assert_not_called()
+        run_stack_mock.assert_called_once()
+
+    def test_offline_evaluation_command_contains_explicit_inputs(self):
+        command = build_evaluation_command(
+            mode="dataset",
+            checkpoint_path="runs/bc/BC_model.pt",
+            dataset_id="env16/BC-v2",
+            eval_episodes=3,
+            top_fraction=0.5,
+            gamma=0.95,
+            device="cpu",
+            normalize_state=False,
+            output_csv="reports/predictions.csv",
+        )
+
+        self.assertEqual(
+            command[:3],
+            ["python", "-m", "Inference.any_percent_bc_eval"],
+        )
+        self.assertIn("runs/bc/BC_model.pt", command)
+        self.assertIn("env16/BC-v2", command)
+        self.assertIn("--no-normalize-state", command)
+        self.assertEqual(command[-2:], ["--output-csv", "reports/predictions.csv"])
+
     def test_configured_training_algorithm_resolves_its_command(self):
         config = load_config("Automation/automation_config.yaml")
         self.assertEqual(
