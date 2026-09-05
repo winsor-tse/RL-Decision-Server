@@ -1,4 +1,4 @@
-"""Train or evaluate an any-percent behavior-cloning model."""
+"""Train BC or AWAC on Minari data, or evaluate a BC model."""
 
 from __future__ import annotations
 
@@ -51,6 +51,45 @@ def build_training_command(
     ]
 
 
+def build_awac_training_command(
+    *,
+    dataset_id: str,
+    update_steps: int,
+    online_iterations: int,
+    buffer_size: int,
+    batch_size: int,
+    gamma: float,
+    normalize_state: bool,
+    checkpoints_path: str,
+    device: str,
+    hidden_dim: int,
+    learning_rate: float,
+    tau: float,
+    awac_lambda: float,
+) -> list[str]:
+    """Map shared launcher options to the discrete AWAC trainer."""
+
+    command = [
+        "python", "-m", "Offline.awac",
+        "--dataset-id", dataset_id,
+        "--offline-iterations", str(update_steps),
+        "--online-iterations", str(online_iterations),
+        "--buffer-size", str(buffer_size),
+        "--batch-size", str(batch_size),
+        "--gamma", str(gamma),
+        "--checkpoints-path", checkpoints_path,
+        "--hidden-dim", str(hidden_dim),
+        "--learning-rate", str(learning_rate),
+        "--tau", str(tau),
+        "--awac-lambda", str(awac_lambda),
+        "--normalize-state" if normalize_state else "--no-normalize-state",
+    ]
+    # AWAC selects CUDA/CPU itself when no device override is supplied.
+    if device != "auto":
+        command.extend(["--device", device])
+    return command
+
+
 def build_evaluation_command(
     *,
     mode: str,
@@ -95,9 +134,16 @@ def run_offline_rl(
     command: str | Sequence[object],
     *,
     mode: str,
+    algorithm: str = "bc",
+    online_iterations: int = 0,
 ) -> int:
-    """Run dataset analysis directly or live evaluation with the bridge."""
+    """Start the bridge only for live evaluation or AWAC fine-tuning."""
 
+    if algorithm == "awac" and mode == "train" and online_iterations > 0:
+        return run_stack(
+            config, command, "AWAC offline training and live fine-tuning",
+            start_tensorboard=True,
+        )
     if mode == "live":
         return run_stack(
             config,
@@ -106,7 +152,7 @@ def run_offline_rl(
             start_tensorboard=False,
         )
     process_name = (
-        "any-percent BC training"
+        f"{'AWAC' if algorithm == 'awac' else 'any-percent BC'} training"
         if mode == "train"
         else "any-percent BC dataset evaluation"
     )
@@ -116,6 +162,7 @@ def run_offline_rl(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
+    parser.add_argument("--algorithm", choices=("bc", "awac"), default="bc")
     parser.add_argument(
         "--mode",
         choices=("train", "dataset", "live"),
@@ -127,6 +174,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--top-fraction", type=float, default=1.0)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--update-steps", type=int, default=1_000_000)
+    parser.add_argument("--online-iterations", type=int, default=0)
+    parser.add_argument("--hidden-dim", type=int, default=256)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--tau", type=float, default=5e-3)
+    parser.add_argument("--awac-lambda", type=float, default=1.0)
     parser.add_argument("--buffer-size", type=int, default=2_000_000)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--eval-every", type=int, default=5_000)
@@ -143,13 +195,38 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.algorithm == "awac" and args.mode != "train":
+        raise ValueError("AWAC supports --mode train only; dataset/live evaluation requires BC.")
+    if args.online_iterations < 0:
+        raise ValueError("--online-iterations must be nonnegative.")
+    if args.online_iterations and (args.algorithm != "awac" or args.mode != "train"):
+        raise ValueError("--online-iterations requires --algorithm awac --mode train.")
+    if args.algorithm == "awac" and args.top_fraction != 1.0:
+        raise ValueError("AWAC uses all demonstrations; --top-fraction must be 1.0.")
     if args.mode in {"dataset", "live"} and not args.checkpoint_path:
         raise ValueError(
             "--checkpoint-path is required for dataset and live evaluation."
         )
 
-    config = load_config(args.config) if args.mode == "live" else {}
-    if args.mode == "train":
+    needs_bridge = args.mode == "live" or args.online_iterations > 0
+    config = load_config(args.config) if needs_bridge else {}
+    if args.mode == "train" and args.algorithm == "awac":
+        command = build_awac_training_command(
+            dataset_id=args.dataset_id,
+            update_steps=args.update_steps,
+            online_iterations=args.online_iterations,
+            buffer_size=args.buffer_size,
+            batch_size=args.batch_size,
+            gamma=args.gamma,
+            normalize_state=args.normalize_state,
+            checkpoints_path=args.checkpoints_path,
+            device=args.device,
+            hidden_dim=args.hidden_dim,
+            learning_rate=args.learning_rate,
+            tau=args.tau,
+            awac_lambda=args.awac_lambda,
+        )
+    elif args.mode == "train":
         command = build_training_command(
             dataset_id=args.dataset_id,
             update_steps=args.update_steps,
@@ -173,7 +250,10 @@ def main(argv: list[str] | None = None) -> int:
             normalize_state=args.normalize_state,
             output_csv=args.output_csv,
         )
-    return run_offline_rl(config, command, mode=args.mode)
+    return run_offline_rl(
+        config, command, mode=args.mode, algorithm=args.algorithm,
+        online_iterations=args.online_iterations,
+    )
 
 
 if __name__ == "__main__":

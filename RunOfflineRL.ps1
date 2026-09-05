@@ -1,10 +1,17 @@
 param(
     [ValidateSet("Train", "Dataset", "Live")]
     [string]$Mode = "Train",
+    [ValidateSet("BC", "AWAC")]
+    [string]$Algorithm = "BC",
     [string]$CheckpointPath = "",
     [string]$DatasetId = "env16/BC-v0",
     [int]$EvalEpisodes = 5,
     [int]$UpdateSteps = 1000000,
+    [int]$OnlineIterations = 0,
+    [int]$HiddenDim = 256,
+    [double]$LearningRate = 0.0003,
+    [double]$Tau = 0.005,
+    [double]$AwacLambda = 1.0,
     [int]$BufferSize = 2000000,
     [int]$BatchSize = 256,
     [int]$EvalEvery = 5000,
@@ -36,9 +43,15 @@ $PythonArguments = @(
     "-m", "Automation.offline_rl",
     "--config", $Config,
     "--mode", $Mode.ToLowerInvariant(),
+    "--algorithm", $Algorithm.ToLowerInvariant(),
     "--dataset-id", $DatasetId,
     "--eval-episodes", $EvalEpisodes,
     "--update-steps", $UpdateSteps,
+    "--online-iterations", $OnlineIterations,
+    "--hidden-dim", $HiddenDim,
+    "--learning-rate", $LearningRate,
+    "--tau", $Tau,
+    "--awac-lambda", $AwacLambda,
     "--buffer-size", $BufferSize,
     "--batch-size", $BatchSize,
     "--eval-every", $EvalEvery,
@@ -74,7 +87,7 @@ try {
 }
 
 @(
-    "Offline RL behavior cloning"
+    "Offline RL $Algorithm"
     "Started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')"
     "Working directory: $PSScriptRoot"
     "Mode: $Mode"

@@ -12,6 +12,7 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 - `Inference/ppo_eval.py`: evaluates PPO checkpoints deterministically or by policy sampling.
 - `Inference/dqn_eval.py`: evaluates DQN checkpoints with optional epsilon exploration.
 - `Inference/any_percent_bc_eval.py`: evaluates BC checkpoints on Minari data or `Env16`.
+- `Offline/awac.py`: trains discrete AWAC from local BC-Minari demonstrations, with optional live `Env16` fine-tuning and TensorBoard logging.
 - `Offline/record_player.py`: records full world-state payloads and global player input to SQLite.
 - `Offline/record_minari.py`: records mapped human actions as a Minari behavior-cloning dataset.
 - `Custom_enviornments/Test_Env/Env_16_BC.py`: no-op, valid-action-only recording environment.
@@ -283,6 +284,31 @@ To skip the name prompt, configure or override the recorder command with
 ```powershell
 .\RunRecorder.ps1 -Command "python -m Offline.record_player --session-name demo-1"
 ```
+
+### AWAC training
+
+Train AWAC on every episode of the local BC-Minari dataset (the same
+`env16/BC-v0` ID used by behavior cloning):
+
+```powershell
+.\RunOfflineRL.ps1 -Algorithm AWAC -DatasetId "env16/BC-v0"
+.\RL_venv\Scripts\python.exe -m tensorboard.main --logdir runs
+```
+
+The default performs 1,000,000 offline updates without connecting to the game.
+Use `-UpdateSteps` to change this count and `-Device cpu` to select CPU.
+Each run writes TensorBoard losses, `config.yaml`, and `AWAC_model.pt` under
+`runs/AWAC-BC-v0-<id>/`. The checkpoint includes both critics, the categorical
+actor, optimizers, observation normalization, and the BC action ordering.
+AWAC checkpoints require the AWAC actor; the BC evaluator cannot load them.
+
+For live fine-tuning, add `-OnlineIterations 100000` to the training command
+and connect the game. The launcher supervises the WebSocket bridge and starts
+TensorBoard when enabled in the automation config. After offline training,
+AWAC creates one `Env16` using the recorded BC action order
+(`up, left, right, down, ...`) and logs online episode returns and lengths.
+Only terminations stop critic bootstrapping; time-limit truncations reset the
+game episode while retaining the next-state value target.
 
 ### Minari behavior-cloning recorder
 

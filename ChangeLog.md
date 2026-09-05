@@ -2,6 +2,23 @@
 
 ## BC-IL branch
 
+### 2026-09-04 - AWAC Minari training and offline automation
+
+- Adapted `Offline/awac.py` to local `env16/BC-v0` demonstrations with a
+  categorical policy for Env16's 11 actions and the recorded BC action order.
+- Replaced D4RL, legacy Gym, and W&B integration with Minari, Gymnasium,
+  Tyro, and TensorBoard. Runs save `AWAC_model.pt`, normalization and action
+  metadata, optimizer states, configuration, and loss events together.
+- Added `-Algorithm BC|AWAC` to `RunOfflineRL.ps1` and algorithm routing to
+  `Automation/offline_rl.py`, preserving BC as the default. `-UpdateSteps`
+  controls AWAC offline updates; AWAC-specific optimizer/network options and
+  device overrides are forwarded to the trainer.
+- Added optional `-OnlineIterations` for AWAC live fine-tuning with the
+  supervised bridge and configured TensorBoard server. Offline-only training
+  requires no bridge. Dataset/live evaluation remains BC-only.
+- Updated `PS1_COMMANDS.md` and README with AWAC launch examples, defaults,
+  output paths, and mode applicability. Added automation-routing tests.
+
 ### 2026-09-03 - Single BC model output
 
 - Removed periodic `checkpoint_<step>.pt` writes from behavior-cloning

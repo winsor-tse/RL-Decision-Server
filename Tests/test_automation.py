@@ -8,6 +8,7 @@ from Automation.infer import resolve_inference_command
 from Automation.offline_rl import (
     build_evaluation_command,
     build_training_command,
+    main as offline_main,
     run_offline_rl,
 )
 from Automation.processes import (
@@ -22,6 +23,78 @@ from Automation.train import resolve_training_command
 
 
 class AutomationConfigTests(unittest.TestCase):
+    def test_awac_offline_routes_options_without_bridge(self):
+        with (
+            mock.patch('Automation.offline_rl.run_process', return_value=7) as process,
+            mock.patch('Automation.offline_rl.run_stack') as stack,
+            mock.patch('Automation.offline_rl.load_config') as config,
+        ):
+            result = offline_main([
+                '--algorithm', 'awac', '--update-steps', '12',
+                '--dataset-id', 'env16/BC-v2', '--device', 'cpu',
+                '--batch-size', '8', '--buffer-size', '100',
+                '--hidden-dim', '32', '--learning-rate', '0.001',
+                '--tau', '0.01', '--awac-lambda', '2', '--gamma', '0.95',
+                '--no-normalize-state', '--checkpoints-path', 'runs/my awac',
+            ])
+        self.assertEqual(result, 7)
+        stack.assert_not_called()
+        config.assert_not_called()
+        command, name = process.call_args.args
+        self.assertEqual(name, 'AWAC training')
+        self.assertEqual(command[:3], ['python', '-m', 'Offline.awac'])
+        for flag, value in {
+            '--offline-iterations': '12', '--online-iterations': '0',
+            '--dataset-id': 'env16/BC-v2', '--device': 'cpu',
+            '--batch-size': '8', '--buffer-size': '100',
+            '--hidden-dim': '32', '--learning-rate': '0.001',
+            '--tau': '0.01', '--awac-lambda': '2.0', '--gamma': '0.95',
+            '--checkpoints-path': 'runs/my awac',
+        }.items():
+            self.assertEqual(command[command.index(flag) + 1], value)
+        self.assertIn('--no-normalize-state', command)
+        self.assertNotIn('--top-fraction', command)
+        self.assertNotIn('--eval-every', command)
+
+    def test_awac_online_starts_supervised_bridge(self):
+        with (
+            mock.patch('Automation.offline_rl.run_process') as process,
+            mock.patch('Automation.offline_rl.run_stack', return_value=0) as stack,
+            mock.patch('Automation.offline_rl.load_config', return_value={'bridge_command': ['bridge']}) as config,
+        ):
+            self.assertEqual(offline_main([
+                '--algorithm', 'awac', '--online-iterations', '5',
+                '--config', 'custom.yaml',
+            ]), 0)
+        process.assert_not_called()
+        config.assert_called_once_with('custom.yaml')
+        command = stack.call_args.args[1]
+        self.assertEqual(command[command.index('--online-iterations') + 1], '5')
+        self.assertNotIn('--device', command)  # auto uses AWAC's device detection
+        self.assertTrue(stack.call_args.kwargs['start_tensorboard'])
+
+    def test_invalid_awac_modes_and_online_options_fail_before_launch(self):
+        cases = [
+            ['--algorithm', 'awac', '--mode', 'dataset'],
+            ['--algorithm', 'awac', '--mode', 'live'],
+            ['--online-iterations', '5'],
+            ['--algorithm', 'awac', '--online-iterations', '-1'],
+            ['--algorithm', 'awac', '--top-fraction', '0.5'],
+        ]
+        with mock.patch('Automation.offline_rl.run_process') as process, mock.patch('Automation.offline_rl.run_stack') as stack:
+            for args in cases:
+                with self.subTest(args=args), self.assertRaises(ValueError):
+                    offline_main(args)
+        process.assert_not_called()
+        stack.assert_not_called()
+
+    def test_bc_remains_default_training_algorithm(self):
+        with mock.patch('Automation.offline_rl.run_process', return_value=0) as process:
+            self.assertEqual(offline_main([]), 0)
+        command = process.call_args.args[0]
+        self.assertEqual(command[:3], ['python', '-m', 'Offline.any_percent_bc'])
+        self.assertNotIn('--online-iterations', command)
+
     def test_offline_training_does_not_start_bridge(self):
         with (
             mock.patch(

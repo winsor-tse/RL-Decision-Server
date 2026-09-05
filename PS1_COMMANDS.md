@@ -151,19 +151,26 @@ such as `env16/BC-v1`, for another dataset.
 
 ## `RunOfflineRL.ps1`
 
-Provides one interface for behavior-cloning training, dataset evaluation, and
-live evaluation. `Train` and `Dataset` modes do not start the bridge. `Live`
-mode starts and supervises the bridge.
+Provides one interface for BC or AWAC training and BC dataset/live evaluation.
+BC is the default algorithm. Offline training and dataset evaluation run without
+the bridge. BC live evaluation and AWAC training with positive
+`-OnlineIterations` start and supervise the bridge.
 
 ### Syntax
 
 ```powershell
 .\RunOfflineRL.ps1 `
   [-Mode <Train|Dataset|Live>] `
+  [-Algorithm <BC|AWAC>] `
   [-CheckpointPath <string>] `
   [-DatasetId <string>] `
   [-EvalEpisodes <int>] `
   [-UpdateSteps <int>] `
+  [-OnlineIterations <int>] `
+  [-HiddenDim <int>] `
+  [-LearningRate <double>] `
+  [-Tau <double>] `
+  [-AwacLambda <double>] `
   [-BufferSize <int>] `
   [-BatchSize <int>] `
   [-EvalEvery <int>] `
@@ -180,20 +187,26 @@ mode starts and supervises the bridge.
 | Parameter | Default | Modes | Description |
 | --- | --- | --- | --- |
 | `-Mode` | `Train` | All | Selects training, dataset evaluation, or live evaluation. |
+| `-Algorithm` | `BC` | All | `BC` or `AWAC`; AWAC supports Train mode only. |
 | `-CheckpointPath` | Empty | Dataset, Live | Required path to `BC_model.pt` for evaluation. |
 | `-DatasetId` | `env16/BC-v0` | All | Local Minari dataset ID. |
 | `-EvalEpisodes` | `5` | Live | Number of live evaluation episodes. |
-| `-UpdateSteps` | `1000000` | Train | Number of gradient updates. |
+| `-UpdateSteps` | `1000000` | Train | Offline gradient updates; maps to AWAC's `--offline-iterations`. |
+| `-OnlineIterations` | `0` | AWAC Train | Live fine-tuning updates after offline training; positive values enable the bridge. |
+| `-HiddenDim` | `256` | AWAC Train | Actor and critic hidden-layer size. |
+| `-LearningRate` | `0.0003` | AWAC Train | Actor and critic optimizer learning rate. |
+| `-Tau` | `0.005` | AWAC Train | Target-critic soft-update coefficient. |
+| `-AwacLambda` | `1.0` | AWAC Train | Advantage-weight temperature. |
 | `-BufferSize` | `2000000` | Train | Maximum replay-buffer transitions. |
 | `-BatchSize` | `256` | Train | Training batch size. |
-| `-EvalEvery` | `5000` | Train | Reserved evaluation interval; does not save models. |
-| `-TopFraction` | `1.0` | All | Highest-return fraction of episodes to use. |
-| `-Gamma` | `0.99` | All | Discount used to rank episode returns. |
-| `-Device` | `auto` | Dataset, Live | Evaluation device. |
+| `-EvalEvery` | `5000` | BC Train | Reserved evaluation interval; does not save models. |
+| `-TopFraction` | `1.0` | BC | Highest-return fraction of episodes; AWAC requires `1.0` and uses all episodes. |
+| `-Gamma` | `0.99` | All | BC episode-ranking discount or AWAC critic discount. |
+| `-Device` | `auto` | AWAC Train, Dataset, Live | Training/evaluation device; auto selects CUDA when available. BC training selects its own device. |
 | `-NoNormalizeState` | Off | All | Disables observation normalization. |
 | `-CheckpointsPath` | `runs` | Train | Root directory for generated run folders. |
 | `-OutputCsv` | Empty | Dataset | Prediction CSV path; defaults beside the model. |
-| `-Config` | `Automation\automation_config.yaml` | Live | Bridge configuration. |
+| `-Config` | `Automation\automation_config.yaml` | BC Live, AWAC online training | Bridge and optional TensorBoard server configuration. |
 | `-LogDirectory` | `logs` | All | Directory for timestamped offline-RL logs. |
 
 ### Train a BC model
@@ -229,6 +242,48 @@ events.out.tfevents...
 
 Only `BC_model.pt` is written after training completes. BC training does not
 save intermediate `.pt` models at evaluation intervals.
+
+### Train an AWAC model
+
+Train on the same local BC-Minari dataset:
+
+```powershell
+.\RunOfflineRL.ps1 -Algorithm AWAC -Mode Train `
+  -DatasetId "env16/BC-v0" `
+  -UpdateSteps 1000000 `
+  -BatchSize 256 `
+  -Device auto `
+  -CheckpointsPath "runs"
+```
+
+Short CPU run:
+
+```powershell
+.\RunOfflineRL.ps1 -Algorithm AWAC -UpdateSteps 100 -Device cpu
+```
+
+Train offline, then fine-tune against the live game:
+
+```powershell
+.\RunOfflineRL.ps1 -Algorithm AWAC -Mode Train `
+  -UpdateSteps 100000 -OnlineIterations 100000 `
+  -AwacLambda 1.0 -LearningRate 0.0003
+```
+
+With positive `-OnlineIterations`, automation starts the bridge before the
+trainer, starts TensorBoard if enabled in `-Config`, and supervises their
+shutdown. The game must be connected for the online phase to progress.
+
+AWAC saves `AWAC_model.pt`, `config.yaml`, and TensorBoard events under a unique
+`runs/AWAC-BC-v0-<id>/` directory. Offline-only runs write TensorBoard events but
+do not start its server. To view them, run:
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Automation.tensorboard_server --logdir runs
+```
+
+`Dataset` and `Live` modes evaluate BC checkpoints only. AWAC checkpoints
+include a categorical actor and critics and cannot use the BC evaluator.
 
 ### Evaluate against the dataset
 
