@@ -1,0 +1,14 @@
+{
+  "algorithm": "ppo",
+  "method": "grid",
+  "design_seed": 42,
+  "training_seeds": [1, 2, 3, 4, 5],
+  "eval_episodes": 30,
+  "fixed": {
+    "total_timesteps": 20480,
+    "learning_rate": 0.00025,
+    "ent_coef": 0.01,
+    "metrics_frequency": 25
+  },
+  "parameters": {}
+}

@@ -27,6 +27,7 @@ include = [
     "Custom_enviornments*",
     "Inference*",
     "Offline*",
+    "Sweeps*",
     "Tests*",
     "Training*",
     "Utils*",
@@ -34,3 +35,4 @@ include = [
 
 [tool.setuptools.package-data]
 Custom_enviornments = ["Config.yaml"]
+Sweeps = ["README.md", "examples/*.json"]

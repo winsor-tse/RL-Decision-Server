@@ -561,6 +561,19 @@ would start after the run ends.
 Configured values are printed once at startup and stored in TensorBoard's
 `hyperparameters` text entry.
 
+## Hyperparameter sweeps and uncertainty estimates
+
+[`Sweeps/README.md`](Sweeps/README.md) documents local grid search, Latin
+hypercube sampling, Monte Carlo/random search, and bootstrap/Wilson uncertainty
+estimates. Designs can be previewed without the game; the PPO/PPO-LSTM runner
+executes one training-and-evaluation trial at a time and resumes completed
+trials. These methods use NumPy and the standard library without a tuning
+framework. The separately copied Protein module retains its own dependencies.
+
+```powershell
+python -m Sweeps plan Sweeps/examples/lhs.json --output runs/lhs-plan.json
+```
+
 ## Monitoring
 
 Training logs are written under `runs/`. The automation launcher starts
