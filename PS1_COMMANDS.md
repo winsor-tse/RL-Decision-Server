@@ -22,13 +22,23 @@ selected by `rl_algorithm`.
 ### Syntax
 
 ```powershell
-.\RunRL.ps1 [-Config <string>] [-LogDirectory <string>]
+.\RunRL.ps1 `
+  [-Config <string>] `
+  [-LogDirectory <string>] `
+  [-ResumeCheckpointPath <string>] `
+  [-TotalTimesteps <int>] `
+  [-StopAfterTimesteps <int>] `
+  [-CheckpointInterval <int>]
 ```
 
 | Parameter | Default | Description |
 | --- | --- | --- |
 | `-Config` | `Automation\automation_config.yaml` | Automation YAML file. |
 | `-LogDirectory` | `logs` | Directory for timestamped training logs. |
+| `-ResumeCheckpointPath` | Empty | PPO/PPO-LSTM training-state checkpoint to resume. |
+| `-TotalTimesteps` | Trainer default | Full PPO/PPO-LSTM experiment target saved in the training checkpoint. |
+| `-StopAfterTimesteps` | Unset | End this invocation at the next completed rollout at or after this global step. |
+| `-CheckpointInterval` | Unset | Timesteps between training-state saves; trainers default to `128`. Use `0` to disable periodic saves. |
 
 ### Examples
 
@@ -45,6 +55,32 @@ Use another automation configuration and log directory:
   -Config "Automation\my_training_config.yaml" `
   -LogDirectory "logs\training"
 ```
+
+Run part of a 100,000-step PPO-LSTM experiment and stop safely after roughly
+20,000 steps (the exact stop is the next completed rollout boundary):
+
+```powershell
+.\RunRL.ps1 -TotalTimesteps 100000 -StopAfterTimesteps 20000
+```
+
+Resume that same run using the training checkpoint printed by the trainer:
+
+```powershell
+.\RunRL.ps1 `
+  -ResumeCheckpointPath "runs\Env16__PPO_lstm_server__1__1234\PPO_lstm_server_training.pt"
+```
+
+For feed-forward PPO, use `PPO_server_training.pt` instead. A normal inference
+checkpoint such as `PPO_server.pt` or `PPO_lstm_server.pt` contains weights
+only and belongs with `restore_model_path`; it cannot perform a full resume.
+
+Training-state checkpoints preserve the original algorithm hyperparameters,
+model and optimizer, global step and completed rollout, episode statistics,
+action counts, and Python/NumPy/PyTorch RNG state. PPO-LSTM also records its
+hidden and cell state. Because the game is an external live process, resuming
+starts a new game episode and resets the active LSTM state rather than trying
+to pair saved memory with a different game state. TensorBoard continues in the
+original run directory.
 
 The configuration selects one of these command keys:
 

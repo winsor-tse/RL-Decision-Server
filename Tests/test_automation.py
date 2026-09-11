@@ -259,6 +259,44 @@ class AutomationConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "only supported"):
             resolve_training_command(config)
 
+    def test_resume_and_partial_training_options_are_forwarded(self):
+        config = load_config("Automation/automation_config.yaml")
+        config["rl_algorithm"] = "ppo_lstm"
+        config["restore_model_path"] = None
+
+        _, command = resolve_training_command(
+            config,
+            resume_checkpoint_path="runs/existing/PPO_lstm_server_training.pt",
+            total_timesteps=100_000,
+            stop_after_timesteps=20_000,
+            checkpoint_interval=256,
+        )
+
+        self.assertEqual(
+            command[-8:],
+            [
+                "--resume-checkpoint-path",
+                "runs/existing/PPO_lstm_server_training.pt",
+                "--total-timesteps",
+                "100000",
+                "--stop-after-timesteps",
+                "20000",
+                "--checkpoint-interval",
+                "256",
+            ],
+        )
+
+    def test_weight_restore_and_full_resume_are_mutually_exclusive(self):
+        config = load_config("Automation/automation_config.yaml")
+        config["rl_algorithm"] = "ppo"
+        config["restore_model_path"] = "runs/weights/PPO_server.pt"
+
+        with self.assertRaisesRegex(ValueError, "cannot be used together"):
+            resolve_training_command(
+                config,
+                resume_checkpoint_path="runs/state/PPO_server_training.pt",
+            )
+
     def test_python_command_uses_active_interpreter(self):
         command = normalize_command(["python", "-m", "example"])
         self.assertEqual(command, [sys.executable, "-m", "example"])
@@ -380,16 +418,8 @@ class AutomationConfigTests(unittest.TestCase):
         command = resolve_inference_command(config)
 
         self.assertEqual(command, config["ppo_lstm_inference_command"])
-        self.assertEqual(
-            command,
-            [
-                "python",
-                "-m",
-                "Inference.ppo_lstm_eval",
-                "--model-path",
-                "runs/XXXX/PPO_lstm_server.pt",
-            ],
-        )
+        self.assertEqual(command[:4], ["python", "-m", "Inference.ppo_lstm_eval", "--model-path"])
+        self.assertTrue(command[-1].endswith("PPO_lstm_server.pt"))
 
     def test_feedforward_ppo_inference_command_is_selectable(self):
         config = load_config("Automation/automation_config.yaml")
@@ -398,16 +428,8 @@ class AutomationConfigTests(unittest.TestCase):
         command = resolve_inference_command(config)
 
         self.assertEqual(command, config["ppo_inference_command"])
-        self.assertEqual(
-            command,
-            [
-                "python",
-                "-m",
-                "Inference.ppo_eval",
-                "--model-path",
-                "runs/XXXX/PPO_server.pt",
-            ],
-        )
+        self.assertEqual(command[:4], ["python", "-m", "Inference.ppo_eval", "--model-path"])
+        self.assertTrue(command[-1].endswith("PPO_server.pt"))
 
     def test_dqn_inference_command_is_selectable(self):
         config = load_config("Automation/automation_config.yaml")

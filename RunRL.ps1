@@ -1,6 +1,10 @@
 param(
     [string]$Config = "Automation\automation_config.yaml",
-    [string]$LogDirectory = "logs"
+    [string]$LogDirectory = "logs",
+    [string]$ResumeCheckpointPath = "",
+    [int]$TotalTimesteps = -1,
+    [int]$StopAfterTimesteps = -1,
+    [int]$CheckpointInterval = -1
 )
 
 $ProjectPython = Join-Path $PSScriptRoot "RL_venv\Scripts\python.exe"
@@ -16,6 +20,18 @@ New-Item -ItemType Directory -Path $LogDirectory -Force -ErrorAction Stop | Out-
 $RunTimestamp = Get-Date -Format "yyyyMMdd_HHmmss_fff"
 $LogPath = Join-Path $LogDirectory "training_$RunTimestamp.txt"
 $PythonArguments = @("-m", "Automation.train", "--config", $Config)
+if ($ResumeCheckpointPath) {
+    $PythonArguments += @("--resume-checkpoint-path", $ResumeCheckpointPath)
+}
+if ($TotalTimesteps -gt 0) {
+    $PythonArguments += @("--total-timesteps", $TotalTimesteps)
+}
+if ($StopAfterTimesteps -ge 0) {
+    $PythonArguments += @("--stop-after-timesteps", $StopAfterTimesteps)
+}
+if ($CheckpointInterval -ge 0) {
+    $PythonArguments += @("--checkpoint-interval", $CheckpointInterval)
+}
 
 function Write-RunLog {
     param([string]$Text)

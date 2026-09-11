@@ -227,6 +227,29 @@ python -m Training.PPO_lstm_server
 
 The game must be running and sending `ai_tick` messages through the browser extension before the env can step.
 
+PPO and PPO-LSTM write a full training checkpoint after completed rollout
+boundaries, every 128 timesteps by default. The normal `PPO_server.pt` and
+`PPO_lstm_server.pt` files remain weights-only inference models. Their resumable
+counterparts are `PPO_server_training.pt` and `PPO_lstm_server_training.pt`.
+
+To stop a 100,000-step run safely after approximately 20,000 steps and resume
+it later:
+
+```powershell
+.\RunRL.ps1 -TotalTimesteps 100000 -StopAfterTimesteps 20000
+
+.\RunRL.ps1 `
+  -ResumeCheckpointPath "runs\Env16__PPO_lstm_server__1__1234\PPO_lstm_server_training.pt"
+```
+
+The resume checkpoint restores the original hyperparameters, model, optimizer,
+global progress, episode statistics, and random-number-generator states, and
+continues writing to the original TensorBoard run. PPO-LSTM also records its
+recurrent state. A resumed process resets the live game episode and active LSTM
+memory because the external game's exact state cannot be reconstructed after a
+crash. Stops and saves occur after a complete `num_steps` rollout, so the
+reported step can be slightly higher than `StopAfterTimesteps`.
+
 ## Recording Player Demonstrations
 
 The offline recorder replaces the training/evaluation backend on the same ZMQ
@@ -473,6 +496,9 @@ rollout horizon; it does not create additional environments.
 | `save_model` | `true` |
 | `model_path` | `None` (the current `runs/<run_name>/PPO_server.pt`) |
 | `restore_model_path` | `None` (start with newly initialized weights) |
+| `resume_checkpoint_path` | `None` (do not resume training state) |
+| `checkpoint_interval` | `128` timesteps |
+| `stop_after_timesteps` | `0` (run to `total_timesteps`) |
 
 Example:
 
@@ -501,7 +527,7 @@ boundaries reset the recurrent state through the rollout's done mask.
 
 | Parameter | Default |
 |---|---:|
-| `total_timesteps` | 20,000 |
+| `total_timesteps` | 100,000 |
 | `learning_rate` | 0.00025 |
 | `num_envs` | 1 |
 | `num_steps` | 128 |
@@ -514,12 +540,15 @@ boundaries reset the recurrent state through the rollout's done mask.
 | `save_model` | `true` |
 | `restore_model_path` | `None` (start with newly initialized weights) |
 | `model_path` | `None` (the current `runs/<run_name>/PPO_lstm_server.pt`) |
+| `resume_checkpoint_path` | `None` (do not resume training state) |
+| `checkpoint_interval` | `128` timesteps |
+| `stop_after_timesteps` | `0` (run to `total_timesteps`) |
 
 `num_steps` must be divisible by `num_minibatches`. For example:
 
 ```bash
 python -m Training.PPO_lstm_server \
-  --total-timesteps 20000 \
+  --total-timesteps 100000 \
   --num-steps 128 \
   --num-minibatches 4 \
   --metrics-frequency 10

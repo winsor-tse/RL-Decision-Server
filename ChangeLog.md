@@ -2,6 +2,22 @@
 
 ## BC-IL branch
 
+### 2026-09-10 - Resumable PPO and PPO-LSTM training
+
+- Added atomic, versioned `PPO_server_training.pt` and
+  `PPO_lstm_server_training.pt` checkpoints at safe rollout boundaries while
+  preserving the existing weights-only inference models.
+- Training checkpoints include the agent, optimizer, original hyperparameters,
+  global step, completed rollout, run paths, episode statistics, action counts,
+  and Python, NumPy, PyTorch, and CUDA RNG states. PPO-LSTM also records hidden
+  and cell state for diagnostics.
+- Added `RunRL.ps1` options for `-ResumeCheckpointPath`, `-TotalTimesteps`,
+  `-StopAfterTimesteps`, and `-CheckpointInterval`. Resume continues the same
+  TensorBoard run and restores its original training configuration.
+- Resume starts a fresh external game episode and resets active recurrent state,
+  since process recovery cannot reconstruct the browser game's exact state.
+- Added partial-run/resume, checkpoint metadata, and automation argument tests.
+
 ### 2026-09-10 - AWAC live evaluation
 
 - Added `Inference/awac_eval.py` to restore a categorical AWAC actor together
