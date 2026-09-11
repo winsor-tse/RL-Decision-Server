@@ -266,8 +266,14 @@ Train offline, then fine-tune against the live game:
 
 ```powershell
 .\RunOfflineRL.ps1 -Algorithm AWAC -Mode Train `
-  -UpdateSteps 100000 -OnlineIterations 100000 `
-  -AwacLambda 1.0 -LearningRate 0.0003
+  -DatasetId "env16/BC-v0" `
+  -UpdateSteps 100000 `
+  -OnlineIterations 100000 `
+  -BatchSize 256 `
+  -Device auto `
+  -AwacLambda 1.0 `
+  -LearningRate 0.0003 `
+  -CheckpointsPath "runs"
 ```
 
 With positive `-OnlineIterations`, automation starts the bridge before the
