@@ -53,6 +53,12 @@ KEY_TO_ACTION_INDEX = {
     "5": 8,
     "6": 9,
     "7": 10,
+    "NUMPAD1": 5,
+    "NUMPAD2": 6,
+    "NUMPAD3": 7,
+    "NUMPAD5": 8,
+    "NUMPAD6": 9,
+    "NUMPAD7": 10,
 }
 
 REWARD_COMPONENT_KEYS = (
@@ -75,9 +81,10 @@ def action_from_input(player_input: dict[str, Any]) -> tuple[int, str] | None:
 
     New key-down events take precedence over held keys. This makes a newly
     pressed attack/spell win over a movement key that is still held. Two new
-    mapped keys, or two mapped held keys without a new event, are ambiguous
-    for a Discrete action space and are ignored. Unmapped keys do not make an
-    otherwise unambiguous action invalid.
+    mapped actions, or two mapped held actions without a new event, are
+    ambiguous for a Discrete action space and are ignored. Top-row and numpad
+    aliases for the same spell count as one action. Unmapped keys do not make
+    an otherwise unambiguous action invalid.
     """
 
     key_down_events = [
@@ -88,10 +95,13 @@ def action_from_input(player_input: dict[str, Any]) -> tuple[int, str] | None:
     mapped_events = list(
         dict.fromkeys(key for key in key_down_events if key in KEY_TO_ACTION_INDEX)
     )
-    if len(mapped_events) == 1:
+    mapped_event_actions = {
+        KEY_TO_ACTION_INDEX[key] for key in mapped_events
+    }
+    if len(mapped_event_actions) == 1:
         key = mapped_events[0]
         return KEY_TO_ACTION_INDEX[key], key
-    if len(mapped_events) > 1:
+    if len(mapped_event_actions) > 1:
         return None
 
     held_keys = [
@@ -101,7 +111,10 @@ def action_from_input(player_input: dict[str, Any]) -> tuple[int, str] | None:
     mapped_held_keys = list(
         dict.fromkeys(key for key in held_keys if key in KEY_TO_ACTION_INDEX)
     )
-    if len(mapped_held_keys) == 1:
+    mapped_held_actions = {
+        KEY_TO_ACTION_INDEX[key] for key in mapped_held_keys
+    }
+    if len(mapped_held_actions) == 1:
         key = mapped_held_keys[0]
         return KEY_TO_ACTION_INDEX[key], key
 

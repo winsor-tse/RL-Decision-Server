@@ -76,6 +76,32 @@ location is `%USERPROFILE%\.minari\datasets`; use `--datasets-path PATH` to
 override it. Completed terminated/truncated episodes are saved before reset,
 and `Ctrl+C` flushes any partial episode containing a complete transition.
 
+Evaluate an any-percent behavior-cloning checkpoint against its dataset with:
+
+```powershell
+.\RunOfflineRL.ps1 -Mode Dataset `
+  -CheckpointPath "runs\bc-example\BC_model.pt" `
+  -DatasetId "env16/BC-v0"
+```
+
+Use `-Mode Live` to start the bridge and evaluate the same checkpoint against
+the game. Add `-EvalEpisodes 5` to choose the number of live episodes. The
+dataset and live modes now share `Inference/any_percent_bc_eval.py`; the former
+does not start the bridge.
+
+Train a BC model directly from the local Minari dataset with:
+
+```powershell
+.\RunOfflineRL.ps1 -Mode Train `
+  -DatasetId "env16/BC-v0" `
+  -TopFraction 1.0 `
+  -CheckpointsPath "runs"
+```
+
+The final model is saved as `BC_model.pt` inside the generated
+`runs/bc-BC-v0-<id>` directory. Add `-UpdateSteps 10000` for a shorter
+initial run.
+
 If TensorBoard is missing when running `Training/DQN_server.py`, install it into the same active environment:
 
 ```bash

@@ -133,6 +133,8 @@ class OfflineRecorderTests(unittest.TestCase):
 
     def test_virtual_key_names_are_stable_for_mapping(self):
         self.assertEqual(virtual_key_name(87), "W")
+        self.assertEqual(virtual_key_name(0x61), "NUMPAD1")
+        self.assertEqual(virtual_key_name(0x67), "NUMPAD7")
         self.assertEqual(virtual_key_name(0x70), "F1")
         self.assertEqual(virtual_key_name(0xA2), "CTRL_LEFT")
 

@@ -94,7 +94,6 @@ class PPOLSTMTests(unittest.TestCase):
         lstm_args = Args()
         ppo_args = PPOArgs()
         algorithm_fields = (
-            "total_timesteps",
             "learning_rate",
             "num_envs",
             "num_steps",
@@ -244,6 +243,52 @@ class PPOLSTMTests(unittest.TestCase):
             Path(save_agent_mock.call_args.args[1]),
             expected_checkpoint,
         )
+
+    @patch.object(PPO_lstm_server, "SummaryWriter", FakeWriter)
+    @patch.object(PPO_lstm_server, "Env16", FakeEnv16)
+    def test_partial_run_resumes_optimizer_progress_and_hyperparameters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            training_path = Path(directory) / "PPO_lstm_server_training.pt"
+            model_path = Path(directory) / "PPO_lstm_server.pt"
+            first_args = Args(
+                total_timesteps=8,
+                num_steps=4,
+                num_minibatches=2,
+                update_epochs=1,
+                learning_rate=0.001,
+                cuda=False,
+                save_model=False,
+                checkpoint_interval=4,
+                stop_after_timesteps=4,
+                training_checkpoint_path=str(training_path),
+                model_path=str(model_path),
+            )
+            PPO_lstm_server.train(first_args)
+            partial = torch.load(training_path, weights_only=True)
+            self.assertEqual(partial["global_step"], 4)
+            self.assertEqual(partial["completed_iteration"], 1)
+            self.assertIn("optimizer", partial)
+            self.assertIn("recurrent_state", partial)
+            self.assertEqual(partial["metadata"]["architecture"], "lstm_actor_critic")
+
+            resumed_args = Args(
+                resume_checkpoint_path=str(training_path),
+                # These differ deliberately; the checkpoint must win.
+                total_timesteps=999,
+                num_steps=8,
+                learning_rate=0.5,
+                cuda=False,
+                save_model=False,
+            )
+            PPO_lstm_server.train(resumed_args)
+            completed = torch.load(training_path, weights_only=True)
+
+        self.assertEqual(resumed_args.total_timesteps, 8)
+        self.assertEqual(resumed_args.num_steps, 4)
+        self.assertEqual(resumed_args.learning_rate, 0.001)
+        self.assertEqual(completed["global_step"], 8)
+        self.assertEqual(completed["completed_iteration"], 2)
+        self.assertEqual(completed["run_name"], partial["run_name"])
 
 
 if __name__ == "__main__":

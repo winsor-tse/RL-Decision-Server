@@ -11,13 +11,19 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 - `Inference/ppo_lstm_eval.py`: evaluates recurrent PPO checkpoints on `Env16`.
 - `Inference/ppo_eval.py`: evaluates PPO checkpoints deterministically or by policy sampling.
 - `Inference/dqn_eval.py`: evaluates DQN checkpoints with optional epsilon exploration.
+- `Inference/any_percent_bc_eval.py`: evaluates BC checkpoints on Minari data or `Env16`.
+- `Inference/awac_eval.py`: evaluates categorical AWAC checkpoints on live `Env16`.
+- `Offline/awac.py`: trains discrete AWAC from local BC-Minari demonstrations, with optional live `Env16` fine-tuning and TensorBoard logging.
 - `Offline/record_player.py`: records full world-state payloads and global player input to SQLite.
 - `Offline/record_minari.py`: records mapped human actions as a Minari behavior-cloning dataset.
 - `Custom_enviornments/Test_Env/Env_16_BC.py`: no-op, valid-action-only recording environment.
 - `Automation/automation_config.yaml`: selects the training and inference entry points.
+- `Automation/offline_rl.py`: routes BC training, dataset analysis, and live evaluation.
 - `RunRL.ps1`: starts TensorBoard, the bridge, and the configured RL algorithm together.
 - `RunInference.ps1`: starts the bridge and the configured evaluator.
+- `RunOfflineRL.ps1`: trains or evaluates an any-percent BC model.
 - `RunRecorder.ps1`: starts the bridge and offline recorder together.
+- [`PS1_COMMANDS.md`](PS1_COMMANDS.md): complete PowerShell launcher CLI and examples.
 - `Utils/buffers.py`: replay buffer used by DQN.
 - `Custom_enviornments/`: shared env config, base env, and class-specific environments.
 
@@ -221,6 +227,29 @@ python -m Training.PPO_lstm_server
 
 The game must be running and sending `ai_tick` messages through the browser extension before the env can step.
 
+PPO and PPO-LSTM write a full training checkpoint after completed rollout
+boundaries, every 128 timesteps by default. The normal `PPO_server.pt` and
+`PPO_lstm_server.pt` files remain weights-only inference models. Their resumable
+counterparts are `PPO_server_training.pt` and `PPO_lstm_server_training.pt`.
+
+To stop a 100,000-step run safely after approximately 20,000 steps and resume
+it later:
+
+```powershell
+.\RunRL.ps1 -TotalTimesteps 100000 -StopAfterTimesteps 20000
+
+.\RunRL.ps1 `
+  -ResumeCheckpointPath "runs\Env16__PPO_lstm_server__1__1234\PPO_lstm_server_training.pt"
+```
+
+The resume checkpoint restores the original hyperparameters, model, optimizer,
+global progress, episode statistics, and random-number-generator states, and
+continues writing to the original TensorBoard run. PPO-LSTM also records its
+recurrent state. A resumed process resets the live game episode and active LSTM
+memory because the external game's exact state cannot be reconstructed after a
+crash. Stops and saves occur after a complete `num_steps` rollout, so the
+reported step can be slightly higher than `StopAfterTimesteps`.
+
 ## Recording Player Demonstrations
 
 The offline recorder replaces the training/evaluation backend on the same ZMQ
@@ -280,6 +309,43 @@ To skip the name prompt, configure or override the recorder command with
 .\RunRecorder.ps1 -Command "python -m Offline.record_player --session-name demo-1"
 ```
 
+### AWAC training
+
+Train AWAC on every episode of the local BC-Minari dataset (the same
+`env16/BC-v0` ID used by behavior cloning):
+
+```powershell
+.\RunOfflineRL.ps1 -Algorithm AWAC -DatasetId "env16/BC-v0"
+.\RL_venv\Scripts\python.exe -m tensorboard.main --logdir runs
+```
+
+The default performs 1,000,000 offline updates without connecting to the game.
+Use `-UpdateSteps` to change this count and `-Device cpu` to select CPU.
+Each run writes TensorBoard losses, `config.yaml`, and `AWAC_model.pt` under
+`runs/AWAC-BC-v0-<id>/`. The checkpoint includes both critics, the categorical
+actor, optimizers, observation normalization, and the BC action ordering.
+AWAC checkpoints use their dedicated live evaluator and do not require the
+Minari dataset during evaluation because normalization and action metadata are
+stored in the checkpoint.
+
+For live fine-tuning, add `-OnlineIterations 100000` to the training command
+and connect the game. The launcher supervises the WebSocket bridge and starts
+TensorBoard when enabled in the automation config. After offline training,
+AWAC creates one `Env16` using the recorded BC action order
+(`up, left, right, down, ...`) and logs online episode returns and lengths.
+Only terminations stop critic bootstrapping; time-limit truncations reset the
+game episode while retaining the next-state value target.
+
+Evaluate a trained AWAC policy for five live episodes through the supervised
+bridge:
+
+```powershell
+.\RunOfflineRL.ps1 -Algorithm AWAC -Mode Live `
+  -CheckpointPath "runs\AWAC-BC-v0-example\AWAC_model.pt" `
+  -EvalEpisodes 5 `
+  -Device auto
+```
+
 ### Minari behavior-cloning recorder
 
 `Offline.record_minari` records the same live player interaction directly as a
@@ -296,8 +362,10 @@ to select another root.
 
 The BC recorder sends `NoOp` to the game on every tick. It records only one
 unambiguous mapped action: `W=up(0)`, `A=left(1)`, `D=right(2)`, `S=down(3)`,
-`SPACE=attack(4)`, and spells `1,2,3,5,6,7` as indices `5..10`. Unmapped ticks
-and ambiguous multi-key ticks are acknowledged but never passed to Minari.
+`SPACE=attack(4)`, and spells `1,2,3,5,6,7` as indices `5..10`. The matching
+numpad keys (`NUMPAD1`, `NUMPAD2`, `NUMPAD3`, `NUMPAD5`, `NUMPAD6`, and
+`NUMPAD7`) use the same spell indices. Unmapped ticks and ambiguous
+multi-action ticks are acknowledged but never passed to Minari.
 The recorder buffers one labeled frame so each stored action is aligned with
 the observation from which the player chose it.
 
@@ -330,6 +398,74 @@ python -c "import minari; d=minari.load_dataset('env16/BC-v0'); e=next(d.iterate
 This Minari dataset uses Minari's HDF5 storage. It is separate from the raw
 SQLite capture produced by `Offline.record_player`.
 
+### Any-percent behavior-cloning workflow
+
+`RunOfflineRL.ps1` replaces the old hard-coded
+`Offline/run_inference_from_checkpoint.py` and
+`Offline/run_live_evaluation.py` scripts. Training and both evaluation paths
+now use the same automation entry point:
+
+| Mode | Bridge | Result |
+| --- | --- | --- |
+| `Train` | No | Trains from Minari and writes one final `BC_model.pt`. |
+| `Dataset` | No | Reports MSE/accuracy and writes `predicted_actions.csv`. |
+| `Live` | Yes | Runs the BC model against the live `Env16` game stream. |
+
+Live evaluation translates BC action indices into the different `Env16`
+movement ordering before sending actions to the game.
+
+Evaluate the checkpoint against recorded transitions:
+
+```powershell
+.\RunOfflineRL.ps1 -Mode Dataset `
+  -CheckpointPath "runs\bc-BC-v0-example\BC_model.pt" `
+  -DatasetId "env16/BC-v0"
+```
+
+Run five live episodes:
+
+```powershell
+.\RunOfflineRL.ps1 -Mode Live `
+  -CheckpointPath "runs\bc-BC-v0-example\BC_model.pt" `
+  -DatasetId "env16/BC-v0" `
+  -EvalEpisodes 5
+```
+
+Use the same `-TopFraction`, `-Gamma`, and normalization setting used during
+training. Pass `-NoNormalizeState` when the checkpoint was trained without
+state normalization. `-Device` accepts `auto`, `cpu`, or `cuda`. Logs are
+written under `logs` by default.
+
+### Any-percent behavior-cloning training
+
+Train the BC model from every episode in the local Minari dataset:
+
+```powershell
+.\RunOfflineRL.ps1 -Mode Train `
+  -DatasetId "env16/BC-v0" `
+  -TopFraction 1.0 `
+  -CheckpointsPath "runs"
+```
+
+For a shorter first run:
+
+```powershell
+.\RunOfflineRL.ps1 -Mode Train `
+  -DatasetId "env16/BC-v0" `
+  -UpdateSteps 10000 `
+  -BatchSize 256 `
+  -TopFraction 1.0 `
+  -CheckpointsPath "runs"
+```
+
+Training creates a uniquely named `runs/bc-BC-v0-<id>` directory containing
+TensorBoard events, `config.yaml`, and one final `BC_model.pt`. It does not
+write intermediate PyTorch models at evaluation intervals. `RunOfflineRL.ps1`
+defaults to `-TopFraction 1.0` so all recorded episodes are used. Offline
+training does not start the game bridge. Use `-Mode Live` afterward for live
+evaluation. See the complete parameter and command reference in
+[`PS1_COMMANDS.md`](PS1_COMMANDS.md).
+
 Both PPO trainers use one live `Env16` instance directly because the external
 simulator owns a single ZMQ request stream. They do not use `SyncVectorEnv` or
 `RecordEpisodeStatistics`; each trainer handles episode resets and batching.
@@ -360,6 +496,9 @@ rollout horizon; it does not create additional environments.
 | `save_model` | `true` |
 | `model_path` | `None` (the current `runs/<run_name>/PPO_server.pt`) |
 | `restore_model_path` | `None` (start with newly initialized weights) |
+| `resume_checkpoint_path` | `None` (do not resume training state) |
+| `checkpoint_interval` | `128` timesteps |
+| `stop_after_timesteps` | `0` (run to `total_timesteps`) |
 
 Example:
 
@@ -388,7 +527,7 @@ boundaries reset the recurrent state through the rollout's done mask.
 
 | Parameter | Default |
 |---|---:|
-| `total_timesteps` | 20,000 |
+| `total_timesteps` | 100,000 |
 | `learning_rate` | 0.00025 |
 | `num_envs` | 1 |
 | `num_steps` | 128 |
@@ -401,12 +540,15 @@ boundaries reset the recurrent state through the rollout's done mask.
 | `save_model` | `true` |
 | `restore_model_path` | `None` (start with newly initialized weights) |
 | `model_path` | `None` (the current `runs/<run_name>/PPO_lstm_server.pt`) |
+| `resume_checkpoint_path` | `None` (do not resume training state) |
+| `checkpoint_interval` | `128` timesteps |
+| `stop_after_timesteps` | `0` (run to `total_timesteps`) |
 
 `num_steps` must be divisible by `num_minibatches`. For example:
 
 ```bash
 python -m Training.PPO_lstm_server \
-  --total-timesteps 20000 \
+  --total-timesteps 100000 \
   --num-steps 128 \
   --num-minibatches 4 \
   --metrics-frequency 10
@@ -460,6 +602,19 @@ would start after the run ends.
 
 Configured values are printed once at startup and stored in TensorBoard's
 `hyperparameters` text entry.
+
+## Hyperparameter sweeps and uncertainty estimates
+
+[`Sweeps/README.md`](Sweeps/README.md) documents local grid search, Latin
+hypercube sampling, Monte Carlo/random search, and bootstrap/Wilson uncertainty
+estimates. Designs can be previewed without the game; the PPO/PPO-LSTM runner
+executes one training-and-evaluation trial at a time and resumes completed
+trials. These methods use NumPy and the standard library without a tuning
+framework. The separately copied Protein module retains its own dependencies.
+
+```powershell
+python -m Sweeps plan Sweeps/examples/lhs.json --output runs/lhs-plan.json
+```
 
 ## Monitoring
 

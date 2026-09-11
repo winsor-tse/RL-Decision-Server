@@ -10,6 +10,14 @@ rl_algorithm: "ppo"
 # Example: runs/Env16__PPO_lstm_server__1__1234/PPO_lstm_server.pt
 restore_model_path: null
 
+# Full training-state resume for PPO/PPO-LSTM. Unlike restore_model_path, this
+# restores optimizer, progress, original hyperparameters, and RNG state.
+resume_checkpoint_path: null
+# Optional safe-boundary controls. These can also be passed to RunRL.ps1.
+total_timesteps: null
+stop_after_timesteps: null
+checkpoint_interval: null
+
 bridge_command:
   - python
   - -m

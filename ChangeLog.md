@@ -2,6 +2,100 @@
 
 ## BC-IL branch
 
+### 2026-09-10 - Resumable PPO and PPO-LSTM training
+
+- Added atomic, versioned `PPO_server_training.pt` and
+  `PPO_lstm_server_training.pt` checkpoints at safe rollout boundaries while
+  preserving the existing weights-only inference models.
+- Training checkpoints include the agent, optimizer, original hyperparameters,
+  global step, completed rollout, run paths, episode statistics, action counts,
+  and Python, NumPy, PyTorch, and CUDA RNG states. PPO-LSTM also records hidden
+  and cell state for diagnostics.
+- Added `RunRL.ps1` options for `-ResumeCheckpointPath`, `-TotalTimesteps`,
+  `-StopAfterTimesteps`, and `-CheckpointInterval`. Resume continues the same
+  TensorBoard run and restores its original training configuration.
+- Resume starts a fresh external game episode and resets active recurrent state,
+  since process recovery cannot reconstruct the browser game's exact state.
+- Added partial-run/resume, checkpoint metadata, and automation argument tests.
+
+### 2026-09-10 - AWAC live evaluation
+
+- Added `Inference/awac_eval.py` to restore a categorical AWAC actor together
+  with its saved observation normalization and BC action ordering, then report
+  live Env16 episode returns and win rate.
+- Added `-Algorithm AWAC -Mode Live` routing to `RunOfflineRL.ps1` automation;
+  the existing process supervisor starts and stops the WebSocket bridge.
+- Added checkpoint validation, deterministic action-selection, live episode,
+  and automation-routing tests plus documented PowerShell usage.
+
+### 2026-09-04 - AWAC Minari training and offline automation
+
+- Adapted `Offline/awac.py` to local `env16/BC-v0` demonstrations with a
+  categorical policy for Env16's 11 actions and the recorded BC action order.
+- Replaced D4RL, legacy Gym, and W&B integration with Minari, Gymnasium,
+  Tyro, and TensorBoard. Runs save `AWAC_model.pt`, normalization and action
+  metadata, optimizer states, configuration, and loss events together.
+- Added `-Algorithm BC|AWAC` to `RunOfflineRL.ps1` and algorithm routing to
+  `Automation/offline_rl.py`, preserving BC as the default. `-UpdateSteps`
+  controls AWAC offline updates; AWAC-specific optimizer/network options and
+  device overrides are forwarded to the trainer.
+- Added optional `-OnlineIterations` for AWAC live fine-tuning with the
+  supervised bridge and configured TensorBoard server. Offline-only training
+  requires no bridge. At that point, dataset/live evaluation remained BC-only.
+- Updated `PS1_COMMANDS.md` and README with AWAC launch examples, defaults,
+  output paths, and mode applicability. Added automation-routing tests.
+
+### 2026-09-03 - Single BC model output
+
+- Removed periodic `checkpoint_<step>.pt` writes from behavior-cloning
+  training. A run now writes only the final `BC_model.pt` PyTorch model.
+
+### 2026-09-03 - PowerShell command reference
+
+- Added `PS1_COMMANDS.md` with syntax, defaults, mode applicability, output
+  details, and examples for every project-level PowerShell launcher.
+
+### 2026-09-03 - Numpad behavior-cloning actions
+
+- Added stable `NUMPAD0` through `NUMPAD9` names to Windows input capture.
+- Mapped `NUMPAD1`, `NUMPAD2`, `NUMPAD3`, `NUMPAD5`, `NUMPAD6`, and `NUMPAD7`
+  to BC spell action indices `5` through `10`, matching the top-row digits.
+- Treats top-row and numpad aliases pressed together as one action when both
+  map to the same spell, while different simultaneous actions remain invalid.
+
+### 2026-09-03 - Behavior-cloning training entry point
+
+- Replaced the unavailable `pyrallis` command-line dependency in
+  `Offline/any_percent_bc.py` with the project's installed `tyro` dependency.
+- BC training now defaults to a unique run directory below `runs`, writes its
+  effective configuration and TensorBoard events there, and does not attempt
+  to open a live game environment during offline training.
+- Extended `Automation/offline_rl.py` and `RunOfflineRL.ps1` with `Train`,
+  `Dataset`, and `Live` modes. Training and dataset evaluation run without the
+  bridge; live evaluation starts the supervised bridge.
+- Renamed the final PyTorch artifact from `final_checkpoint.pt` to
+  `BC_model.pt`.
+- Added documented full-dataset and shorter training commands.
+
+### 2026-09-03 - Streamlined offline checkpoint evaluation
+
+- Replaced the hard-coded `Offline/run_inference_from_checkpoint.py` and
+  `Offline/run_live_evaluation.py` scripts with
+  `Inference/any_percent_bc_eval.py`.
+- Added configurable dataset and live evaluation modes. Dataset mode reports
+  action MSE and discrete-action accuracy and exports a prediction CSV. Live
+  mode evaluates directly against `Env16`.
+- Corrected live behavior-cloning action translation: the BC dataset orders
+  movement as up, left, right, down, while `Env16` orders it as up, down, left,
+  right.
+- Added `Automation/offline_rl.py` to run dataset evaluation without the bridge
+  and live evaluation with the supervised WebSocket bridge.
+- Added `RunOfflineRL.ps1` as the shared PowerShell entry point with explicit
+  checkpoint, dataset, episode, trajectory-selection, normalization, device,
+  output, config, and log options.
+- Added synthetic checkpoint, dataset preparation, action conversion, CSV, and
+  automation-routing tests.
+
 ### 2026-08-09 through 2026-08-29 - Minari and offline-learning foundations
 
 This branch adds the first end-to-end path for capturing human Yugen Saga

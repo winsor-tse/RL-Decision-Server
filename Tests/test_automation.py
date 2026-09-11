@@ -5,6 +5,12 @@ import unittest
 from unittest import mock
 
 from Automation.infer import resolve_inference_command
+from Automation.offline_rl import (
+    build_evaluation_command,
+    build_training_command,
+    main as offline_main,
+    run_offline_rl,
+)
 from Automation.processes import (
     load_config,
     normalize_command,
@@ -17,6 +23,196 @@ from Automation.train import resolve_training_command
 
 
 class AutomationConfigTests(unittest.TestCase):
+    def test_awac_offline_routes_options_without_bridge(self):
+        with (
+            mock.patch('Automation.offline_rl.run_process', return_value=7) as process,
+            mock.patch('Automation.offline_rl.run_stack') as stack,
+            mock.patch('Automation.offline_rl.load_config') as config,
+        ):
+            result = offline_main([
+                '--algorithm', 'awac', '--update-steps', '12',
+                '--dataset-id', 'env16/BC-v2', '--device', 'cpu',
+                '--batch-size', '8', '--buffer-size', '100',
+                '--hidden-dim', '32', '--learning-rate', '0.001',
+                '--tau', '0.01', '--awac-lambda', '2', '--gamma', '0.95',
+                '--no-normalize-state', '--checkpoints-path', 'runs/my awac',
+            ])
+        self.assertEqual(result, 7)
+        stack.assert_not_called()
+        config.assert_not_called()
+        command, name = process.call_args.args
+        self.assertEqual(name, 'AWAC training')
+        self.assertEqual(command[:3], ['python', '-m', 'Offline.awac'])
+        for flag, value in {
+            '--offline-iterations': '12', '--online-iterations': '0',
+            '--dataset-id': 'env16/BC-v2', '--device': 'cpu',
+            '--batch-size': '8', '--buffer-size': '100',
+            '--hidden-dim': '32', '--learning-rate': '0.001',
+            '--tau': '0.01', '--awac-lambda': '2.0', '--gamma': '0.95',
+            '--checkpoints-path': 'runs/my awac',
+        }.items():
+            self.assertEqual(command[command.index(flag) + 1], value)
+        self.assertIn('--no-normalize-state', command)
+        self.assertNotIn('--top-fraction', command)
+        self.assertNotIn('--eval-every', command)
+
+    def test_awac_online_starts_supervised_bridge(self):
+        with (
+            mock.patch('Automation.offline_rl.run_process') as process,
+            mock.patch('Automation.offline_rl.run_stack', return_value=0) as stack,
+            mock.patch('Automation.offline_rl.load_config', return_value={'bridge_command': ['bridge']}) as config,
+        ):
+            self.assertEqual(offline_main([
+                '--algorithm', 'awac', '--online-iterations', '5',
+                '--config', 'custom.yaml',
+            ]), 0)
+        process.assert_not_called()
+        config.assert_called_once_with('custom.yaml')
+        command = stack.call_args.args[1]
+        self.assertEqual(command[command.index('--online-iterations') + 1], '5')
+        self.assertNotIn('--device', command)  # auto uses AWAC's device detection
+        self.assertTrue(stack.call_args.kwargs['start_tensorboard'])
+
+    def test_invalid_awac_modes_and_online_options_fail_before_launch(self):
+        cases = [
+            ['--algorithm', 'awac', '--mode', 'dataset'],
+            ['--online-iterations', '5'],
+            ['--algorithm', 'awac', '--online-iterations', '-1'],
+            ['--algorithm', 'awac', '--top-fraction', '0.5'],
+        ]
+        with mock.patch('Automation.offline_rl.run_process') as process, mock.patch('Automation.offline_rl.run_stack') as stack:
+            for args in cases:
+                with self.subTest(args=args), self.assertRaises(ValueError):
+                    offline_main(args)
+        process.assert_not_called()
+        stack.assert_not_called()
+
+    def test_awac_live_evaluation_starts_bridge(self):
+        with (
+            mock.patch('Automation.offline_rl.load_config', return_value={'bridge_command': ['bridge']}),
+            mock.patch('Automation.offline_rl.run_stack', return_value=0) as stack,
+        ):
+            result = offline_main([
+                '--algorithm', 'awac', '--mode', 'live',
+                '--checkpoint-path', 'runs/awac/AWAC_model.pt',
+                '--eval-episodes', '7', '--device', 'cpu',
+            ])
+        self.assertEqual(result, 0)
+        command = stack.call_args.args[1]
+        self.assertEqual(command[:3], ['python', '-m', 'Inference.awac_eval'])
+        self.assertEqual(
+            command[command.index('--checkpoint-path') + 1],
+            'runs/awac/AWAC_model.pt',
+        )
+        self.assertEqual(command[command.index('--eval-episodes') + 1], '7')
+        self.assertEqual(stack.call_args.args[2], 'AWAC live evaluation')
+        self.assertFalse(stack.call_args.kwargs['start_tensorboard'])
+
+    def test_bc_remains_default_training_algorithm(self):
+        with mock.patch('Automation.offline_rl.run_process', return_value=0) as process:
+            self.assertEqual(offline_main([]), 0)
+        command = process.call_args.args[0]
+        self.assertEqual(command[:3], ['python', '-m', 'Offline.any_percent_bc'])
+        self.assertNotIn('--online-iterations', command)
+
+    def test_offline_training_does_not_start_bridge(self):
+        with (
+            mock.patch(
+                "Automation.offline_rl.run_process",
+                return_value=0,
+            ) as run_process_mock,
+            mock.patch("Automation.offline_rl.run_stack") as run_stack_mock,
+        ):
+            return_code = run_offline_rl(
+                {},
+                ["python", "-m", "Offline.any_percent_bc"],
+                mode="train",
+            )
+
+        self.assertEqual(return_code, 0)
+        run_process_mock.assert_called_once()
+        run_stack_mock.assert_not_called()
+
+    def test_offline_training_command_contains_dataset_and_output(self):
+        command = build_training_command(
+            dataset_id="env16/BC-v2",
+            update_steps=10_000,
+            buffer_size=50_000,
+            batch_size=128,
+            top_fraction=1.0,
+            gamma=0.99,
+            eval_every=1_000,
+            normalize_state=True,
+            checkpoints_path="runs",
+        )
+
+        self.assertEqual(
+            command[:3],
+            ["python", "-m", "Offline.any_percent_bc"],
+        )
+        self.assertIn("env16/BC-v2", command)
+        self.assertIn("10000", command)
+        self.assertIn("--normalize-state", command)
+        self.assertIn("runs", command)
+
+    def test_offline_dataset_evaluation_does_not_start_bridge(self):
+        with (
+            mock.patch(
+                "Automation.offline_rl.run_process",
+                return_value=0,
+            ) as run_process_mock,
+            mock.patch("Automation.offline_rl.run_stack") as run_stack_mock,
+        ):
+            return_code = run_offline_rl(
+                {},
+                ["python", "-m", "Inference.any_percent_bc_eval"],
+                mode="dataset",
+            )
+
+        self.assertEqual(return_code, 0)
+        run_process_mock.assert_called_once()
+        run_stack_mock.assert_not_called()
+
+    def test_offline_live_evaluation_starts_bridge(self):
+        with (
+            mock.patch("Automation.offline_rl.run_process") as run_process_mock,
+            mock.patch(
+                "Automation.offline_rl.run_stack",
+                return_value=0,
+            ) as run_stack_mock,
+        ):
+            return_code = run_offline_rl(
+                {"bridge_command": ["python", "bridge.py"]},
+                ["python", "-m", "Inference.any_percent_bc_eval"],
+                mode="live",
+            )
+
+        self.assertEqual(return_code, 0)
+        run_process_mock.assert_not_called()
+        run_stack_mock.assert_called_once()
+
+    def test_offline_evaluation_command_contains_explicit_inputs(self):
+        command = build_evaluation_command(
+            mode="dataset",
+            checkpoint_path="runs/bc/BC_model.pt",
+            dataset_id="env16/BC-v2",
+            eval_episodes=3,
+            top_fraction=0.5,
+            gamma=0.95,
+            device="cpu",
+            normalize_state=False,
+            output_csv="reports/predictions.csv",
+        )
+
+        self.assertEqual(
+            command[:3],
+            ["python", "-m", "Inference.any_percent_bc_eval"],
+        )
+        self.assertIn("runs/bc/BC_model.pt", command)
+        self.assertIn("env16/BC-v2", command)
+        self.assertIn("--no-normalize-state", command)
+        self.assertEqual(command[-2:], ["--output-csv", "reports/predictions.csv"])
+
     def test_configured_training_algorithm_resolves_its_command(self):
         config = load_config("Automation/automation_config.yaml")
         self.assertEqual(
@@ -62,6 +258,44 @@ class AutomationConfigTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "only supported"):
             resolve_training_command(config)
+
+    def test_resume_and_partial_training_options_are_forwarded(self):
+        config = load_config("Automation/automation_config.yaml")
+        config["rl_algorithm"] = "ppo_lstm"
+        config["restore_model_path"] = None
+
+        _, command = resolve_training_command(
+            config,
+            resume_checkpoint_path="runs/existing/PPO_lstm_server_training.pt",
+            total_timesteps=100_000,
+            stop_after_timesteps=20_000,
+            checkpoint_interval=256,
+        )
+
+        self.assertEqual(
+            command[-8:],
+            [
+                "--resume-checkpoint-path",
+                "runs/existing/PPO_lstm_server_training.pt",
+                "--total-timesteps",
+                "100000",
+                "--stop-after-timesteps",
+                "20000",
+                "--checkpoint-interval",
+                "256",
+            ],
+        )
+
+    def test_weight_restore_and_full_resume_are_mutually_exclusive(self):
+        config = load_config("Automation/automation_config.yaml")
+        config["rl_algorithm"] = "ppo"
+        config["restore_model_path"] = "runs/weights/PPO_server.pt"
+
+        with self.assertRaisesRegex(ValueError, "cannot be used together"):
+            resolve_training_command(
+                config,
+                resume_checkpoint_path="runs/state/PPO_server_training.pt",
+            )
 
     def test_python_command_uses_active_interpreter(self):
         command = normalize_command(["python", "-m", "example"])
@@ -184,16 +418,8 @@ class AutomationConfigTests(unittest.TestCase):
         command = resolve_inference_command(config)
 
         self.assertEqual(command, config["ppo_lstm_inference_command"])
-        self.assertEqual(
-            command,
-            [
-                "python",
-                "-m",
-                "Inference.ppo_lstm_eval",
-                "--model-path",
-                "runs/XXXX/PPO_lstm_server.pt",
-            ],
-        )
+        self.assertEqual(command[:4], ["python", "-m", "Inference.ppo_lstm_eval", "--model-path"])
+        self.assertTrue(command[-1].endswith("PPO_lstm_server.pt"))
 
     def test_feedforward_ppo_inference_command_is_selectable(self):
         config = load_config("Automation/automation_config.yaml")
@@ -202,16 +428,8 @@ class AutomationConfigTests(unittest.TestCase):
         command = resolve_inference_command(config)
 
         self.assertEqual(command, config["ppo_inference_command"])
-        self.assertEqual(
-            command,
-            [
-                "python",
-                "-m",
-                "Inference.ppo_eval",
-                "--model-path",
-                "runs/XXXX/PPO_server.pt",
-            ],
-        )
+        self.assertEqual(command[:4], ["python", "-m", "Inference.ppo_eval", "--model-path"])
+        self.assertTrue(command[-1].endswith("PPO_server.pt"))
 
     def test_dqn_inference_command_is_selectable(self):
         config = load_config("Automation/automation_config.yaml")

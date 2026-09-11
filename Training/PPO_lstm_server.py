@@ -17,6 +17,12 @@ from torch.utils.tensorboard import SummaryWriter
 from Custom_enviornments.Test_Env.Env_16 import Env16
 from Training.ppo_metrics import log_step_metrics
 from Utils.model_paths import training_checkpoint_path
+from Utils.ppo_checkpoint import (
+    load_training_checkpoint,
+    restore_rng_state,
+    restore_saved_hyperparameters,
+    save_training_checkpoint,
+)
 
 
 @dataclass
@@ -35,6 +41,14 @@ class Args:
     """checkpoint override; defaults to runs/<run_name>/PPO_lstm_server.pt"""
     restore_model_path: str | None = None
     """PyTorch checkpoint whose agent weights initialize this training run"""
+    resume_checkpoint_path: str | None = None
+    """training checkpoint to resume, including optimizer and progress"""
+    training_checkpoint_path: str | None = None
+    """training-state path; defaults to PPO_lstm_server_training.pt in the run directory"""
+    checkpoint_interval: int = 128
+    """timesteps between safe rollout-boundary checkpoints; 0 disables periodic saves"""
+    stop_after_timesteps: int = 0
+    """stop this invocation at the first rollout boundary at or after this global step"""
 
     # Algorithm specific arguments
     total_timesteps: int = 100000
@@ -205,6 +219,18 @@ class Agent(nn.Module):
 
 
 def train(args: Args) -> None:
+    if args.resume_checkpoint_path and args.restore_model_path:
+        raise ValueError("Use either resume_checkpoint_path or restore_model_path, not both")
+    if args.checkpoint_interval < 0 or args.stop_after_timesteps < 0:
+        raise ValueError("checkpoint_interval and stop_after_timesteps must be nonnegative")
+    resume_checkpoint = None
+    if args.resume_checkpoint_path:
+        resume_path, resume_checkpoint = load_training_checkpoint(
+            args.resume_checkpoint_path,
+            algorithm="ppo_lstm",
+            device=torch.device("cpu"),
+        )
+        restore_saved_hyperparameters(args, resume_checkpoint)
     if args.num_envs != 1:
         raise ValueError("Env16 supports exactly one live environment")
     if args.metrics_frequency <= 0:
@@ -221,15 +247,30 @@ def train(args: Args) -> None:
     args.batch_size = args.num_envs * args.num_steps
     args.minibatch_size = args.batch_size // args.num_minibatches
     args.num_iterations = args.total_timesteps // args.batch_size
-    run_name = f"Env16__{args.exp_name}__{args.seed}__{int(time.time())}"
-    run_directory = Path("runs") / run_name
-    args.model_path = str(
-        training_checkpoint_path(
-            run_directory,
-            args.model_path,
-            "PPO_lstm_server.pt",
+    if resume_checkpoint is None:
+        run_name = f"Env16__{args.exp_name}__{args.seed}__{int(time.time())}"
+        run_directory = Path("runs") / run_name
+        args.model_path = str(
+            training_checkpoint_path(
+                run_directory,
+                args.model_path,
+                "PPO_lstm_server.pt",
+            )
         )
-    )
+        training_state_path = Path(
+            args.training_checkpoint_path
+            or run_directory / "PPO_lstm_server_training.pt"
+        )
+    else:
+        run_name = str(resume_checkpoint["run_name"])
+        run_directory = Path(resume_checkpoint["run_directory"])
+        run_directory.mkdir(parents=True, exist_ok=True)
+        args.model_path = str(
+            resume_checkpoint.get("model_path")
+            or run_directory / "PPO_lstm_server.pt"
+        )
+        training_state_path = resume_path
+    args.training_checkpoint_path = str(training_state_path)
 
     writer = SummaryWriter(str(run_directory))
     writer.add_text(
@@ -266,6 +307,15 @@ def train(args: Args) -> None:
                 flush=True,
             )
         optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+        if resume_checkpoint is not None:
+            agent.load_state_dict(resume_checkpoint["agent"])
+            optimizer.load_state_dict(resume_checkpoint["optimizer"])
+            restore_rng_state(resume_checkpoint["rng_state"])
+            print(
+                f"Resuming {run_name} from step {resume_checkpoint['global_step']} "
+                f"using {resume_path}",
+                flush=True,
+            )
 
         obs = torch.zeros(
             (args.num_steps, args.num_envs)
@@ -304,7 +354,7 @@ def train(args: Args) -> None:
         )
         lstm_cell = torch.zeros_like(lstm_hidden)
 
-        global_step = 0
+        global_step = int(resume_checkpoint["global_step"]) if resume_checkpoint else 0
         start_time = time.time()
         next_observation, _ = env.reset(seed=args.seed)
         next_obs = torch.as_tensor(
@@ -331,14 +381,22 @@ def train(args: Args) -> None:
         episode_return = 0.0
         episode_length = 0
         episode_reward_components: dict[str, float] = {}
-        completed_episodes = 0
-        wins = 0
-        action_counts = np.zeros(env.single_action_space.n, dtype=np.int64)
+        runtime_state = resume_checkpoint.get("runtime_state", {}) if resume_checkpoint else {}
+        completed_episodes = int(runtime_state.get("completed_episodes", 0))
+        wins = int(runtime_state.get("wins", 0))
+        action_counts = np.asarray(
+            runtime_state.get("action_counts", np.zeros(env.single_action_space.n)),
+            dtype=np.int64,
+        )
         recent_actions: list[int] = []
         player_hp_index = 3
         enemy_hp_index = int(env.config["OBS_PLAYER_SIZE"]) + 2
 
-        for iteration in range(1, args.num_iterations + 1):
+        completed_iteration = int(
+            resume_checkpoint["completed_iteration"] if resume_checkpoint else 0
+        )
+        last_checkpoint_step = global_step
+        for iteration in range(completed_iteration + 1, args.num_iterations + 1):
             if args.anneal_lr:
                 fraction = 1.0 - (iteration - 1.0) / args.num_iterations
                 optimizer.param_groups[0]["lr"] = (
@@ -668,6 +726,47 @@ def train(args: Args) -> None:
             if args.save_model:
                 checkpoint_path = save_agent(agent, args.model_path)
                 print(f"model saved to {checkpoint_path}")
+
+            should_checkpoint = (
+                args.checkpoint_interval > 0
+                and global_step - last_checkpoint_step >= args.checkpoint_interval
+            )
+            should_stop = (
+                args.stop_after_timesteps > 0
+                and global_step >= args.stop_after_timesteps
+            )
+            if should_checkpoint or should_stop or iteration == args.num_iterations:
+                saved_training_state = save_training_checkpoint(
+                    training_state_path,
+                    algorithm="ppo_lstm",
+                    args=args,
+                    agent=agent,
+                    optimizer=optimizer,
+                    global_step=global_step,
+                    completed_iteration=iteration,
+                    run_name=run_name,
+                    run_directory=run_directory,
+                    runtime_state={
+                        "completed_episodes": completed_episodes,
+                        "wins": wins,
+                        "action_counts": torch.as_tensor(action_counts),
+                    },
+                    recurrent_state=next_lstm_state,
+                    metadata={
+                        "environment": "Env16",
+                        "observation_shape": list(env.single_observation_space.shape),
+                        "action_names": list(env.Actions),
+                        "architecture": "lstm_actor_critic",
+                        "lstm_hidden_size": agent.lstm.hidden_size,
+                        "lstm_num_layers": agent.lstm.num_layers,
+                        "recurrent_state_resume": "reset_for_new_external_episode",
+                    },
+                )
+                last_checkpoint_step = global_step
+                print(f"training checkpoint saved to {saved_training_state}")
+            if should_stop:
+                print(f"Partial training stop reached at step {global_step}")
+                break
     finally:
         if env is not None:
             env.close()

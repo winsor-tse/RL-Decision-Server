@@ -1,4 +1,3 @@
-import contextlib
 import os
 import random
 import uuid
@@ -8,15 +7,17 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import gymnasium as gym
 import minari
 import numpy as np
-import pyrallis
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import wandb
+import tyro
+import yaml
 from tqdm.auto import trange
+from torch.utils.tensorboard import SummaryWriter
 
 TensorBatch = List[torch.Tensor]
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+BC_MODEL_FILENAME = "BC_model.pt"
 
 
 @dataclass
@@ -35,17 +36,19 @@ class TrainConfig:
     batch_size: int = 256  # Batch size for all networks
     normalize_state: bool = True  # Normalize states
     # evaluation params
-    eval_every: int = int(5e3)  # How often (time steps) we evaluate
+    eval_every: int = int(5e3)  # Reserved evaluation interval; no model save
     eval_episodes: int = 10  # How many episodes run during evaluation
     # general params
     train_seed: int = 0
     eval_seed: int = 0
-    checkpoints_path: Optional[str] = None  # Save path
+    checkpoints_path: str = "runs"  # Root for checkpoints and TensorBoard logs
 
     def __post_init__(self):
-        self.name = f"{self.name}-{self.dataset_id}-{str(uuid.uuid4())[:8]}"
-        if self.checkpoints_path is not None:
-            self.checkpoints_path = os.path.join(self.checkpoints_path, self.name)
+        # Sanitize dataset identifier for use in filenames (remove path separators and drive letters)
+        dataset_label = os.path.basename(self.dataset_id.replace('\\', '/'))
+        dataset_label = dataset_label.replace(':', '')
+        self.name = f"{self.name}-{dataset_label}-{str(uuid.uuid4())[:8]}"
+        self.checkpoints_path = os.path.join(self.checkpoints_path, self.name)
 
 
 def set_seed(seed: int, deterministic_torch: bool = False):
@@ -72,16 +75,27 @@ def wrap_env(
     state_std: Union[np.ndarray, float] = 1.0,
     reward_scale: float = 1.0,
 ) -> gym.Env:
-    def normalize_state(state):
-        return (state - state_mean) / state_std
+    # Use an ObservationWrapper compatible with the installed Gymnasium version
+    class _NormalizeObs(gym.ObservationWrapper):
+        def __init__(self, env, mean, std):
+            super().__init__(env)
+            self._mean = mean
+            self._std = std
 
-    def scale_reward(reward):
-        # Please be careful, here reward is multiplied by scale!
-        return reward_scale * reward
+        def observation(self, observation):
+            return (observation - self._mean) / self._std
 
-    env = gym.wrappers.TransformObservation(env, normalize_state)
+    class _ScaleReward(gym.RewardWrapper):
+        def __init__(self, env, scale):
+            super().__init__(env)
+            self._scale = scale
+
+        def reward(self, reward):
+            return self._scale * reward
+
+    env = _NormalizeObs(env, state_mean, state_std)
     if reward_scale != 1.0:
-        env = gym.wrappers.TransformReward(env, scale_reward)
+        env = _ScaleReward(env, reward_scale)
     return env
 
 
@@ -167,7 +181,11 @@ class ReplayBuffer:
                 "Replay buffer is smaller than the dataset you are trying to load!"
             )
         self._states[:n_transitions] = self._to_tensor(data["observations"])
-        self._actions[:n_transitions] = self._to_tensor(data["actions"])
+        # Ensure actions are shaped (N, action_dim). For 1D actions, reshape to (N,1).
+        actions_tensor = self._to_tensor(data["actions"])
+        if actions_tensor.dim() == 1:
+            actions_tensor = actions_tensor.unsqueeze(-1)
+        self._actions[:n_transitions] = actions_tensor
         self._rewards[:n_transitions] = self._to_tensor(data["rewards"][..., None])
         self._next_states[:n_transitions] = self._to_tensor(data["next_observations"])
         self._dones[:n_transitions] = self._to_tensor(data["terminals"][..., None])
@@ -263,38 +281,82 @@ def evaluate(
 
         episode_reward = 0.0
         while not done:
-            action = actor.act(state, device)
-            state, reward, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
-            episode_reward += reward
+                raw_action = actor.act(state, device)
+                # If the environment expects discrete actions, convert continuous output to an index
+                if hasattr(env, 'action_space') and hasattr(env.action_space, 'n'):
+                    # raw_action likely an array/float; get scalar value
+                    try:
+                        val = float(np.asarray(raw_action).flatten()[0])
+                    except Exception:
+                        val = float(raw_action)
+                    # Round to nearest integer and clip to valid discrete range
+                    action_idx = int(np.round(val))
+                    action_idx = int(np.clip(action_idx, 0, env.action_space.n - 1))
+                    action = action_idx
+                else:
+                    action = raw_action
+
+                # Step the environment. Env16BC will raise a ValueError when the
+                # provided action doesn't match the recorded captured action. Catch
+                # that and advance using the recorded action (if available) so the
+                # episode can continue while still recording the model's prediction.
+                try:
+                    state, reward, terminated, truncated, info = env.step(action)
+                except ValueError as e:
+                    msg = str(e)
+                    # Detect the specific mismatch error from Env16BC
+                    if 'Expected captured action' in msg and hasattr(env, 'next_action'):
+                        expected = None
+                        try:
+                            expected = env.next_action()
+                        except Exception:
+                            expected = None
+
+                        if expected is not None:
+                            # Advance env using the recorded action so episode continues
+                            state, reward, terminated, truncated, info = env.step(int(expected))
+                            # Optionally, log the mismatch via TensorBoard if writer exists
+                            try:
+                                writer.add_scalar('eval/action_mismatch', 1, len(episode_rewards))
+                            except Exception:
+                                pass
+                        else:
+                            # Re-raise if we cannot recover
+                            raise
+                    else:
+                        # Unknown ValueError - re-raise
+                        raise
+
+                done = terminated or truncated
+                episode_reward += reward
         episode_rewards.append(episode_reward)
 
     actor.train()
     return np.asarray(episode_rewards)
 
 
-@pyrallis.wrap()
 def train(config: TrainConfig):
-    wandb.init(
-        config=asdict(config),
-        project=config.project,
-        group=config.group,
-        name=config.name,
-        id=str(uuid.uuid4()),
-        save_code=True,
-    )
     dataset = minari.load_dataset(config.dataset_id)
-
-    eval_env = dataset.recover_environment() #TODO: current dataset is local, and its replay gameplay. Do not recover enviornment.
-    #TODO: build the Env16
-    state_dim = eval_env.observation_space.shape[0]
-    action_dim = eval_env.action_space.shape[0]
-    max_action = float(eval_env.action_space.high[0])
 
     qdataset = qlearning_dataset(
         dataset=dataset,
         traj_ids=best_trajectories_ids(dataset, config.top_fraction, config.gamma),
     )
+
+    # Derive state/action dimensions from the dataset (works when env can't be recovered)
+    state_dim = int(qdataset["observations"].shape[1])
+    # Enforce 1D action arrays (scalar continuous actions)
+    actions_arr = qdataset["actions"]
+    if actions_arr.ndim != 1:
+        raise ValueError(f"This script expects 1D action arrays (shape (N,)). Found shape: {actions_arr.shape}")
+    action_dim = 1
+    # Estimate max_action from data; fallback to 1.0 if not available
+    try:
+        max_action = float(np.max(np.abs(actions_arr)))
+        if max_action == 0.0:
+            max_action = 1.0
+    except Exception:
+        max_action = 1.0
     if config.normalize_state:
         state_mean, state_std = compute_mean_std(qdataset["observations"], eps=1e-3)
     else:
@@ -306,7 +368,7 @@ def train(config: TrainConfig):
     qdataset["next_observations"] = normalize_states(
         qdataset["next_observations"], state_mean, state_std
     )
-    eval_env = wrap_env(eval_env, state_mean=state_mean, state_std=state_std)
+
     replay_buffer = ReplayBuffer(
         state_dim,
         action_dim,
@@ -315,11 +377,19 @@ def train(config: TrainConfig):
     )
     replay_buffer.load_dataset(qdataset)
 
-    if config.checkpoints_path is not None:
-        print(f"Checkpoints path: {config.checkpoints_path}")
-        os.makedirs(config.checkpoints_path, exist_ok=True)
-        with open(os.path.join(config.checkpoints_path, "config.yaml"), "w") as f:
-            pyrallis.dump(config, f)
+    print(f"Checkpoints path: {config.checkpoints_path}")
+    os.makedirs(config.checkpoints_path, exist_ok=True)
+    with open(
+        os.path.join(config.checkpoints_path, "config.yaml"),
+        "w",
+        encoding="utf-8",
+    ) as config_file:
+        yaml.safe_dump(asdict(config), config_file, sort_keys=False)
+
+    # Keep TensorBoard events and model checkpoints together for this run.
+    log_dir = config.checkpoints_path
+    os.makedirs(log_dir, exist_ok=True)
+    writer = SummaryWriter(log_dir=log_dir)
 
     # Set seed #this seed is not necessary
     set_seed(config.train_seed)
@@ -340,30 +410,20 @@ def train(config: TrainConfig):
         batch = [b.to(DEVICE) for b in replay_buffer.sample(config.batch_size)]
         log_dict = trainer.train(batch)
 
-        wandb.log(log_dict, step=step)
+        for k, v in log_dict.items():
+            try:
+                writer.add_scalar(f"train/{k}", float(v), step)
+            except Exception:
+                # if a non-scalar is logged, skip
+                pass
 
-        if (step + 1) % config.eval_every == 0:
-            eval_scores = evaluate(
-                env=eval_env,
-                actor=actor,
-                num_episodes=config.eval_episodes,
-                seed=config.eval_seed,
-                device=DEVICE,
-            )
-            wandb.log({"evaluation_return": eval_scores.mean()}, step=step)
-            # optional normalized score logging, only if dataset has reference scores
-            with contextlib.suppress(ValueError):
-                normalized_score = (
-                    minari.get_normalized_score(dataset, eval_scores).mean() * 100
-                )
-                wandb.log({"normalized_score": normalized_score}, step=step)
+    model_path = os.path.join(config.checkpoints_path, BC_MODEL_FILENAME)
+    torch.save(trainer.state_dict(), model_path)
+    print(f"Saved BC model to: {model_path}")
 
-            if config.checkpoints_path is not None:
-                torch.save(
-                    trainer.state_dict(),
-                    os.path.join(config.checkpoints_path, f"checkpoint_{step}.pt"),
-                )
+    # Close TensorBoard writer
+    writer.close()
 
 
 if __name__ == "__main__":
-    train()
+    train(tyro.cli(TrainConfig))

@@ -1,47 +1,43 @@
+"""Discrete AWAC for Env16, using local BC-Minari demonstrations."""
+
 import os
 import random
 import uuid
 from copy import deepcopy
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Tuple
 
-import d4rl
-import gym
+import gymnasium as gym
+import minari
 import numpy as np
-import pyrallis
 import torch
 import torch.nn as nn
-import torch.nn.functional
-import wandb
-from tqdm import trange
+import tyro
+import yaml
+from torch.utils.tensorboard import SummaryWriter
+from tqdm.auto import trange
+
+from Custom_enviornments.Load_env_config import load_env_config
+from Custom_enviornments.Test_Env.Env_16 import Env16
+from Custom_enviornments.Test_Env.Env_16_BC import BC_ACTIONS_11
 
 TensorBatch = List[torch.Tensor]
-
-ENVS_WITH_GOAL = ("antmaze", "pen", "door", "hammer", "relocate")
+AWAC_MODEL_FILENAME = "AWAC_model.pt"
 
 
 @dataclass
 class TrainConfig:
-    project: str = "CORL"
-    group: str = "AWAC-D4RL"
     name: str = "AWAC"
-    checkpoints_path: Optional[str] = None
-
-    env_name: str = "halfcheetah-medium-expert-v2"
+    dataset_id: str = "env16/BC-v0"  # Local BC-Minari dataset, as in any_percent_bc.
+    checkpoints_path: str = "runs"
     seed: int = 42
-    eval_seed: int = 0  # Eval environment seed
-    test_seed: int = 69
-    deterministic_torch: bool = True
-    device: str = "cuda"
-
-    buffer_size: int = 20_000_000
-    offline_iterations: int = int(1e6)  # Number of offline updates
-    online_iterations: int = int(1e6)  # Number of online updates
+    deterministic_torch: bool = False
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    buffer_size: int = 2_000_000
+    offline_iterations: int = 1_000_000
+    online_iterations: int = 0  # Opt in; requires the bridge and running game.
     batch_size: int = 256
-    eval_frequency: int = 1000
-    n_test_episodes: int = 10
-    normalize_reward: bool = False
-
+    normalize_state: bool = True
     hidden_dim: int = 256
     learning_rate: float = 3e-4
     gamma: float = 0.99
@@ -49,9 +45,48 @@ class TrainConfig:
     awac_lambda: float = 1.0
 
     def __post_init__(self):
-        self.name = f"{self.name}-{self.env_name}-{str(uuid.uuid4())[:8]}"
-        if self.checkpoints_path is not None:
-            self.checkpoints_path = os.path.join(self.checkpoints_path, self.name)
+        if self.offline_iterations < 0 or self.online_iterations < 0:
+            raise ValueError("Training iteration counts must be nonnegative")
+        if min(self.buffer_size, self.batch_size, self.hidden_dim) <= 0:
+            raise ValueError("Buffer, batch, and hidden sizes must be positive")
+        if self.awac_lambda <= 0 or self.learning_rate <= 0:
+            raise ValueError("awac_lambda and learning_rate must be positive")
+        if not 0 <= self.gamma <= 1 or not 0 <= self.tau <= 1:
+            raise ValueError("gamma and tau must be between 0 and 1")
+        label = os.path.basename(self.dataset_id.replace("\\", "/")).replace(":", "")
+        self.name = f"{self.name}-{label}-{str(uuid.uuid4())[:8]}"
+        self.checkpoints_path = os.path.join(self.checkpoints_path, self.name)
+
+
+def qlearning_dataset(dataset) -> Dict[str, np.ndarray]:
+    """Keep all demonstrations and bootstrap across time-limit truncations."""
+    if not isinstance(dataset.action_space, gym.spaces.Discrete):
+        raise ValueError("Env16 requires a discrete Minari action space")
+    if dataset.action_space.n != len(BC_ACTIONS_11) or dataset.action_space.start != 0:
+        raise ValueError("Dataset must use the 11 zero-based BC action indices")
+    fields = {key: [] for key in
+              ("observations", "actions", "next_observations", "rewards", "terminals")}
+    obs_size = load_env_config()["OBS_SIZE"]
+    for episode in dataset.iterate_episodes():
+        actions = np.asarray(episode.actions)
+        if not len(actions):
+            continue
+        obs = np.asarray(episode.observations, dtype=np.float32)
+        if obs.shape != (len(actions) + 1, obs_size):
+            raise ValueError(f"Expected Env16 observations shaped (N+1, {obs_size}); got {obs.shape}")
+        if actions.shape != (len(actions),) or not np.all(
+            np.isfinite(actions) & (actions == np.floor(actions))
+            & (actions >= 0) & (actions < len(BC_ACTIONS_11))
+        ):
+            raise ValueError("Dataset contains invalid discrete action indices")
+        fields["observations"].append(obs[:-1])
+        fields["next_observations"].append(obs[1:])
+        fields["actions"].append(actions)
+        fields["rewards"].append(np.asarray(episode.rewards, dtype=np.float32))
+        fields["terminals"].append(np.asarray(episode.terminations, dtype=np.float32))
+    if not fields["actions"]:
+        raise ValueError("The local Minari dataset contains no transitions")
+    return {key: np.concatenate(values) for key, values in fields.items()}
 
 
 class ReplayBuffer:
@@ -82,7 +117,7 @@ class ReplayBuffer:
     def _to_tensor(self, data: np.ndarray) -> torch.Tensor:
         return torch.tensor(data, dtype=torch.float32, device=self._device)
 
-    def load_d4rl_dataset(self, data: Dict[str, np.ndarray]):
+    def load_dataset(self, data: Dict[str, np.ndarray]):
         if self._size != 0:
             raise ValueError("Trying to load data into non-empty replay buffer")
         n_transitions = data["observations"].shape[0]
@@ -91,12 +126,12 @@ class ReplayBuffer:
                 "Replay buffer is smaller than the dataset you are trying to load!"
             )
         self._states[:n_transitions] = self._to_tensor(data["observations"])
-        self._actions[:n_transitions] = self._to_tensor(data["actions"])
+        self._actions[:n_transitions] = self._to_tensor(data["actions"]).reshape(-1, 1)
         self._rewards[:n_transitions] = self._to_tensor(data["rewards"][..., None])
         self._next_states[:n_transitions] = self._to_tensor(data["next_observations"])
         self._dones[:n_transitions] = self._to_tensor(data["terminals"][..., None])
         self._size += n_transitions
-        self._pointer = min(self._size, n_transitions)
+        self._pointer = self._size % self._buffer_size
 
         print(f"Dataset size: {n_transitions}")
 
@@ -128,88 +163,50 @@ class ReplayBuffer:
         self._size = min(self._size + 1, self._buffer_size)
 
 
-def set_env_seed(env: Optional[gym.Env], seed: int):
-    env.seed(seed)
-    env.action_space.seed(seed)
-
-
 class Actor(nn.Module):
-    def __init__(
-        self,
-        state_dim: int,
-        action_dim: int,
-        hidden_dim: int,
-        min_log_std: float = -20.0,
-        max_log_std: float = 2.0,
-        min_action: float = -1.0,
-        max_action: float = 1.0,
-    ):
+    """Categorical policy over the BC action ordering."""
+
+    def __init__(self, state_dim: int, action_dim: int, hidden_dim: int):
         super().__init__()
         self._mlp = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
+            nn.Linear(state_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, action_dim),
         )
-        self._log_std = nn.Parameter(torch.zeros(action_dim, dtype=torch.float32))
-        self._min_log_std = min_log_std
-        self._max_log_std = max_log_std
-        self._min_action = min_action
-        self._max_action = max_action
 
-    def _get_policy(self, state: torch.Tensor) -> torch.distributions.Distribution:
-        mean = self._mlp(state)
-        log_std = self._log_std.clamp(self._min_log_std, self._max_log_std)
-        policy = torch.distributions.Normal(mean, log_std.exp())
-        return policy
+    def _get_policy(self, state):
+        return torch.distributions.Categorical(logits=self._mlp(state))
 
-    def log_prob(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+    def log_prob(self, state, action):
+        return self._get_policy(state).log_prob(action.long().reshape(-1)).unsqueeze(-1)
+
+    def forward(self, state):
         policy = self._get_policy(state)
-        log_prob = policy.log_prob(action).sum(-1, keepdim=True)
-        return log_prob
+        action = policy.sample()
+        return action.unsqueeze(-1), policy.log_prob(action).unsqueeze(-1)
 
-    def forward(self, state: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    @torch.no_grad()
+    def act(self, state: np.ndarray, device: str = "cpu") -> int:
+        state = torch.as_tensor(state, dtype=torch.float32, device=device).reshape(1, -1)
         policy = self._get_policy(state)
-        action = policy.rsample()
-        action.clamp_(self._min_action, self._max_action)
-        log_prob = policy.log_prob(action).sum(-1, keepdim=True)
-        return action, log_prob
-
-    def act(self, state: np.ndarray, device: str) -> np.ndarray:
-        state_t = torch.tensor(state[None], dtype=torch.float32, device=device)
-        policy = self._get_policy(state_t)
-        if self._mlp.training:
-            action_t = policy.sample()
-        else:
-            action_t = policy.mean
-        action = action_t[0].cpu().numpy()
-        return action
+        action = policy.sample() if self.training else policy.probs.argmax(-1)
+        return int(action.item())
 
 
 class Critic(nn.Module):
-    def __init__(
-        self,
-        state_dim: int,
-        action_dim: int,
-        hidden_dim: int,
-    ):
+    def __init__(self, state_dim: int, action_dim: int, hidden_dim: int):
         super().__init__()
         self._mlp = nn.Sequential(
-            nn.Linear(state_dim + action_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
+            nn.Linear(state_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, action_dim),
         )
 
-    def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        q_value = self._mlp(torch.cat([state, action], dim=-1))
-        return q_value
+    def forward(self, state, action=None):
+        values = self._mlp(state)
+        return values if action is None else values.gather(1, action.long().reshape(-1, 1))
 
 
 def soft_update(target: nn.Module, source: nn.Module, tau: float):
@@ -253,10 +250,10 @@ class AdvantageWeightedActorCritic:
         actions: torch.Tensor,
     ) -> torch.Tensor:
         with torch.no_grad():
-            pi_action, _ = self._actor(states)
-            v = torch.min(
-                self._critic_1(states, pi_action), self._critic_2(states, pi_action)
-            )
+            policy = self._actor._get_policy(states)
+            v = (policy.probs * torch.min(
+                self._critic_1(states), self._critic_2(states)
+            )).sum(-1, keepdim=True)
 
             q = torch.min(
                 self._critic_1(states, actions), self._critic_2(states, actions)
@@ -279,12 +276,11 @@ class AdvantageWeightedActorCritic:
         next_states: torch.Tensor,
     ) -> torch.Tensor:
         with torch.no_grad():
-            next_actions, _ = self._actor(next_states)
-
-            q_next = torch.min(
-                self._target_critic_1(next_states, next_actions),
-                self._target_critic_2(next_states, next_actions),
-            )
+            policy = self._actor._get_policy(next_states)
+            q_next = (policy.probs * torch.min(
+                self._target_critic_1(next_states),
+                self._target_critic_2(next_states),
+            )).sum(-1, keepdim=True)
             q_target = rewards + self._gamma * (1.0 - dones) * q_next
 
         q1 = self._critic_1(states, actions)
@@ -334,290 +330,114 @@ class AdvantageWeightedActorCritic:
             "actor": self._actor.state_dict(),
             "critic_1": self._critic_1.state_dict(),
             "critic_2": self._critic_2.state_dict(),
+            "target_critic_1": self._target_critic_1.state_dict(),
+            "target_critic_2": self._target_critic_2.state_dict(),
+            "actor_optimizer": self._actor_optimizer.state_dict(),
+            "critic_1_optimizer": self._critic_1_optimizer.state_dict(),
+            "critic_2_optimizer": self._critic_2_optimizer.state_dict(),
         }
 
     def load_state_dict(self, state_dict: Dict[str, Any]):
         self._actor.load_state_dict(state_dict["actor"])
         self._critic_1.load_state_dict(state_dict["critic_1"])
         self._critic_2.load_state_dict(state_dict["critic_2"])
+        for name in ("critic_1", "critic_2"):
+            getattr(self, "_target_" + name).load_state_dict(
+                state_dict.get("target_" + name, state_dict[name])
+            )
+        for name in ("actor_optimizer", "critic_1_optimizer", "critic_2_optimizer"):
+            if name in state_dict:
+                getattr(self, "_" + name).load_state_dict(state_dict[name])
 
 
-def set_seed(
-    seed: int, env: Optional[gym.Env] = None, deterministic_torch: bool = False
-):
-    if env is not None:
-        set_env_seed(env, seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.manual_seed(seed)
-    torch.use_deterministic_algorithms(deterministic_torch)
-
-
-def compute_mean_std(states: np.ndarray, eps: float) -> Tuple[np.ndarray, np.ndarray]:
-    mean = states.mean(0)
-    std = states.std(0) + eps
-    return mean, std
-
-
-def normalize_states(states: np.ndarray, mean: np.ndarray, std: np.ndarray):
-    return (states - mean) / std
-
-
-def wrap_env(
-    env: gym.Env,
-    state_mean: Union[np.ndarray, float] = 0.0,
-    state_std: Union[np.ndarray, float] = 1.0,
-) -> gym.Env:
-    def normalize_state(state):
-        return (state - state_mean) / state_std
-
-    env = gym.wrappers.TransformObservation(env, normalize_state)
-    return env
-
-
-def is_goal_reached(reward: float, info: Dict) -> bool:
-    if "goal_achieved" in info:
-        return info["goal_achieved"]
-    return reward > 0  # Assuming that reaching target is a positive reward
-
-
-@torch.no_grad()
-def eval_actor(
-    env: gym.Env, actor: Actor, device: str, n_episodes: int, seed: int
-) -> Tuple[np.ndarray, np.ndarray]:
-    env.seed(seed)
-    actor.eval()
-    episode_rewards = []
-    successes = []
-    for _ in range(n_episodes):
-        state, done = env.reset(), False
-        episode_reward = 0.0
-        goal_achieved = False
-        while not done:
-            action = actor.act(state, device)
-            state, reward, done, env_infos = env.step(action)
-            episode_reward += reward
-            if not goal_achieved:
-                goal_achieved = is_goal_reached(reward, env_infos)
-        # Valid only for environments with goal
-        successes.append(float(goal_achieved))
-        episode_rewards.append(episode_reward)
-
-    actor.train()
-    return np.asarray(episode_rewards), np.mean(successes)
-
-
-def return_reward_range(dataset: Dict, max_episode_steps: int) -> Tuple[float, float]:
-    returns, lengths = [], []
-    ep_ret, ep_len = 0.0, 0
-    for r, d in zip(dataset["rewards"], dataset["terminals"]):
-        ep_ret += float(r)
-        ep_len += 1
-        if d or ep_len == max_episode_steps:
-            returns.append(ep_ret)
-            lengths.append(ep_len)
-            ep_ret, ep_len = 0.0, 0
-    lengths.append(ep_len)  # but still keep track of number of steps
-    assert sum(lengths) == len(dataset["rewards"])
-    return min(returns), max(returns)
-
-
-def modify_reward(dataset: Dict, env_name: str, max_episode_steps: int = 1000) -> Dict:
-    if any(s in env_name for s in ("halfcheetah", "hopper", "walker2d")):
-        min_ret, max_ret = return_reward_range(dataset, max_episode_steps)
-        dataset["rewards"] /= max_ret - min_ret
-        dataset["rewards"] *= max_episode_steps
-        return {
-            "max_ret": max_ret,
-            "min_ret": min_ret,
-            "max_episode_steps": max_episode_steps,
-        }
-    elif "antmaze" in env_name:
-        dataset["rewards"] -= 1.0
-    return {}
-
-
-def modify_reward_online(reward: float, env_name: str, **kwargs) -> float:
-    if any(s in env_name for s in ("halfcheetah", "hopper", "walker2d")):
-        reward /= kwargs["max_ret"] - kwargs["min_ret"]
-        reward *= kwargs["max_episode_steps"]
-    elif "antmaze" in env_name:
-        reward -= 1.0
-    return reward
-
-
-def wandb_init(config: dict) -> None:
-    wandb.init(
-        config=config,
-        project=config["project"],
-        group=config["group"],
-        name=config["name"],
-        id=str(uuid.uuid4()),
-    )
-    wandb.run.save()
-
-
-@pyrallis.wrap()
 def train(config: TrainConfig):
-    env = gym.make(config.env_name)
-    eval_env = gym.make(config.env_name)
+    random.seed(config.seed)
+    np.random.seed(config.seed)
+    torch.manual_seed(config.seed)
+    torch.use_deterministic_algorithms(config.deterministic_torch)
+    # Loading metadata/data never recovers Env16BC or opens a live game socket.
+    dataset = minari.load_dataset(config.dataset_id, download=False)
+    data = qlearning_dataset(dataset)
+    state_dim = data["observations"].shape[1]
+    if config.normalize_state:
+        mean = data["observations"].mean(0)
+        std = data["observations"].std(0) + 1e-3
+    else:
+        mean = np.zeros(state_dim, dtype=np.float32)
+        std = np.ones(state_dim, dtype=np.float32)
+    for key in ("observations", "next_observations"):
+        data[key] = (data[key] - mean) / std
+    capacity = config.buffer_size
+    if len(data["actions"]) > capacity:
+        raise ValueError("Replay buffer is smaller than the dataset")
+    if not config.online_iterations:
+        capacity = len(data["actions"])
+    replay = ReplayBuffer(state_dim, 1, capacity, config.device)
+    replay.load_dataset(data)
+    del data
 
-    is_env_with_goal = config.env_name.startswith(ENVS_WITH_GOAL)
-
-    max_steps = env._max_episode_steps
-
-    set_seed(config.seed, env, deterministic_torch=config.deterministic_torch)
-    set_env_seed(eval_env, config.eval_seed)
-    state_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.shape[0]
-    dataset = d4rl.qlearning_dataset(env)
-
-    reward_mod_dict = {}
-    if config.normalize_reward:
-        reward_mod_dict = modify_reward(dataset, config.env_name)
-
-    state_mean, state_std = compute_mean_std(dataset["observations"], eps=1e-3)
-    dataset["observations"] = normalize_states(
-        dataset["observations"], state_mean, state_std
-    )
-    dataset["next_observations"] = normalize_states(
-        dataset["next_observations"], state_mean, state_std
-    )
-    env = wrap_env(env, state_mean=state_mean, state_std=state_std)
-    eval_env = wrap_env(eval_env, state_mean=state_mean, state_std=state_std)
-    replay_buffer = ReplayBuffer(
-        state_dim,
-        action_dim,
-        config.buffer_size,
-        config.device,
-    )
-    replay_buffer.load_d4rl_dataset(dataset)
-
-    actor_critic_kwargs = {
-        "state_dim": state_dim,
-        "action_dim": action_dim,
-        "hidden_dim": config.hidden_dim,
-    }
-
-    actor = Actor(**actor_critic_kwargs)
-    actor.to(config.device)
-    actor_optimizer = torch.optim.Adam(actor.parameters(), lr=config.learning_rate)
-    critic_1 = Critic(**actor_critic_kwargs)
-    critic_2 = Critic(**actor_critic_kwargs)
-    critic_1.to(config.device)
-    critic_2.to(config.device)
-    critic_1_optimizer = torch.optim.Adam(critic_1.parameters(), lr=config.learning_rate)
-    critic_2_optimizer = torch.optim.Adam(critic_2.parameters(), lr=config.learning_rate)
-
+    kwargs = dict(state_dim=state_dim, action_dim=len(BC_ACTIONS_11), hidden_dim=config.hidden_dim)
+    actor = Actor(**kwargs).to(config.device)
+    critic_1 = Critic(**kwargs).to(config.device)
+    critic_2 = Critic(**kwargs).to(config.device)
     awac = AdvantageWeightedActorCritic(
-        actor=actor,
-        actor_optimizer=actor_optimizer,
-        critic_1=critic_1,
-        critic_1_optimizer=critic_1_optimizer,
-        critic_2=critic_2,
-        critic_2_optimizer=critic_2_optimizer,
-        gamma=config.gamma,
-        tau=config.tau,
-        awac_lambda=config.awac_lambda,
+        actor, torch.optim.Adam(actor.parameters(), lr=config.learning_rate),
+        critic_1, torch.optim.Adam(critic_1.parameters(), lr=config.learning_rate),
+        critic_2, torch.optim.Adam(critic_2.parameters(), lr=config.learning_rate),
+        gamma=config.gamma, tau=config.tau, awac_lambda=config.awac_lambda,
     )
-    wandb_init(asdict(config))
-
-    if config.checkpoints_path is not None:
-        print(f"Checkpoints path: {config.checkpoints_path}")
-        os.makedirs(config.checkpoints_path, exist_ok=True)
-        with open(os.path.join(config.checkpoints_path, "config.yaml"), "w") as f:
-            pyrallis.dump(config, f)
-
-    full_eval_scores, full_normalized_eval_scores = [], []
-    state, done = env.reset(), False
-    episode_step = 0
-    episode_return = 0
-    goal_achieved = False
-
-    eval_successes = []
-    train_successes = []
-
-    print("Offline pretraining")
-    for t in trange(
-        int(config.offline_iterations) + int(config.online_iterations), ncols=80
-    ):
-        if t == config.offline_iterations:
-            print("Online tuning")
-        online_log = {}
-        if t >= config.offline_iterations:
-            episode_step += 1
-            action, _ = actor(
-                torch.tensor(
-                    state.reshape(1, -1), device=config.device, dtype=torch.float32
-                )
+    os.makedirs(config.checkpoints_path, exist_ok=True)
+    with open(os.path.join(config.checkpoints_path, "config.yaml"), "w", encoding="utf-8") as f:
+        yaml.safe_dump(asdict(config), f, sort_keys=False)
+    print(f"Checkpoints and TensorBoard: {config.checkpoints_path}")
+    writer = SummaryWriter(log_dir=config.checkpoints_path)
+    env = None
+    completed_steps = 0
+    try:
+        print("Offline pretraining")
+        episode_return, episode_length = 0.0, 0
+        for step in trange(config.offline_iterations + config.online_iterations):
+            if step == config.offline_iterations:
+                print("Online fine-tuning in Env16 (waiting for game ticks)")
+                # Match recorded labels: up, left, right, down, ...
+                env = Env16(actions=BC_ACTIONS_11)
+                raw_state, _ = env.reset(seed=config.seed)
+                state = (raw_state - mean) / std
+            if step >= config.offline_iterations:
+                action = actor.act(state, config.device)
+                raw_next, reward, terminated, truncated, _ = env.step(action)
+                next_state = (raw_next - mean) / std
+                replay.add_transition(state, action, reward, next_state, terminated)
+                state = next_state
+                episode_return += reward
+                episode_length += 1
+                if terminated or truncated:
+                    writer.add_scalar("online/episode_return", episode_return, step)
+                    writer.add_scalar("online/episode_length", episode_length, step)
+                    raw_state, _ = env.reset()
+                    state = (raw_state - mean) / std
+                    episode_return, episode_length = 0.0, 0
+            for key, value in awac.update(replay.sample(config.batch_size)).items():
+                writer.add_scalar(f"train/{key}", value, step)
+            completed_steps = step + 1
+    finally:
+        try:
+            checkpoint = awac.state_dict()
+            checkpoint.update(
+                state_mean=torch.as_tensor(mean), state_std=torch.as_tensor(std),
+                state_dim=state_dim, action_dim=len(BC_ACTIONS_11),
+                hidden_dim=config.hidden_dim, actions=list(BC_ACTIONS_11),
+                dataset_id=config.dataset_id, completed_steps=completed_steps,
+                config=asdict(config),
             )
-            action = action.cpu().data.numpy().flatten()
-            next_state, reward, done, env_infos = env.step(action)
-
-            if not goal_achieved:
-                goal_achieved = is_goal_reached(reward, env_infos)
-            episode_return += reward
-            real_done = False  # Episode can timeout which is different from done
-            if done and episode_step < max_steps:
-                real_done = True
-
-            if config.normalize_reward:
-                reward = modify_reward_online(reward, config.env_name, **reward_mod_dict)
-
-            replay_buffer.add_transition(state, action, reward, next_state, real_done)
-            state = next_state
-            if done:
-                state, done = env.reset(), False
-                # Valid only for envs with goal, e.g. AntMaze, Adroit
-                if is_env_with_goal:
-                    train_successes.append(goal_achieved)
-                    online_log["train/regret"] = np.mean(1 - np.array(train_successes))
-                    online_log["train/is_success"] = float(goal_achieved)
-                online_log["train/episode_return"] = episode_return
-                normalized_return = eval_env.get_normalized_score(episode_return)
-                online_log["train/d4rl_normalized_episode_return"] = (
-                    normalized_return * 100.0
-                )
-                online_log["train/episode_length"] = episode_step
-                episode_return = 0
-                episode_step = 0
-                goal_achieved = False
-
-        batch = replay_buffer.sample(config.batch_size)
-        batch = [b.to(config.device) for b in batch]
-        update_result = awac.update(batch)
-        update_result[
-            "offline_iter" if t < config.offline_iterations else "online_iter"
-        ] = (t if t < config.offline_iterations else t - config.offline_iterations)
-        update_result.update(online_log)
-        wandb.log(update_result, step=t)
-        if (t + 1) % config.eval_frequency == 0:
-            eval_scores, success_rate = eval_actor(
-                eval_env, actor, config.device, config.n_test_episodes, config.test_seed
-            )
-            eval_log = {}
-
-            full_eval_scores.append(eval_scores)
-            wandb.log({"eval/eval_score": eval_scores.mean()}, step=t)
-            if hasattr(eval_env, "get_normalized_score"):
-                normalized = eval_env.get_normalized_score(np.mean(eval_scores))
-                # Valid only for envs with goal, e.g. AntMaze, Adroit
-                if t >= config.offline_iterations and is_env_with_goal:
-                    eval_successes.append(success_rate)
-                    eval_log["eval/regret"] = np.mean(1 - np.array(train_successes))
-                    eval_log["eval/success_rate"] = success_rate
-                normalized_eval_scores = normalized * 100.0
-                full_normalized_eval_scores.append(normalized_eval_scores)
-                eval_log["eval/d4rl_normalized_score"] = normalized_eval_scores
-                wandb.log(eval_log, step=t)
-            if config.checkpoints_path:
-                torch.save(
-                    awac.state_dict(),
-                    os.path.join(config.checkpoints_path, f"checkpoint_{t}.pt"),
-                )
-    wandb.finish()
+            model_path = os.path.join(config.checkpoints_path, AWAC_MODEL_FILENAME)
+            torch.save(checkpoint, model_path)
+            print(f"Saved AWAC model to: {model_path}")
+        finally:
+            writer.close()
+            if env is not None:
+                env.close()
 
 
 if __name__ == "__main__":
-    train()
+    train(tyro.cli(TrainConfig))
