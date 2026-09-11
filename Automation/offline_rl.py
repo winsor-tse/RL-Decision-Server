@@ -129,6 +129,19 @@ def build_evaluation_command(
     return command
 
 
+def build_awac_evaluation_command(
+    *, checkpoint_path: str, eval_episodes: int, device: str,
+) -> list[str]:
+    """Build the live Env16 AWAC evaluation command."""
+
+    return [
+        "python", "-m", "Inference.awac_eval",
+        "--checkpoint-path", checkpoint_path,
+        "--eval-episodes", str(eval_episodes),
+        "--device", device,
+    ]
+
+
 def run_offline_rl(
     config: dict,
     command: str | Sequence[object],
@@ -148,7 +161,7 @@ def run_offline_rl(
         return run_stack(
             config,
             command,
-            "any-percent BC live evaluation",
+            f"{'AWAC' if algorithm == 'awac' else 'any-percent BC'} live evaluation",
             start_tensorboard=False,
         )
     process_name = (
@@ -195,13 +208,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    if args.algorithm == "awac" and args.mode != "train":
-        raise ValueError("AWAC supports --mode train only; dataset/live evaluation requires BC.")
+    if args.algorithm == "awac" and args.mode == "dataset":
+        raise ValueError("AWAC supports train and live modes; dataset evaluation requires BC.")
     if args.online_iterations < 0:
         raise ValueError("--online-iterations must be nonnegative.")
     if args.online_iterations and (args.algorithm != "awac" or args.mode != "train"):
         raise ValueError("--online-iterations requires --algorithm awac --mode train.")
-    if args.algorithm == "awac" and args.top_fraction != 1.0:
+    if args.algorithm == "awac" and args.mode == "train" and args.top_fraction != 1.0:
         raise ValueError("AWAC uses all demonstrations; --top-fraction must be 1.0.")
     if args.mode in {"dataset", "live"} and not args.checkpoint_path:
         raise ValueError(
@@ -210,7 +223,13 @@ def main(argv: list[str] | None = None) -> int:
 
     needs_bridge = args.mode == "live" or args.online_iterations > 0
     config = load_config(args.config) if needs_bridge else {}
-    if args.mode == "train" and args.algorithm == "awac":
+    if args.mode == "live" and args.algorithm == "awac":
+        command = build_awac_evaluation_command(
+            checkpoint_path=args.checkpoint_path,
+            eval_episodes=args.eval_episodes,
+            device=args.device,
+        )
+    elif args.mode == "train" and args.algorithm == "awac":
         command = build_awac_training_command(
             dataset_id=args.dataset_id,
             update_steps=args.update_steps,

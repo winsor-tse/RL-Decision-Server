@@ -151,7 +151,8 @@ such as `env16/BC-v1`, for another dataset.
 
 ## `RunOfflineRL.ps1`
 
-Provides one interface for BC or AWAC training and BC dataset/live evaluation.
+Provides one interface for BC or AWAC training, BC dataset evaluation, and BC
+or AWAC live evaluation.
 BC is the default algorithm. Offline training and dataset evaluation run without
 the bridge. BC live evaluation and AWAC training with positive
 `-OnlineIterations` start and supervise the bridge.
@@ -187,8 +188,8 @@ the bridge. BC live evaluation and AWAC training with positive
 | Parameter | Default | Modes | Description |
 | --- | --- | --- | --- |
 | `-Mode` | `Train` | All | Selects training, dataset evaluation, or live evaluation. |
-| `-Algorithm` | `BC` | All | `BC` or `AWAC`; AWAC supports Train mode only. |
-| `-CheckpointPath` | Empty | Dataset, Live | Required path to `BC_model.pt` for evaluation. |
+| `-Algorithm` | `BC` | All | Selects `BC` or `AWAC`; AWAC Dataset mode is unsupported. |
+| `-CheckpointPath` | Empty | Dataset, Live | Required path to the selected algorithm's model checkpoint. |
 | `-DatasetId` | `env16/BC-v0` | All | Local Minari dataset ID. |
 | `-EvalEpisodes` | `5` | Live | Number of live evaluation episodes. |
 | `-UpdateSteps` | `1000000` | Train | Offline gradient updates; maps to AWAC's `--offline-iterations`. |
@@ -206,7 +207,7 @@ the bridge. BC live evaluation and AWAC training with positive
 | `-NoNormalizeState` | Off | All | Disables observation normalization. |
 | `-CheckpointsPath` | `runs` | Train | Root directory for generated run folders. |
 | `-OutputCsv` | Empty | Dataset | Prediction CSV path; defaults beside the model. |
-| `-Config` | `Automation\automation_config.yaml` | BC Live, AWAC online training | Bridge and optional TensorBoard server configuration. |
+| `-Config` | `Automation\automation_config.yaml` | Live, AWAC online training | Bridge and optional TensorBoard server configuration. |
 | `-LogDirectory` | `logs` | All | Directory for timestamped offline-RL logs. |
 
 ### Train a BC model
@@ -288,8 +289,23 @@ do not start its server. To view them, run:
 .\RL_venv\Scripts\python.exe -m Automation.tensorboard_server --logdir runs
 ```
 
-`Dataset` and `Live` modes evaluate BC checkpoints only. AWAC checkpoints
-include a categorical actor and critics and cannot use the BC evaluator.
+AWAC does not currently provide Dataset mode. Its Live evaluator loads the
+categorical actor, observation normalization, and action order directly from
+`AWAC_model.pt`.
+
+### Evaluate AWAC against the live game
+
+```powershell
+.\RunOfflineRL.ps1 -Algorithm AWAC -Mode Live `
+  -CheckpointPath "runs\AWAC-BC-v0-a1b2c3d4\AWAC_model.pt" `
+  -EvalEpisodes 5 `
+  -Device auto
+```
+
+Automation starts and supervises the WebSocket bridge. The evaluator chooses
+the highest-probability policy action, reports each episode's return and
+outcome, then prints mean return, standard deviation, wins, and win rate. The
+game must be connected before evaluation can progress.
 
 ### Evaluate against the dataset
 

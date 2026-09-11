@@ -76,7 +76,6 @@ class AutomationConfigTests(unittest.TestCase):
     def test_invalid_awac_modes_and_online_options_fail_before_launch(self):
         cases = [
             ['--algorithm', 'awac', '--mode', 'dataset'],
-            ['--algorithm', 'awac', '--mode', 'live'],
             ['--online-iterations', '5'],
             ['--algorithm', 'awac', '--online-iterations', '-1'],
             ['--algorithm', 'awac', '--top-fraction', '0.5'],
@@ -87,6 +86,27 @@ class AutomationConfigTests(unittest.TestCase):
                     offline_main(args)
         process.assert_not_called()
         stack.assert_not_called()
+
+    def test_awac_live_evaluation_starts_bridge(self):
+        with (
+            mock.patch('Automation.offline_rl.load_config', return_value={'bridge_command': ['bridge']}),
+            mock.patch('Automation.offline_rl.run_stack', return_value=0) as stack,
+        ):
+            result = offline_main([
+                '--algorithm', 'awac', '--mode', 'live',
+                '--checkpoint-path', 'runs/awac/AWAC_model.pt',
+                '--eval-episodes', '7', '--device', 'cpu',
+            ])
+        self.assertEqual(result, 0)
+        command = stack.call_args.args[1]
+        self.assertEqual(command[:3], ['python', '-m', 'Inference.awac_eval'])
+        self.assertEqual(
+            command[command.index('--checkpoint-path') + 1],
+            'runs/awac/AWAC_model.pt',
+        )
+        self.assertEqual(command[command.index('--eval-episodes') + 1], '7')
+        self.assertEqual(stack.call_args.args[2], 'AWAC live evaluation')
+        self.assertFalse(stack.call_args.kwargs['start_tensorboard'])
 
     def test_bc_remains_default_training_algorithm(self):
         with mock.patch('Automation.offline_rl.run_process', return_value=0) as process:

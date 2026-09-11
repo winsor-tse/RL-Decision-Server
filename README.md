@@ -12,6 +12,7 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 - `Inference/ppo_eval.py`: evaluates PPO checkpoints deterministically or by policy sampling.
 - `Inference/dqn_eval.py`: evaluates DQN checkpoints with optional epsilon exploration.
 - `Inference/any_percent_bc_eval.py`: evaluates BC checkpoints on Minari data or `Env16`.
+- `Inference/awac_eval.py`: evaluates categorical AWAC checkpoints on live `Env16`.
 - `Offline/awac.py`: trains discrete AWAC from local BC-Minari demonstrations, with optional live `Env16` fine-tuning and TensorBoard logging.
 - `Offline/record_player.py`: records full world-state payloads and global player input to SQLite.
 - `Offline/record_minari.py`: records mapped human actions as a Minari behavior-cloning dataset.
@@ -300,7 +301,9 @@ Use `-UpdateSteps` to change this count and `-Device cpu` to select CPU.
 Each run writes TensorBoard losses, `config.yaml`, and `AWAC_model.pt` under
 `runs/AWAC-BC-v0-<id>/`. The checkpoint includes both critics, the categorical
 actor, optimizers, observation normalization, and the BC action ordering.
-AWAC checkpoints require the AWAC actor; the BC evaluator cannot load them.
+AWAC checkpoints use their dedicated live evaluator and do not require the
+Minari dataset during evaluation because normalization and action metadata are
+stored in the checkpoint.
 
 For live fine-tuning, add `-OnlineIterations 100000` to the training command
 and connect the game. The launcher supervises the WebSocket bridge and starts
@@ -309,6 +312,16 @@ AWAC creates one `Env16` using the recorded BC action order
 (`up, left, right, down, ...`) and logs online episode returns and lengths.
 Only terminations stop critic bootstrapping; time-limit truncations reset the
 game episode while retaining the next-state value target.
+
+Evaluate a trained AWAC policy for five live episodes through the supervised
+bridge:
+
+```powershell
+.\RunOfflineRL.ps1 -Algorithm AWAC -Mode Live `
+  -CheckpointPath "runs\AWAC-BC-v0-example\AWAC_model.pt" `
+  -EvalEpisodes 5 `
+  -Device auto
+```
 
 ### Minari behavior-cloning recorder
 

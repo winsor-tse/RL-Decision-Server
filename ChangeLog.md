@@ -2,6 +2,16 @@
 
 ## BC-IL branch
 
+### 2026-09-10 - AWAC live evaluation
+
+- Added `Inference/awac_eval.py` to restore a categorical AWAC actor together
+  with its saved observation normalization and BC action ordering, then report
+  live Env16 episode returns and win rate.
+- Added `-Algorithm AWAC -Mode Live` routing to `RunOfflineRL.ps1` automation;
+  the existing process supervisor starts and stops the WebSocket bridge.
+- Added checkpoint validation, deterministic action-selection, live episode,
+  and automation-routing tests plus documented PowerShell usage.
+
 ### 2026-09-04 - AWAC Minari training and offline automation
 
 - Adapted `Offline/awac.py` to local `env16/BC-v0` demonstrations with a
@@ -15,7 +25,7 @@
   device overrides are forwarded to the trainer.
 - Added optional `-OnlineIterations` for AWAC live fine-tuning with the
   supervised bridge and configured TensorBoard server. Offline-only training
-  requires no bridge. Dataset/live evaluation remains BC-only.
+  requires no bridge. At that point, dataset/live evaluation remained BC-only.
 - Updated `PS1_COMMANDS.md` and README with AWAC launch examples, defaults,
   output paths, and mode applicability. Added automation-routing tests.
 
