@@ -47,7 +47,7 @@ provide their missing entity, map, spell-property, and status-effect types.
 | Player decision interval | 200 ms per action.                                                                                                                                                |
 | Player profile           | Level-135 Mystic.`Current_Player_Stats.txt` lists HP 9,463, MP 15,108, AC 3,292, and displayed combat factors.                                                    |
 | Regeneration             | HP and MP regenerate every 2 seconds.                                                                                                                             |
-| Innie movement           | Base speed 1 second with a spawn-time multiplier from 0.9 to 1.1.                                                                                                 |
+| Innie movement           | At spawn, each Innie samples `Roll(900, 1100) / 1000.0`, inclusive: a 900–1,100 ms base movement interval in 1 ms increments. That sampled interval remains constant for the NPC's entire life and is sampled again only when it respawns after death. |
 | Innie aggro              | Aggressive radius 4, new-aggro check every 1.5 seconds, and target removal beyond distance 18.                                                                    |
 | Innie combat             | Confirmed balance cap 150, attack speed 1 second, and Euclidean attack radius 1. Radius 1 reaches only cardinal neighbors; radius 1.5 would also reach diagonals. |
 | NPC update order         | Drop invalid aggro, check new aggro, move/face, then attack. RedBot additionally attempts configured spells.                                                      |
@@ -55,7 +55,7 @@ provide their missing entity, map, spell-property, and status-effect types.
 | Regeneration timing      | Ten environment steps at the 200 ms decision interval.                                                                                                            |
 | World distance           | `EntityBase.Distance` is Euclidean and controls combat, spell radii, aggro range, and range checks.                                                               |
 | Observation distance     | The client-supplied distances in the fixture equal Manhattan distance; Mystic also uses Manhattan as its fallback.                                                |
-| Spawn boxes              | `map53.json` contains 40 non-fixed 10 by 10 template-5300 boxes with two Innies each, for 80 baseline Innies. A dead NPC respawns at a random unoccupied point in its own box after 14 seconds. |
+| Spawn boxes              | `map53.json` contains 40 non-fixed 10 by 10 template-5300 boxes with two Innies each, for 80 baseline Innies. A dead Innie respawns at a random unoccupied point in its own box after 50 seconds. |
 | Collision scope          | The JSON blocked layer contains 5,088 marked cells, but terrain blocking is explicitly deferred. Baseline legality checks map bounds and entity occupancy only. |
 | Mystic ranges            | The exact`Ranges.Mystic` formula is supplied in `TimeFrame_Other_Details.txt`.                                                                                    |
 | Spell records            | Exact properties are supplied for Arcane Blast (416), Acid Cloud (417), and Tempest Inferno (418).                                                                |
@@ -80,7 +80,7 @@ Do not use one generic distance helper. The simulator needs two named metrics:
 | Player start and objective              | Resolved for baseline      | Sample the player from `x=50+/-5`, `y=45+/-5`, rejecting occupied cells. The episode objective is five Innie kills; no separate objective-area geometry is required for v0. |
 | `EntityBase.Distance` metric            | Resolved                   | Port Euclidean distance exactly for mechanics; retain Manhattan distance for Mystic observations.                                                                                                                            |
 | NPC movement, facing, path choice       | Resolved for baseline      | Port `NPC.cs`. A candidate cell is legal when it is inside map bounds and contains neither the player nor another living NPC. Terrain blocking remains disabled. |
-| Innie combat template                   | Resolved for baseline      | Use template 5300, balance cap 150, bulk 0.5, HP 274,599, MP 0, AC 2,250, toughness 15, raw damage 3,549, one-second attacks, one-second base movement with 0.9–1.1 jitter, radius 1, 14-second respawn, and no NPC spells. |
+| Innie combat template                   | Resolved for baseline      | Use template 5300, balance cap 150, bulk 0.5, HP 274,599, MP 0, AC 2,250, toughness 15, raw damage 3,549, one-second attacks, one sampled 0.9–1.1-second movement interval per life, radius 1, 50-second respawn, and no NPC spells. |
 | Player/spell shared formulas            | Resolved for baseline      | Port`Player.cs`, `Entitybase.cs`, `BaseSpell.txt`, and the supplied Mystic range formula.                                                                                                                                    |
 | Spell properties                        | Resolved                   | Use the supplied records for spell IDs 416, 417, and 418.                                                                                                                                                                    |
 | Event scheduling                        | Partly resolved            | `EventHandler.cs` confirms timestamp-priority queues, due checks against the server clock, and serial `CheckAndHandle` execution per map queue. Equal-time ordering is not defined by the supplied queue implementation, so the simulator will use a deterministic enqueue sequence as its documented tie-break. |
@@ -132,10 +132,10 @@ remains available for a later map-exact profile. Do not silently replace the
 parsed property.
 
 The supplied Innie template row describes template 5300 as level 55, body 68,
-experience 8,150, base HP 47,430, base AC 1,020, base toughness 6, template
-damage 1, and respawn time 14 seconds. The map's balance cap then overrides the
-combat values described below. The template has no cast-spell property, so the
-baseline Innie spell list is empty.
+experience 8,150, base HP 47,430, base AC 1,020, base toughness 6, and template
+damage 1. The developer-confirmed respawn time is 50 seconds. The map's balance
+cap then overrides the combat values described below. The template has no
+cast-spell property, so the baseline Innie spell list is empty.
 
 ## What `Example_Full_State.txt` tells us
 
@@ -178,6 +178,28 @@ not silently change Mystic reward behavior without regression tests.
 The full-state player is not the level-135 combat profile from
 `Current_Player_Stats.txt`; use the latter for simulation defaults. Preserve the
 full state only as an input/parsing fixture.
+
+## Testing terminology: fixtures and golden values
+
+A **fixture** is a saved, stable test input. Examples in this project are
+`Example_Full_State.txt`, `map53.json`, a fixed initial world state, or a recorded
+sequence of actions and RNG draws. A fixture lets a test run the same case every
+time.
+
+A **golden value** is the expected output for a fixture, taken from authoritative
+C# execution, an accepted live-game capture, or a developer-confirmed result. A
+**golden test** runs the fixture and asserts that Python produces that exact
+output. Current examples include:
+
+- the 26-number observation produced from `Example_Full_State.txt`;
+- 40 template-5300 spawn boxes and 80 Innies parsed from `map53.json`;
+- Innie maximum HP 274,599 for effective level 150 and bulk factor 0.5;
+- future captured damage, cooldown, movement, and spell results paired with the
+  exact input state and RNG draws that produced them.
+
+These are regression-test references, not training examples or tunable balance
+values. Approximate displayed values such as “strength factor about 5.04” are
+reference checks, not exact golden values, until captured with full precision.
 
 ## Scaled calculations now available
 
@@ -275,7 +297,7 @@ Port these implementations from `Player.cs`, `Entitybase.cs`, and
 - `CanHit`, target validation, and player-versus-monster rules;
 - regeneration timing and clamping to max HP/MP.
 
-The documented stats provide golden values: strength factor about 5.04,
+The documented stats provide reference checks: strength factor about 5.04,
 intelligence factor about 9.41, spell crit about 42.4%, magic crit multiplier
 about 2.01, dodge about 17.7%, and block chance about 0.7%. Inventory-derived
 weapon damage and nonzero `MaxStats.SpellMultiplier` still require explicit
@@ -302,16 +324,18 @@ manaConsumption=0.33, animation=29, sfx=27
 ```
 
 1. Validate the chosen target with the `BaseSpell.CanHit` rules.
-2. Read `manaFactor`, `damagePercent`, and `baseDamage` properties, using the C#
+2. Require at least 500 MP and subtract the fixed 500 MP cost before entering
+   the spell calculation.
+3. Read `manaFactor`, `damagePercent`, and `baseDamage` properties, using the C#
    defaults when a property is absent.
-3. Calculate base damage from current MP, strength factor, and intelligence
-   factor, including the October 2024 modifiers.
-4. Calculate raw spell damage and the main target's crit roll.
-5. Apply the main target's magic mitigation.
-6. Consume percentage HP/MP exactly where the C# does.
-7. When Arcane Bomb is enabled, enumerate splash targets and calculate their
+4. Calculate base damage from post-cost current MP, strength factor, and
+   intelligence factor, including the October 2024 modifiers.
+5. Calculate raw spell damage and the main target's crit roll.
+6. Apply the main target's magic mitigation.
+7. Consume 33% of the then-current MP exactly where the C# spell body does.
+8. When Arcane Bomb is enabled, enumerate splash targets and calculate their
    individual raw damage, crit, mitigation, and AoE scaling.
-8. Apply splash damage and then main-target damage in the source order.
+9. Apply splash damage and then main-target damage in the source order.
 
 Without Arcane Bomb this is a single-target spell. The source defaults to zero
 splash radius.
@@ -330,14 +354,17 @@ minRadius=2.5, maxRadius=4.25, level=70
 effectId=acid, effectLevel=2, animation=118, tickAnimation=118, sfx=5
 ```
 
-1. Calculate Mystic range and clamp it between `minRadius` and `maxRadius`.
-2. Select all hittable monsters in the target-centered radius.
-3. Calculate raw damage, crit, AoE scaling, and distance falloff in the same
+1. Require at least 1,000 MP and subtract the fixed 1,000 MP cost before entering
+   the spell calculation.
+2. Calculate Mystic range and clamp it between `minRadius` and `maxRadius`.
+3. Select all hittable monsters in the target-centered radius.
+4. Calculate raw damage from post-cost current MP, then crit, AoE scaling, and
+   distance falloff in the same
    order as C#.
-4. Apply initial damage and target mitigation.
-5. Consume percentage HP/MP.
-6. Schedule the per-target tick effect using absolute millisecond deadlines.
-7. Apply the optional Sunburnt multiplier only when that status is enabled.
+5. Apply initial damage and target mitigation.
+6. Consume 33% of the then-current MP.
+7. Schedule the per-target tick effect using absolute millisecond deadlines.
+8. Apply the optional Sunburnt multiplier only when that status is enabled.
 
 For the documented level-135 player (`Dexterity=194`, `Strength=100`), the exact
 Mystic calculation produces raw radius about 7.2611, which the spell clamps to
@@ -356,17 +383,20 @@ animation=2, sfx=119
 ```
 
 1. Fall back to the caster when the target is null, as the C# does.
-2. Calculate radius from the Mystic range function with defaults 0.5–1.5.
-3. Calculate the caster-to-target distance factor.
-4. Build full-radius and partial-radius target sets, excluding magic-immune
+2. Require at least 750 MP and subtract the fixed 750 MP cost before entering
+   the spell calculation.
+3. Calculate radius from the Mystic range function with defaults 0.5–1.5.
+4. Calculate the caster-to-target distance factor.
+5. Build full-radius and partial-radius target sets, excluding magic-immune
    monsters.
-5. Calculate raw damage, AoE scaling, partial-target weights, and per-target
-   allocation with C# truncation at the same points.
-6. Apply magic mitigation and damage to both target sets.
-7. Consume the configured 20% of current MP only when at least one target is
+6. Calculate raw damage from post-cost current MP, then AoE scaling,
+   partial-target weights, and per-target allocation with C# truncation at the
+   same points.
+7. Apply magic mitigation and damage to both target sets.
+8. Consume the configured 20% of current MP only when at least one target is
    hit, matching the source location of the consumption code. The script's 15%
    fallback applies only when `manaConsumption` is absent; it is present here.
-8. Apply the optional Tempest Meteor stun only when that trinket modifier is
+9. Apply the optional Tempest Meteor stun only when that trinket modifier is
    enabled; baseline simulation keeps it disabled.
 
 The script reads `level` before `castLevel`, so this property record uses level
@@ -391,11 +421,38 @@ no valid monster exists, follow the source target-mode rule and center the spell
 on the caster. This nearest-target rule is confirmed for the current simulator
 scope. Range and `CanHit` validation still run after selection.
 
-`mpCost` is a cast-eligibility threshold in the supplied `BaseSpell.CanCast`;
-the fixed cost subtraction is commented out. On a successful cast, the spell
-body instead removes its configured percentage of current MP: 33% for Arcane
-Blast, 33% for Acid Cloud, and 20% for Tempest Inferno. Preserve C# `Math.Round`
-and clamp MP at zero.
+The spell records in `TimeFrame_Other_Details.txt` define both a fixed `mpCost`
+and a percentage `manaConsumption`. The supplied `BaseSpell.CanCast` fragment
+checks that the caster can afford `mpCost`; its local subtraction lines are
+commented because the fixed charge occurs in the surrounding cast pipeline.
+For the simulator, a successful cast must execute this resource order:
+
+1. validate target, cooldown, and `CurrentMP >= mpCost`;
+2. subtract the fixed cost: 500 for Arcane Blast, 1,000 for Acid Cloud, or 750
+   for Tempest Inferno;
+3. run the spell body, so every formula reading `caster.CurrentMP` sees the
+   post-fixed-cost value;
+4. at the spell body's consumption point, subtract 33%, 33%, or 20% of the
+   then-current MP using C# `Math.Round`, clamping at zero.
+
+For starting MP `M`, Arcane Blast and Acid Cloud therefore use `M - mpCost` in
+their damage formula and percentage base. Tempest Inferno also uses `M - 750`
+for damage, but its 20% charge occurs only inside the source branch that found
+at least one target. The fixed 750 MP has already been spent by that point.
+Tests must cover this no-hit distinction explicitly.
+
+Using the documented starting MP of 15,108 gives concrete resource-order test
+cases:
+
+| Spell | After fixed cost | Rounded percentage charge | MP after successful hit |
+|---|---:|---:|---:|
+| Arcane Blast | 14,608 | `Round(14,608 * 0.33) = 4,821` | 9,787 |
+| Acid Cloud | 14,108 | `Round(14,108 * 0.33) = 4,656` | 9,452 |
+| Tempest Inferno | 14,358 | `Round(14,358 * 0.20) = 2,872` | 11,486 |
+
+For a successful Tempest cast that finds no hittable entities, the expected MP
+is 14,358 because the fixed cost was charged but the conditional 20% charge was
+not reached.
 
 Store both slot and family cooldowns as absolute millisecond deadlines. At 200
 ms decision boundaries, the first possible recasts are:
@@ -511,8 +568,9 @@ in trace mode so formula comparisons can verify when each roll is consumed.
 Preserve source call order as well as distributions. Examples now visible in
 the supplied files include:
 
-- Innie construction rolls initial spawn delay when applicable, then move-speed
-  jitter;
+- each Innie samples its movement interval once when that life begins. Store the
+  sampled 0.9–1.1-second value on the NPC and reuse it for every move until
+  death; a respawn begins a new life and consumes a new movement-speed draw;
 - `NextStepToBasic` eagerly rolls its first coin flip after evaluating candidate
   tiles and then rolls the weighted axis choice unless an adjacent early return
   was taken;
@@ -615,6 +673,8 @@ configuration:
 | Player spawn | Uniform legal cell in X 45..55 and Y 40..50, inclusive |
 | NPC spawns | All 40 non-fixed template-5300 boxes, quantity two each |
 | Other NPCs | Fixed template 5399 excluded |
+| Innie movement interval | One inclusive integer sample from 900 through 1,100 ms per life |
+| Innie respawn | 50,000 ms after death, in its original spawn box |
 | Objective | Kill five Innies |
 | Step duration | 200 ms |
 | Actions | Four cardinal moves, attack, spells 1 through 3 |
@@ -726,9 +786,9 @@ Exit gate:
 - Implement `scheduler.py` with heap keys `(due_ms, enqueue_sequence)`, event
   tokens for cancellation, trace records, and a guard against infinite
   same-timestamp rescheduling.
-- Schedule player regeneration every 2,000 ms, NPC updates from each NPC's
-  jittered movement/attack deadlines, effect ticks at their exact intervals,
-  and respawns 14,000 ms after death.
+- Schedule player regeneration every 2,000 ms, NPC updates from each NPC's stored
+  per-life movement interval and attack deadlines, effect ticks at their exact
+  intervals, and respawns 50,000 ms after death.
 - Advance exactly 200 ms per Gym step while executing every due event at its own
   timestamp. Test events both on and between decision boundaries.
 - Port the `NPC.cs` cardinal candidate generation and weighted pursuit branches
@@ -748,7 +808,9 @@ Exit gate:
 - occupancy conflicts resolve by stable event order with no overlapping state;
 - cardinal pursuit, diagonal distance, blocked facing, random movement, aggro
   acquire/drop, spawn return, and timer-reset branches match focused fixtures;
-- 900-1,100 ms movement jitter and 1,500 ms aggro boundaries are exact;
+- movement intervals use one inclusive integer draw from 900 through 1,100 ms,
+  remain unchanged during a life, and are resampled after death; 1,500 ms aggro
+  boundaries are exact;
 - no event scheduled after a step boundary executes early.
 
 ### Phase 3 - Port scaling, combat, death, and respawn
@@ -768,7 +830,7 @@ Exit gate:
   diagonal rejection, attack deadline, player damage, and death.
 - Emit structured `DamageEvent`, `DeathEvent`, and `RespawnEvent` records. Death
   occurs once, removes occupancy and aggro immediately, cancels invalid effects,
-  and schedules the original entity into its own spawn box after 14 seconds.
+  and schedules the original entity into its own spawn box after 50 seconds.
 - If its box has no free cell at the deadline, leave the entity dead and retry
   placement at the next decision boundary without changing its ID.
 - Keep player gear disabled. Implement the facing-tile attack path behind
@@ -790,21 +852,23 @@ Build casting in layers:
 1. `targeting.py` returns the nearest living monster using Euclidean spell
    eligibility distance and entity-ID tie-breaks. Targeted-or-self spells fall
    back to the caster only when no valid monster exists.
-2. `cooldowns.py` checks fixed MP/HP eligibility plus slot/family absolute ready
-   times. Rejected casts consume no resources, cooldown, or combat RNG.
+2. `cooldowns.py` checks fixed MP/HP affordability plus slot/family absolute
+   ready times. Rejected casts consume no resources, cooldown, or combat RNG.
 3. Pure calculation functions return target allocations, raw damage, crit flags,
    mitigation inputs, and resource costs without mutating world state.
-4. Mutation functions apply results in source order, emit events, schedule timed
-   effects, consume resources, and set cooldown deadlines.
+4. The cast transaction subtracts fixed `mpCost`, passes the post-cost MP into
+   the spell calculation, applies results in source order, performs the later
+   percentage consumption, emits events, schedules effects, and sets cooldowns.
 
-Implement Arcane Blast (416) first: nearest single target, 500 MP eligibility,
-3,500 ms slot/family cooldown, 33% current-MP consumption, and baseline-disabled
-Arcane Bomb splash. Then implement Acid Cloud (417): 1,000 MP eligibility,
+Implement Arcane Blast (416) first: nearest single target, 500 fixed MP cost,
+3,500 ms slot/family cooldown, then 33% remaining-MP consumption, and
+baseline-disabled Arcane Bomb splash. Then implement Acid Cloud (417): 1,000
+fixed MP cost,
 5,000 ms cooldown, radius capped at 4.25, initial damage, 1,000 ms ticks for
-6,000 ms, and 33% current-MP consumption. Finally implement Tempest Inferno
-(418): 750 MP eligibility, 1,750 ms cooldown, radius capped at 1.5, full/partial
-target allocation, 20% current-MP consumption from the supplied property record,
-and baseline-disabled trinket stun.
+6,000 ms, then 33% remaining-MP consumption. Finally implement Tempest Inferno
+(418): 750 fixed MP cost, 1,750 ms cooldown, radius capped at 1.5, full/partial
+target allocation, 20% remaining-MP consumption from the supplied property
+record when at least one target is hit, and baseline-disabled trinket stun.
 
 Resolve an existing plan inconsistency in favor of the supplied property record:
 Tempest Inferno uses `manaConsumption=0.20`; do not retain the spell script's
@@ -821,7 +885,8 @@ Exit gate:
 - each spell has pure numeric goldens and full state-transition tests;
 - tests cover no target, self fallback, exact range edge, insufficient MP,
   cooldown edge, normal/critical hit, immunity, zero/one/many AoE targets,
-  partial-radius allocation, DoT tick/expiry, resource rounding, and kills;
+  partial-radius allocation, DoT tick/expiry, fixed-before-percentage resource
+  order, post-cost damage input, resource rounding, no-hit Tempest cost, and kills;
 - a failed cast produces a reason and no hidden mutation or RNG draw;
 - cooldown and effect traces are deterministic under replay.
 
