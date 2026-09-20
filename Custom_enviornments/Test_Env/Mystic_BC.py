@@ -1,6 +1,6 @@
-"""Human-demonstration variant of :mod:`Mage` for Minari collection.
+"""Human-demonstration variant of :mod:`Mystic` for Minari collection.
 
-``MageBC`` never sends the captured player action back to the game. Every
+``MysticBC`` never sends the captured player action back to the game. Every
 ZeroMQ tick receives a ``NoOp`` response; valid keyboard actions are only used
 as labels in the offline dataset. Ticks without a mapped key are acknowledged
 but are not exposed as Gym steps, except when they finish the preceding valid
@@ -17,15 +17,15 @@ from gymnasium.envs.registration import EnvSpec
 
 from Custom_enviornments.BaseEnv import BaseEnv
 from Custom_enviornments.Test_Env import Env_conditions
-from Custom_enviornments.Test_Env.Mage import Mage
+from Custom_enviornments.Test_Env.Mystic import Mystic
 from Offline.record_player import WindowsInputCapture
 
 
 LOGGER = logging.getLogger(__name__)
-MAGE_BC_ENV_ID = "YugenSaga/MageBC-v0"
+MYSTIC_BC_ENV_ID = "YugenSaga/MysticBC-v0"
 
 # This order intentionally follows the indices requested for the BC dataset.
-# It is separate from Mage.ACTIONS_11, whose movement order is
+# It is separate from Mystic.ACTIONS_11, whose movement order is
 # [up, down, left, right].
 BC_ACTIONS_11 = [
     "up",
@@ -121,8 +121,8 @@ def action_from_input(player_input: dict[str, Any]) -> tuple[int, str] | None:
     return None
 
 
-class MageBC(Mage):
-    """Mage reward/state logic with human actions and no-op game replies."""
+class MysticBC(Mystic):
+    """Mystic reward/state logic with human actions and no-op game replies."""
 
     metadata = {"render_modes": []}
 
@@ -138,9 +138,9 @@ class MageBC(Mage):
         # Directly constructed custom envs normally have spec=None. Providing
         # one lets Minari retain enough metadata to recover this environment.
         self.spec = EnvSpec(
-            id=MAGE_BC_ENV_ID,
+            id=MYSTIC_BC_ENV_ID,
             entry_point=(
-                "Custom_enviornments.Test_Env.Mage_BC:MageBC"
+                "Custom_enviornments.Test_Env.Mystic_BC:MysticBC"
             ),
             max_episode_steps=int(self.config["MAX_EPISODE_STEPS"]),
         )
@@ -234,7 +234,7 @@ class MageBC(Mage):
         }
 
     def reset(self, seed=None, options=None):
-        # Bypass Mage.reset because it sends direction:up and does not capture
+        # Bypass Mystic.reset because it sends direction:up and does not capture
         # a human action for the returned initial observation.
         BaseEnv.reset(self, seed=seed, options=options)
         self.input_capture.reset()
@@ -262,9 +262,9 @@ class MageBC(Mage):
     def step(self, action):
         action_idx = self._normalize_action(action)
         if action_idx < 0 or action_idx >= len(self.Actions):
-            raise ValueError(f"Action index {action_idx} is outside MageBC.")
+            raise ValueError(f"Action index {action_idx} is outside MysticBC.")
         if self._pending_action is None:
-            raise RuntimeError("Call reset() before stepping MageBC.")
+            raise RuntimeError("Call reset() before stepping MysticBC.")
         if action_idx != self._pending_action:
             raise ValueError(
                 f"Expected captured action {self._pending_action}, got {action_idx}."

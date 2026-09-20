@@ -7,7 +7,7 @@ import torch
 import tyro
 
 from Training.DQN_server import QNetwork
-from Custom_enviornments.Test_Env import Mage
+from Custom_enviornments.Test_Env import Mystic
 
 """
 # Basic usage with defaults
@@ -81,8 +81,8 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
     print(f"Using device: {device}")
 
-    print("Initializing Custom_enviornments.Test_Env.Mage.Mage...")
-    env = Mage.Mage()
+    print("Initializing Custom_enviornments.Test_Env.Mystic.Mystic...")
+    env = Mystic.Mystic()
 
     print(f"Loading model from {args.model_path}...")
     model = QNetwork(env).to(device)

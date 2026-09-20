@@ -22,7 +22,7 @@
 
 - Added `Inference/awac_eval.py` to restore a categorical AWAC actor together
   with its saved observation normalization and BC action ordering, then report
-  live Mage episode returns and win rate.
+  live Mystic episode returns and win rate.
 - Added `-Algorithm AWAC -Mode Live` routing to `RunOfflineRL.ps1` automation;
   the existing process supervisor starts and stops the WebSocket bridge.
 - Added checkpoint validation, deterministic action-selection, live episode,
@@ -30,8 +30,8 @@
 
 ### 2026-09-04 - AWAC Minari training and offline automation
 
-- Adapted `Offline/awac.py` to local `mage/BC-v0` demonstrations with a
-  categorical policy for Mage's 11 actions and the recorded BC action order.
+- Adapted `Offline/awac.py` to local `mystic/BC-v0` demonstrations with a
+  categorical policy for Mystic's 11 actions and the recorded BC action order.
 - Replaced D4RL, legacy Gym, and W&B integration with Minari, Gymnasium,
   Tyro, and TensorBoard. Runs save `AWAC_model.pt`, normalization and action
   metadata, optimizer states, configuration, and loss events together.
@@ -84,9 +84,9 @@
   `Inference/any_percent_bc_eval.py`.
 - Added configurable dataset and live evaluation modes. Dataset mode reports
   action MSE and discrete-action accuracy and exports a prediction CSV. Live
-  mode evaluates directly against `Mage`.
+  mode evaluates directly against `Mystic`.
 - Corrected live behavior-cloning action translation: the BC dataset orders
-  movement as up, left, right, down, while `Mage` orders it as up, down, left,
+  movement as up, left, right, down, while `Mystic` orders it as up, down, left,
   right.
 - Added `Automation/offline_rl.py` to run dataset evaluation without the bridge
   and live evaluation with the supervised WebSocket bridge.
@@ -119,7 +119,7 @@ Relevant history: `9a03252`, `21f18f5`, `55a9872`, `1712072`, `b209c42`, and
 #### Minari behavior-cloning dataset
 
 - Added Minari `0.5.3` to the project dependencies.
-- Added `MageBC`, a demonstration-specific version of `Mage` that preserves
+- Added `MysticBC`, a demonstration-specific version of `Mystic` that preserves
   the existing observation, reward, termination, truncation, and info logic.
 - The game always receives `NoOp`; captured keys become offline action labels:
 
@@ -156,20 +156,20 @@ Record a dataset with:
 
 ```powershell
 .\RunRecorder.ps1 `
-  -Command "python -m Offline.record_minari --dataset-id mage/BC-v0 --max-steps 500"
+  -Command "python -m Offline.record_minari --dataset-id mystic/BC-v0 --max-steps 500"
 ```
 
 Inspect sampled transitions with:
 
 ```powershell
-.\RL_venv\Scripts\python.exe Tests\test_minari_BC.py --dataset-id mage/BC-v0 --episodes 5
+.\RL_venv\Scripts\python.exe Tests\test_minari_BC.py --dataset-id mystic/BC-v0 --episodes 5
 ```
 
 Minari datasets use local HDF5 storage under `~/.minari/datasets` by default;
 they are separate from the raw SQLite recorder. Dataset IDs are versioned and
-cannot be overwritten, so later recordings should use `mage/BC-v1`,
-`mage/BC-v2`, and so on. A verified example contains one 100-transition
-episode under `mage/BC-v0`.
+cannot be overwritten, so later recordings should use `mystic/BC-v1`,
+`mystic/BC-v2`, and so on. A verified example contains one 100-transition
+episode under `mystic/BC-v0`.
 
 Relevant history: `3231786`, `5eeaa6d`, `06103ef`, and `48e744a`.
 
@@ -183,7 +183,7 @@ Relevant history: `3231786`, `5eeaa6d`, `06103ef`, and `48e744a`.
   writing, and Weights & Biases metrics.
 - This remains a prototype. Its actor and environment setup still assume a
   continuous `Box` action space (`shape`, `high`, and `tanh` output), while
-  `MageBC` uses discrete action indices. Evaluation also attempts to recover a
+  `MysticBC` uses discrete action indices. Evaluation also attempts to recover a
   live environment from recorded data. These parts must be adapted before the
   trainer can be used reliably with the Yugen Saga dataset.
 
@@ -196,7 +196,7 @@ Relevant history: `a41afb9` and `665415d`.
   advantage-weighted actor updates, normalization, evaluation, checkpoints,
   and Weights & Biases logging.
 - AWAC currently targets Gym/D4RL continuous-control datasets and is not yet
-  connected to `MageBC` or the local Minari dataset. It imports `d4rl`, which
+  connected to `MysticBC` or the local Minari dataset. It imports `d4rl`, which
   is not currently pinned in `requirements.txt`.
 - Added `Training/Rainbow_DQN.py` with a noisy dueling distributional network,
   prioritized replay, and target-network training. Rainbow DQN is an advanced

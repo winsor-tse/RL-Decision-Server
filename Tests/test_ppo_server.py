@@ -45,7 +45,7 @@ class PPOMetricTests(unittest.TestCase):
                 runs_directory=directory,
             )
 
-            self.assertEqual(run_name, "Mage__PPO_server__1__1234")
+            self.assertEqual(run_name, "Mystic__PPO_server__1__1234")
             self.assertEqual(run_directory, Path(directory) / run_name)
             self.assertTrue(run_directory.is_dir())
             self.assertEqual(

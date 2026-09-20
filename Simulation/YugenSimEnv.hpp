@@ -19,7 +19,7 @@ public:
     enum class Tile : std::uint8_t { Walkable, Wall };
     enum class AggroTarget : std::int8_t { None = -1, Player = 0 };
 
-    // Matches Custom_enviornments/Test_Env/Mage.py (spell 4 is omitted).
+    // Matches Custom_enviornments/Test_Env/Mystic.py (spell 4 is omitted).
     enum class Action : int {
         Up, Down, Left, Right, Attack,
         Spell1, Spell2, Spell3, Spell5, Spell6, Spell7, Count

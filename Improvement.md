@@ -14,7 +14,7 @@ Steps:
 ```text
 Custom_enviornments/
   Boss_Env/
-    Mage.py
+    Mystic.py
     Env_conditions.py
 ```
 

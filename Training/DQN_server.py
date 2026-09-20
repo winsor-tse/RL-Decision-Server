@@ -20,7 +20,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from Utils.buffers import ReplayBuffer
-from Custom_enviornments.Test_Env import Mage
+from Custom_enviornments.Test_Env import Mystic
 
 
 DEFAULT_TOTAL_TIMESTEPS = 20_000
@@ -238,7 +238,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    envs = Mage.Mage()
+    envs = Mystic.Mystic()
 
     q_network = QNetwork(envs).to(device)
     optimizer = optim.Adam(q_network.parameters(), lr=args.learning_rate)

@@ -9,7 +9,7 @@ from typing import Any
 import minari
 
 
-DEFAULT_DATASET_ID = "mage/BC-v0"
+DEFAULT_DATASET_ID = "mystic/BC-v0"
 DEFAULT_EPISODES = 5
 
 

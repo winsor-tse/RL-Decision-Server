@@ -30,7 +30,7 @@ class TrainConfig:
     gamma: float = 0.99  # Discount factor
     top_fraction: float = 0.1  # Best data fraction to use
     # training params
-    dataset_id: str = "mage/BC-v0"  #This needs to pull from local
+    dataset_id: str = "mystic/BC-v0"  #This needs to pull from local
     update_steps: int = int(1e6)  # Total training networks updates
     buffer_size: int = 2_000_000  # Replay buffer size
     batch_size: int = 256  # Batch size for all networks
@@ -296,7 +296,7 @@ def evaluate(
                 else:
                     action = raw_action
 
-                # Step the environment. MageBC will raise a ValueError when the
+                # Step the environment. MysticBC will raise a ValueError when the
                 # provided action doesn't match the recorded captured action. Catch
                 # that and advance using the recorded action (if available) so the
                 # episode can continue while still recording the model's prediction.
@@ -304,7 +304,7 @@ def evaluate(
                     state, reward, terminated, truncated, info = env.step(action)
                 except ValueError as e:
                     msg = str(e)
-                    # Detect the specific mismatch error from MageBC
+                    # Detect the specific mismatch error from MysticBC
                     if 'Expected captured action' in msg and hasattr(env, 'next_action'):
                         expected = None
                         try:

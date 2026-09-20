@@ -1,344 +1,957 @@
-# Plan: C# Yugen Saga mechanics in a Python Gymnasium environment
+# Plan: Yugen Saga Mystic simulation in Python
 
-## Goal
+## Current scope
 
-Build a headless Python `gymnasium.Env` that simulates the level-135 Mystic
-combat scenario described in `Simulation/Source-Code`. The first version should
-be policy-compatible with `Custom_enviornments/Test_Env/Mage.py`:
+Build a headless Python `gymnasium.Env` for the Mystic combat loop using the C#
+fragments in `Simulation/Source-Code` as the mechanics reference. The first
+version includes only:
 
-- the same 11 action IDs and labels;
-- the same 26-element `float32` observation layout;
-- the same Gymnasium `reset()` and `step()` return shapes;
-- the same reward component names and episode outcomes where those rules still
-  make sense;
-- no socket, rendering, sleeping, or file I/O in the simulation hot path.
+- cardinal movement: `up`, `down`, `left`, `right`;
+- `attack`: a deliberately simple close-range basic-damage action;
+- `castSpell:1`, `castSpell:2`, and `castSpell:3`, translated from their three
+  supplied C# implementations;
+- Innie movement, aggro, attacks, damage, death, and respawn;
+- the existing Mystic observation layout and Gymnasium API.
 
-The C# snippets should be treated as the behavioral specification and translated
-to Python. They are not a compilable game module: they reference many absent
-server types and functions. Embedding a .NET runtime would retain those missing
-dependencies, complicate process management, and make parallel environments
-harder without improving fidelity.
+Actions for spell slots 5, 6, and 7 are out of scope. The simulator therefore
+has eight actions:
 
-## What the supplied source establishes
 
-| Area | Known behavior |
-|---|---|
-| Map | 100 by 100 tiles; collision/terrain data is not supplied. |
-| Decision time | One player action every 200 ms. Use simulated time only. |
-| Player | Level 135 Mystic; HP 9,463; MP 15,108; displayed combat factors and mitigation are listed in `Current_Player_Stats.txt`. |
-| Regeneration | HP and MP regeneration occur every 2 seconds. |
-| NPC movement | Base move speed is 1 second in the supplied scenario, randomized by 0.9 to 1.1 at spawn. |
-| NPC aggro | Scenario radius is 4; base NPC code checks for new aggro every 1.5 seconds and drops a target beyond distance 18. |
-| NPC update | Drop invalid aggro, check new aggro, move/face, then attack. `RedBotNPCScript.Update` additionally calls `TryToCast`. |
-| NPC scaling | `RedBotNPCScript.OnCreated` supplies formulas, but enemy HP and damage depend on missing `ScaledCalcs.GetEnemyHP` and `NPCRecursiveDmg.GetDamage`. |
-| Mitigation | The NPC script supplies AC, blocking, magic/melee mitigation, death, and respawn logic. |
-| Spell 1 file | Single-target cast with optional trinket splash, MP/HP percentage consumption, raw spell damage, mitigation, and per-target crit rolls. |
-| Spell 2 file | Targeted AoE with initial damage, radius falloff, a timed damage effect, and MP/HP percentage consumption. |
+| ID | Action        | Initial behavior                                           |
+| -: | ------------- | ---------------------------------------------------------- |
+|  0 | `up`          | Move one tile north if legal.                              |
+|  1 | `down`        | Move one tile south if legal.                              |
+|  2 | `left`        | Move one tile west if legal.                               |
+|  3 | `right`       | Move one tile east if legal.                               |
+|  4 | `attack`      | Damage one close target using the configured basic damage. |
+|  5 | `castSpell:1` | Execute`Spell1_Arcane Blast_single_target_spell.txt`.      |
+|  6 | `castSpell:2` | Execute`Spell2_Acid Cloud_large AoE.txt`.                  |
+|  7 | `castSpell:3` | Execute`Spell3_Tempest Inferno.txt`.                       |
 
-The spell source filenames and their internal descriptions should be verified
-against the live action bar before action IDs are bound permanently.
+Before a simulator-trained policy is used with the live game, Mystic and MysticBC
+should import the same shared eight-action definition. Changing from 11 to 8
+actions changes the policy output layer, so existing 11-action checkpoints will
+need retraining or an explicit output-head migration. The 26-value observation
+shape can remain unchanged.
 
-## Fidelity gaps to resolve
+The C# should be translated into native Python. These files are partial server
+sources rather than a compilable module, so embedding a .NET runtime would not
+provide their missing entity, map, spell-property, and status-effect types.
 
-The simulator can be structurally complete before all values are known, but it
-cannot claim game-level damage accuracy until these inputs are supplied or
-measured:
+## Source-derived scenario facts
 
-1. The 100 by 100 collision grid, legal spawn cells, player start, NPC spawns,
-   and objective area.
-2. Whether `EntityBase.Distance` is Euclidean, Manhattan, Chebyshev, or another
-   metric. Mage currently uses Manhattan distance when the client does not send
-   a distance.
-3. Movement collision, diagonal behavior, facing, `MoveTowardsBasic`, random
-   movement, path selection, and occupied-tile rules.
-4. The actual Innie template: max HP/MP, base damage, AC, attack speed/range,
-   respawn time, bulk factor, balance cap, and any spell list.
-5. Implementations or evaluated level-135 values for `GetEnemyHP`,
-   `NPCRecursiveDmg.GetDamage`, player `StrengthFactor` and
-   `IntelligenceFactor`, player `CalculateRawSpellDamage`,
-   `ApplyAoECalculation`, `Ranges.Mystic`, facing bonus, and `CanHit`.
-6. Spell property records: cooldown, range, mana/vita consumption, all optional
-   formula overrides, duration, tick interval/percent, and trinket/status state.
-   The source defaults would consume 100% of current MP, so assuming defaults is
-   especially unsafe.
-7. Mechanics for actions `attack`, `castSpell:3`, `castSpell:5`,
-   `castSpell:6`, and `castSpell:7`.
-8. Exact server event ordering when player actions, regeneration, NPC movement,
-   attacks, status ticks, deaths, and respawns share a timestamp.
-9. RNG details that affect parity: chance comparison, integer range endpoints,
-   and when each roll is consumed.
 
-Unknown mechanics should live in explicit configuration fields or raise a
-development-time `NotImplementedError`. They should not be hidden behind guessed
-constants. A deliberately simplified mode may use documented approximations,
-but it should be named and versioned separately from the fidelity model.
+| Area                     | Behavior or value                                                                                                                                                 |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Map                      | Map 53 is a 100 by 100 Tiled map with 32-pixel tiles. `map53.json` is the machine-readable source; `Map_Layout.png` is the visual reference. The `map3471` example state remains a parser fixture only. |
+| Player decision interval | 200 ms per action.                                                                                                                                                |
+| Player profile           | Level-135 Mystic.`Current_Player_Stats.txt` lists HP 9,463, MP 15,108, AC 3,292, and displayed combat factors.                                                    |
+| Regeneration             | HP and MP regenerate every 2 seconds.                                                                                                                             |
+| Innie movement           | Base speed 1 second with a spawn-time multiplier from 0.9 to 1.1.                                                                                                 |
+| Innie aggro              | Aggressive radius 4, new-aggro check every 1.5 seconds, and target removal beyond distance 18.                                                                    |
+| Innie combat             | Confirmed balance cap 150, attack speed 1 second, and Euclidean attack radius 1. Radius 1 reaches only cardinal neighbors; radius 1.5 would also reach diagonals. |
+| NPC update order         | Drop invalid aggro, check new aggro, move/face, then attack. RedBot additionally attempts configured spells.                                                      |
+| Innie scaling            | `ScaledCalcs.GetEnemyHP`, `NPCRecursiveDmg.GetDamage`, and the RedBot scaling path are now supplied.                                                              |
+| Regeneration timing      | Ten environment steps at the 200 ms decision interval.                                                                                                            |
+| World distance           | `EntityBase.Distance` is Euclidean and controls combat, spell radii, aggro range, and range checks.                                                               |
+| Observation distance     | The client-supplied distances in the fixture equal Manhattan distance; Mystic also uses Manhattan as its fallback.                                                |
+| Spawn boxes              | `map53.json` contains 40 non-fixed 10 by 10 template-5300 boxes with two Innies each, for 80 baseline Innies. A dead NPC respawns at a random unoccupied point in its own box after 14 seconds. |
+| Collision scope          | The JSON blocked layer contains 5,088 marked cells, but terrain blocking is explicitly deferred. Baseline legality checks map bounds and entity occupancy only. |
+| Mystic ranges            | The exact`Ranges.Mystic` formula is supplied in `TimeFrame_Other_Details.txt`.                                                                                    |
+| Spell records            | Exact properties are supplied for Arcane Blast (416), Acid Cloud (417), and Tempest Inferno (418).                                                                |
 
-## Proposed package layout
+Use integer simulated milliseconds. Cooldowns, move timers, regeneration,
+status ticks, and respawns should store absolute due times so the simulator does
+not sleep or accumulate floating-point timer drift.
 
-Keep the simulation beside the existing environments so project packaging and
-imports continue to work:
+Do not use one generic distance helper. The simulator needs two named metrics:
+
+- `euclidean_distance` for server mechanics (`EntityBase.Distance`, attack
+  radius, spell radius, and aggro/range comparisons);
+- `observation_distance` using Manhattan distance to reproduce the world-state
+  payload and Mystic observation.
+
+## Developer-answer status
+
+
+| Question                                | Status after source review | Integration decision                                                                                                                                                                                                         |
+| --------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 100x100 map and spawn layout            | Resolved for baseline      | Parse dimensions, tile size, properties, and NPC object rectangles from `map53.json`. Use the 40 template-5300 boxes and exclude the fixed template-5399 NPC from the Innie-only scenario. Do not enable the blocked tile layer yet. |
+| Player start and objective              | Resolved for baseline      | Sample the player from `x=50+/-5`, `y=45+/-5`, rejecting occupied cells. The episode objective is five Innie kills; no separate objective-area geometry is required for v0. |
+| `EntityBase.Distance` metric            | Resolved                   | Port Euclidean distance exactly for mechanics; retain Manhattan distance for Mystic observations.                                                                                                                            |
+| NPC movement, facing, path choice       | Resolved for baseline      | Port `NPC.cs`. A candidate cell is legal when it is inside map bounds and contains neither the player nor another living NPC. Terrain blocking remains disabled. |
+| Innie combat template                   | Resolved for baseline      | Use template 5300, balance cap 150, bulk 0.5, HP 274,599, MP 0, AC 2,250, toughness 15, raw damage 3,549, one-second attacks, one-second base movement with 0.9–1.1 jitter, radius 1, 14-second respawn, and no NPC spells. |
+| Player/spell shared formulas            | Resolved for baseline      | Port`Player.cs`, `Entitybase.cs`, `BaseSpell.txt`, and the supplied Mystic range formula.                                                                                                                                    |
+| Spell properties                        | Resolved                   | Use the supplied records for spell IDs 416, 417, and 418.                                                                                                                                                                    |
+| Event scheduling                        | Partly resolved            | `EventHandler.cs` confirms timestamp-priority queues, due checks against the server clock, and serial `CheckAndHandle` execution per map queue. Equal-time ordering is not defined by the supplied queue implementation, so the simulator will use a deterministic enqueue sequence as its documented tie-break. |
+| RNG distribution/endpoints              | Resolved                   | Port inclusive`Roll` and integer-threshold `RollChance`; preserve source draw order per branch.                                                                                                                              |
+
+## Map and spawn layout
+
+Use `map53.json` as the authoritative geometry/object input and
+`Map_Layout.png` as a review aid. The JSON is a finite orthogonal Tiled 1.8 map:
+
+- width and height: 100 by 100 tiles;
+- tile width and height: 32 by 32 editor pixels;
+- tile layers: `layer0`, `layer1`, `layer2`, and `blocked`;
+- object layers: `data` and `render`;
+- map name: `Severed Space`, map ID 53 in the environment configuration;
+- 40 non-fixed NPC objects for template 5300, each 320 by 320 pixels, with
+  `quantity=2`;
+- one fixed template-5399 object at tile `(50, 21)`, which is outside the
+  Innie-only training scenario.
+
+Dividing Tiled object coordinates and sizes by 32 yields exact tile rectangles.
+The template-5300 boxes start at X values `10, 20, ..., 80` and Y values
+`31, 41, 51, 61, 71`; every box is 10 by 10. This produces 40 boxes and 80
+Innies at reset. The loader should derive these values from JSON and validate
+them rather than hard-code a second copy.
+
+For the first simulator:
+
+- parse the map and object properties from JSON, but ignore the `blocked` layer
+  when evaluating movement;
+- build a `SpawnBox` from every non-fixed template-5300 NPC object;
+- sample the player uniformly from inclusive X range 45 through 55 and Y range
+  40 through 50; use deterministic rejection sampling for occupied cells;
+- sample each Innie uniformly from an unoccupied cell in its own box at reset
+  and again after its respawn timer;
+- reject moves and spawns that collide with the player or another living NPC;
+- process spawn boxes and entities in stable object-ID/entity-ID order so seeded
+  resets do not depend on dictionary ordering;
+- keep spawn boxes as scenario data, separate from movement/combat logic;
+- store the original map image beside any manually transcribed box-coordinate
+  fixture so the transcription can be reviewed;
+- add blocked cells later without changing the environment API.
+
+The JSON map property says `balanceCap=68`, while the developer separately
+confirmed 150 and the captured Innie HP of 274,599 matches the level-150 formula
+with bulk factor 0.5. Preserve both facts in configuration provenance. The
+baseline scenario uses `npc_effective_level_override=150`; the raw JSON value
+remains available for a later map-exact profile. Do not silently replace the
+parsed property.
+
+The supplied Innie template row describes template 5300 as level 55, body 68,
+experience 8,150, base HP 47,430, base AC 1,020, base toughness 6, template
+damage 1, and respawn time 14 seconds. The map's balance cap then overrides the
+combat values described below. The template has no cast-spell property, so the
+baseline Innie spell list is empty.
+
+## What `Example_Full_State.txt` tells us
+
+The file is a golden fixture for Mystic parsing, not a clean initial scenario.
+It contains:
+
+- top-level current player ID 7 at `(15, 59)`, facing left on `map3471`;
+- current player HP and MP at approximately 50%, but with debug-scale maxima of
+  roughly 500 million;
+- 41 monsters named Innie;
+- two player entries in `entities`, one current and one other player;
+- a monster whose ID is also 7, so IDs are not globally unique across the
+  top-level player and monster collection in this payload;
+- Innie max HP 274,599.
+
+The existing Mystic parser produces this exact `float32` observation:
+
+```text
+[15, 59, 2, 0.5, 0.5, 3471,
+ 10, 3, 1, 0,
+ 14, 3, 1, 0,
+ 18, 3, 1, 0,
+ 26, 3, 1, 0,
+ 26, 3, 1, 0]
+```
+
+The selected monster IDs are `80, 75, 40, 84, 85`. They are the five nearest
+monsters, and all are to the player's right. The tie at distance 26 currently
+inherits payload order. The simulator should use a documented stable tie-break,
+preferably `(distance, entity_id)`, and the golden test should make that choice
+explicit.
+
+`parse_observation` correctly filters to `type == "monster"`. In contrast,
+`parse_entity_state` currently tracks every non-current entity, including the
+other player, and returns 42 entries for this fixture. The simulator will contain
+only the controlled player and monsters, so its reward entity-state data should
+be built directly from monster state. A future refactor of the live parser must
+not silently change Mystic reward behavior without regression tests.
+
+The full-state player is not the level-135 combat profile from
+`Current_Player_Stats.txt`; use the latter for simulation defaults. Preserve the
+full state only as an input/parsing fixture.
+
+## Scaled calculations now available
+
+Port `ScaledCalcs.txt` literally into a pure Python mechanics module:
+
+- `expected_regression_dps(level)`;
+- `get_enemy_hp(level)`;
+- `NPCRecursiveDamage.get_damage(level)` with the same lookup growth and
+  recurrence order.
+
+The fixture's Innie maximum HP is useful evidence about the scenario. With the
+RedBot default `bulkFactor = 0.5`, C# truncation gives:
+
+```text
+get_enemy_hp(150) * 0.5 -> 274599
+```
+
+That exactly matches the full state. The developer confirmed a balance cap of
+150. `RedBotNPCScript.OnCreated` therefore replaces the template level with 150
+even though the documented player is level 135. Configure these separately as
+`player_level = 135` and `npc_effective_level = 150`.
+
+At effective level 150 and the supplied/default Innie properties, the source
+path yields HP 274,599, AC 2,250, toughness 15, attack speed 1 second, attack
+radius 1, and template damage 3,549. Unspecified Innie stats, including strength
+and MP, are zero, so the NPC strength factor is 1 and raw melee damage remains
+3,549 before the target's dodge/block/AC path. The template properties contain
+no NPC spells.
+
+Golden tests should include at least levels 135, 149, 150, and 151 because the
+enemy-HP formula changes branch at 150. Preserve C# cast-to-`long` truncation.
+
+## Movement and range rules from `NPC.cs`
+
+Port the supplied movement state machine rather than substituting a general
+pathfinder:
+
+- entities move only in the four cardinal directions;
+- `MoveTowardsBasic` faces the target without moving when Euclidean distance is
+  at most 1;
+- otherwise `NextStepToBasic` evaluates the four legal candidate tiles using
+  Manhattan distance to the target;
+- equally useful horizontal/vertical candidates use the source's weighted
+  random choice based on squared axis distance;
+- when the preferred tile is invalid, the source chooses among alternatives
+  using its explicit blocked-path branches and inclusive random rolls;
+- a successful NPC move changes position and facing, runs the on-move effects,
+  resets the move timer, and pushes the attack timer back according to the
+  `NPC.Move` formula;
+- a blocked move changes facing, runs on-move effects, and resets the move timer
+  without changing position;
+- idle random movement uniformly chooses one of four cardinal offsets, returns
+  toward the spawn area when outside it, and still respects `IsValidNPCMove`.
+
+For baseline movement, `is_legal_move` checks only `(1)` map bounds and `(2)`
+whether the destination is occupied by the player or another living NPC. Keep
+terrain collision behind the same map adapter, with `use_blocked_layer=False`,
+so the 5,088-cell JSON layer can be enabled later without changing NPC logic.
+When multiple NPC events share a time, stable event order makes the first move
+claim its destination and later moves see that cell as occupied.
+
+The server `Direction` enum order is left, right, up, down, while Mystic's
+observation encoding is up=0, down=1, left=2, right=3, idle=4. Keep separate
+enums/conversion functions and test every mapping; do not cast one directly to
+the other.
+
+Aggro and attacks use Euclidean distance. With the confirmed Innie radius 1,
+only `(x±1, y)` and `(x, y±1)` are attackable. A diagonal is `sqrt(2)` away and
+would become attackable at radius 1.5.
+
+Port `Ranges.Mystic` literally:
+
+```text
+E  = 0.5 * level^2 + 8 * level + 27.5
+DW = int64(caster.dexterity) * int64(caster.strength)
+range = min(maxRadius,
+            minRadius + (2.57 / 15)
+            * max(0, sqrt(DW) - sqrt(E))^0.75)
+```
+
+Keep the spell scripts' outer clamping/subtraction separate from this helper;
+Acid Cloud and Tempest Inferno call it with different adjusted maxima.
+
+## Shared player and combat formulas now available
+
+Port these implementations from `Player.cs`, `Entitybase.cs`, and
+`BaseSpell.txt` before translating the spell bodies:
+
+- player strength and intelligence factors;
+- spell crit chance and magic crit multiplier;
+- raw spell damage and spell multiplier;
+- dodge, block chance, block amount, AC mitigation, and damage application;
+- `ApplyAoECalculation` with its three target-count branches;
+- front/side/behind facing bonuses;
+- `CanHit`, target validation, and player-versus-monster rules;
+- regeneration timing and clamping to max HP/MP.
+
+The documented stats provide golden values: strength factor about 5.04,
+intelligence factor about 9.41, spell crit about 42.4%, magic crit multiplier
+about 2.01, dodge about 17.7%, and block chance about 0.7%. Inventory-derived
+weapon damage and nonzero `MaxStats.SpellMultiplier` still require explicit
+configuration because item records are not supplied.
+
+## Spell translations
+
+Each spell should expose a pure calculation layer and a state-mutation layer.
+The pure layer makes formula parity testable without constructing a full Gym
+environment.
+
+Use the supplied property records rather than the fallback values embedded in
+the scripts. This removes the unsafe 100%-MP defaults from spell 1 and spell 2.
+
+### Spell 1
+
+Translate `Spell1_Arcane Blast_single_target_spell.txt` in its written order:
+
+```text
+id=416, name=Arcane Blast, target=all, targetMode=targeted
+cooldown=3500 ms, family=arcane-blast, familyCooldown=3500 ms
+mpCost=500, manaFactor=0.45, damagePercent=0.75
+manaConsumption=0.33, animation=29, sfx=27
+```
+
+1. Validate the chosen target with the `BaseSpell.CanHit` rules.
+2. Read `manaFactor`, `damagePercent`, and `baseDamage` properties, using the C#
+   defaults when a property is absent.
+3. Calculate base damage from current MP, strength factor, and intelligence
+   factor, including the October 2024 modifiers.
+4. Calculate raw spell damage and the main target's crit roll.
+5. Apply the main target's magic mitigation.
+6. Consume percentage HP/MP exactly where the C# does.
+7. When Arcane Bomb is enabled, enumerate splash targets and calculate their
+   individual raw damage, crit, mitigation, and AoE scaling.
+8. Apply splash damage and then main-target damage in the source order.
+
+Without Arcane Bomb this is a single-target spell. The source defaults to zero
+splash radius.
+
+### Spell 2
+
+Translate `Spell2_Acid Cloud_large AoE.txt`:
+
+```text
+id=417, name=Acid Cloud, target=all, targetMode=targetedOrSelf
+cooldown=5000 ms, mpCost=1000
+manaFactor=0.275, damagePercent=0.75, manaConsumption=0.33
+initialDamagePercent=0.76, tickPercent=0.04
+duration=6000 ms, interval=1000 ms
+minRadius=2.5, maxRadius=4.25, level=70
+effectId=acid, effectLevel=2, animation=118, tickAnimation=118, sfx=5
+```
+
+1. Calculate Mystic range and clamp it between `minRadius` and `maxRadius`.
+2. Select all hittable monsters in the target-centered radius.
+3. Calculate raw damage, crit, AoE scaling, and distance falloff in the same
+   order as C#.
+4. Apply initial damage and target mitigation.
+5. Consume percentage HP/MP.
+6. Schedule the per-target tick effect using absolute millisecond deadlines.
+7. Apply the optional Sunburnt multiplier only when that status is enabled.
+
+For the documented level-135 player (`Dexterity=194`, `Strength=100`), the exact
+Mystic calculation produces raw radius about 7.2611, which the spell clamps to
+4.25. Acid Cloud ticks every five environment steps for six seconds.
+
+### Spell 3
+
+Translate `Spell3_Tempest Inferno.txt` exactly:
+
+```text
+id=418, name=Tempest Inferno, target=all, targetMode=targetedOrSelf
+cooldown=1750 ms, mpCost=750
+castLevel=134, level=125
+manaFactor=0.45, damagePercent=0.775, manaConsumption=0.20
+animation=2, sfx=119
+```
+
+1. Fall back to the caster when the target is null, as the C# does.
+2. Calculate radius from the Mystic range function with defaults 0.5–1.5.
+3. Calculate the caster-to-target distance factor.
+4. Build full-radius and partial-radius target sets, excluding magic-immune
+   monsters.
+5. Calculate raw damage, AoE scaling, partial-target weights, and per-target
+   allocation with C# truncation at the same points.
+6. Apply magic mitigation and damage to both target sets.
+7. Consume the configured 20% of current MP only when at least one target is
+   hit, matching the source location of the consumption code. The script's 15%
+   fallback applies only when `manaConsumption` is absent; it is present here.
+8. Apply the optional Tempest Meteor stun only when that trinket modifier is
+   enabled; baseline simulation keeps it disabled.
+
+The script reads `level` before `castLevel`, so this property record uses level
+125 for `Ranges.Mystic`. With the documented player stats, the resulting spell
+radius is exactly the 1.5 maximum.
+
+### Shared cast and targeting rules
+
+Port the relevant portion of `BaseSpell.txt`:
+
+- map and range validation;
+- MP/HP fixed-cost validation;
+- target-mode resolution;
+- immunity checks;
+- `CanHit` behavior for player-versus-monster combat.
+
+The current discrete actions do not carry a target ID or cursor coordinate.
+For the first simulator, select the nearest hittable living monster, breaking
+ties by entity ID. Arcane Blast is `targeted` and fails with `no_target` when no
+monster is available. Acid Cloud and Tempest Inferno are `targetedOrSelf`; when
+no valid monster exists, follow the source target-mode rule and center the spell
+on the caster. This nearest-target rule is confirmed for the current simulator
+scope. Range and `CanHit` validation still run after selection.
+
+`mpCost` is a cast-eligibility threshold in the supplied `BaseSpell.CanCast`;
+the fixed cost subtraction is commented out. On a successful cast, the spell
+body instead removes its configured percentage of current MP: 33% for Arcane
+Blast, 33% for Acid Cloud, and 20% for Tempest Inferno. Preserve C# `Math.Round`
+and clamp MP at zero.
+
+Store both slot and family cooldowns as absolute millisecond deadlines. At 200
+ms decision boundaries, the first possible recasts are:
+
+
+| Spell           | Cooldown | First eligible boundary | Decision intervals |
+| --------------- | -------: | ----------------------: | -----------------: |
+| Arcane Blast    |  3500 ms |                 3600 ms |                 18 |
+| Acid Cloud      |  5000 ms |                 5000 ms |                 25 |
+| Tempest Inferno |  1750 ms |                 1800 ms |                  9 |
+
+Cooldown eligibility should use the source `Spell.CanCast` behavior when that
+class is supplied; until then, use `now_ms >= ready_at_ms` and test boundary
+times explicitly.
+
+## Basic attack
+
+`attack` remains in the action contract, but gear is disabled in the baseline
+fidelity profile because weapon damage and attack speed were intentionally left
+out by the developer. Implement it behind a configuration toggle:
+
+- follow the standard `Player.MeleeAttack` targeting rule: inspect only the
+  cardinal tile directly in front of the player;
+- with `gear_enabled=False`, return a no-op event with reason `gear_disabled`;
+- with `gear_enabled=True`, if the facing tile contains a living monster, apply
+  configured integer weapon damage through `HandleMelee`, including dodge and
+  target mitigation;
+- preserve the standard single-target `3 / (numTargets + 2)` factor, which is
+  1 when `numTargets == 1`;
+- use the player attack-speed gate once the relevant weapon speed is supplied;
+- do not add alternate weapon patterns, splash, or a resource cost in the first
+  version;
+- return a no-op with `no_target` when the facing tile is empty and
+  `cooldown` when the attack-speed gate rejects the action.
+
+The optional gear profile must supply weapon damage, attack interval, and spell
+multiplier together. This keeps approximate gear values out of the source-exact
+baseline.
+
+## Package design
 
 ```text
 Custom_enviornments/
-  Simulation_Env/
+  Mystic_Sim/
     __init__.py
-    Env_Sim.py              # Gymnasium adapter only
-    actions.py              # canonical 11-action enum/list
-    config.py               # immutable scenario/mechanics configuration
-    state.py                # PlayerState, NPCState, effects, map and events
-    engine.py               # reset, advance 200 ms, event ordering
-    observation.py          # pure state -> Mage-compatible float32 vector
-    rewards.py              # reward components and episode rules
-    movement.py             # collision, distance, aggro and NPC movement
-    combat.py               # rolls, mitigation, damage, death and regeneration
-    spells.py               # translated Mystic spells and timed effects
-    scenarios.py            # seeded map/spawn construction
+    env.py                 # thin Gymnasium adapter
+    actions.py             # shared eight-action definition
+    config.py              # immutable player, NPC, spell and scenario values
+    state.py               # player, monster, effect, map and event dataclasses
+    engine.py              # reset and deterministic 200 ms state transition
+    observation.py         # pure state -> Mystic-compatible float32 vector
+    rewards.py             # reward components and episode rules
+    movement.py            # collision, distance, aggro and pursuit
+    scaled_calcs.py        # literal ScaledCalcs/NPCRecursiveDmg translation
+    combat.py              # rolls, mitigation, damage, death and regeneration
+    spells.py              # spell 1, 2 and 3 translations
+    map_loader.py          # validated Tiled JSON -> map and spawn definitions
+    scheduler.py           # absolute-time heap and deterministic tie-breaks
+    scenarios.py           # seeded map53 fidelity profiles
 Tests/
-  test_sim_environment.py
-  test_sim_timing.py
-  test_sim_combat.py
-  test_sim_observation_parity.py
-  fixtures/simulation/      # C# golden inputs/outputs and recorded transitions
+  fixtures/simulation/
+  test_mystic_sim_state.py
+  test_mystic_sim_timing.py
+  test_mystic_sim_scaled_calcs.py
+  test_mystic_sim_combat.py
+  test_mystic_sim_spells.py
+  test_mystic_sim_observation.py
+  test_mystic_sim_environment.py
 ```
 
-`Env_Sim.py` should remain thin. Rules belong in pure functions or the engine so
-they can be tested without Gymnasium, run in batches later, and optimized without
-changing the external API.
+Rules belong in pure functions or the engine rather than the Gym wrapper. This
+keeps formula tests small and leaves a clean path to batching or optimizing only
+the measured bottlenecks later.
 
-## Environment contract
+## Observation contract
 
-### Actions
-
-Use the exact Mage ordering:
-
-| ID | Action |
-|---:|---|
-| 0 | `up` |
-| 1 | `down` |
-| 2 | `left` |
-| 3 | `right` |
-| 4 | `attack` |
-| 5 | `castSpell:1` |
-| 6 | `castSpell:2` |
-| 7 | `castSpell:3` |
-| 8 | `castSpell:5` |
-| 9 | `castSpell:6` |
-| 10 | `castSpell:7` |
-
-Move this list to one shared module and import it from both Mage and the
-simulator. That prevents checkpoint-breaking action drift. Invalid or currently
-unimplemented actions need a defined policy: for training, a failed/no-op cast
-with an `info` reason is preferable to changing the action-space size. Add an
-action mask later if the chosen algorithm consumes one.
-
-### Observations
-
-Preserve the existing order and normalization:
+Continue producing Mystic's 26-element `numpy.float32` vector:
 
 ```text
 [player_x, player_y, direction, hp_pct, mp_pct, map_id,
  enemy_0_distance, enemy_0_direction, enemy_0_hp_pct, enemy_0_mp_pct,
- ... five nearest enemies total]
+ ... five nearest monsters total]
 ```
 
-The result must have shape `(26,)` and dtype `numpy.float32`. Enemy ordering must
-be stable: sort by distance and then by entity ID to break ties. Simulated IDs
-must remain stable until death/despawn.
+Extract a pure encoder from `Env_conditions.parse_observation`. Its current debug
+file writes cannot run inside a high-throughput simulation step. Test the pure
+world-state encoder with `Example_Full_State.txt`, including exact shape, dtype,
+values, nearest IDs, direction values, normalization, and map-ID parsing.
 
-Refactor the current parser before reuse. `Env_conditions.parse_observation`
-writes three debug files during ordinary parsing, which would dominate a fast
-simulation. Extract a pure encoder and make live debug persistence an optional
-adapter concern. Test the pure live-world-state and simulated-state encoders
-against identical snapshots.
+Cooldowns, status effects, target ID, and terrain remain hidden from this
+observation. Keep the parity observation first, and use a recurrent policy if
+hidden timers cause problems. Any expanded observation must receive a new
+version rather than changing trained-model inputs silently.
 
-The current observation does not include cooldowns, status effects, or obstacle
-geometry. That preserves checkpoint compatibility but makes the process partly
-observable. After the parity baseline, define a versioned `SimEnv-v1`
-observation rather than silently changing the 26 fields. A recurrent policy is
-the least disruptive baseline for hidden cooldown/timer state.
+## RNG parity from `GameServer.cs`
 
-### Reset and step
+The server uses the process-wide, thread-safe `Random.Shared`. Its helper
+semantics are now known:
 
-`reset(seed=..., options=...)` should call `super().reset(seed=seed)`, build a
-scenario using `self.np_random`, clear all event queues/timers, and return the
-initial observation plus diagnostic `info`.
+```text
+Roll(min, max)       -> Random.Next(min, max + 1)       # both endpoints included
+Roll(options)        -> Random.Next(0, options.Length)  # upper endpoint excluded
+RollChance(chance)   -> Random.Next(0, 1_000_000_001)
+                        <= chance * 1_000_000_000
+```
 
-`step(action)` should perform one 200 ms decision interval:
+Implement these as compatibility helpers backed by each environment's seeded
+NumPy generator. `roll_chance(0)` retains the source's extremely small success
+possibility because integer zero satisfies the `<=` comparison; do not silently
+replace it with `rng.random() < chance` in the exact profile. Record RNG draws
+in trace mode so formula comparisons can verify when each roll is consumed.
 
-1. Validate and apply the player action at simulated time `t`.
-2. Process every scheduled event with a due time in `(t, t + 200 ms]` in a
-   documented stable priority order.
-3. Remove or mark dead entities and schedule configured respawns.
-4. Advance simulated time and step count.
-5. Encode the resulting state.
-6. Calculate reward from the previous and resulting states/events.
-7. Return `(observation, reward, terminated, truncated, info)`.
+Preserve source call order as well as distributions. Examples now visible in
+the supplied files include:
 
-Store time as integer milliseconds and cooldown/effect deadlines as absolute
-integer timestamps. This represents the source's 900–1100 ms movement jitter,
-1.5-second aggro checks, and 2-second regeneration without floating-point timer
-drift. Event ordering must be part of the public simulator version because it
-can change learned behavior.
+- Innie construction rolls initial spawn delay when applicable, then move-speed
+  jitter;
+- `NextStepToBasic` eagerly rolls its first coin flip after evaluating candidate
+  tiles and then rolls the weighted axis choice unless an adjacent early return
+  was taken;
+- random movement/facing uses one inclusive roll from 0 through 3;
+- melee rolls dodge first, followed by attacker crit when applicable, followed
+  by target block;
+- each raw player spell-damage calculation rolls crit, followed by the target's
+  mitigation/block roll.
 
-### Reward and episode behavior
+Tests should assert RNG draw logs for representative movement, melee, and spell
+branches so a refactor cannot change later outcomes by skipping an apparently
+unused draw.
 
-Start with an explicit `reward_mode="mage_compat"` that preserves Mage's
-component keys:
+The live server consumes one shared RNG across concurrent work, so reproducing a
+live global random sequence is not practical. Simulator determinism means the
+same environment seed, state, and action sequence consume the same local draws.
+
+## Reset and step semantics
+
+`reset(seed=..., options=...)` should call `super().reset(seed=seed)`, construct
+the selected scenario with `self.np_random`, reset every timer/effect, and return
+the initial observation and diagnostic info.
+
+One `step(action)` covers exactly 200 simulated milliseconds. `EventHandler.cs`
+establishes the scheduling model: events carry absolute times, map events enter
+a timestamp-priority queue, the single map worker checks the head against the
+current clock, and due events execute serially through `CheckAndHandle`.
+
+Implement a heap ordered by `(due_ms, enqueue_sequence)`. The monotonically
+increasing sequence supplies deterministic equal-time ordering because the
+third-party C# priority queue's equal-priority behavior is not included. An
+event scheduled while handling another event receives a later sequence, even if
+it has the same due time. Cancelled events remain harmless heap entries and are
+ignored using a generation/token check.
+
+The step transaction is:
+
+1. At `t`, validate the discrete action, resolve the nearest target where
+   required, and apply or reject the player action.
+2. Set `step_end = t + 200`.
+3. Pop every event with `due_ms <= step_end` in heap order. Set the engine clock
+   to each event's exact due time before executing it. Events may enqueue new
+   events that are also due before `step_end`.
+4. Advance the clock to `step_end` after the queue is drained.
+5. Encode observation, calculate rewards from the step's event ledger, update
+   termination/truncation, and return the Gymnasium tuple.
+
+Use explicit event kinds for NPC update, regeneration, effect tick/expiry, and
+respawn. Damage and death caused inside one event are applied synchronously so
+later equal-time events observe the updated HP/alive state. Inside an NPC update,
+preserve the source order: validate/drop aggro, acquire aggro when due, move or
+face, then attack when due. This is the baseline simulator contract; a later
+live trace can replace only the tie-break policy if necessary.
+
+All randomness uses the environment's seeded generator, including spawn cells,
+move-speed jitter, dodge, block, crit, path choices, and respawn placement.
+
+## Rewards and episode boundaries
+
+Preserve Mystic's component names for dashboard compatibility:
 
 ```text
 health_state, positioning, damage_taken, damage_dealt, terminal, killed
 ```
 
-Use simulator damage/death events directly instead of inferring kills when an
-enemy ID disappears. Keep the Mage five-kill win condition, player-death loss,
-and 256-step time limit for the parity scenario. Map departure and the current
-Y-coordinate boundaries only apply if the simulated scenario intentionally
-recreates map 53; otherwise they must be scenario configuration.
+Use explicit simulator events for damage and death rather than inferring kills
+from disappeared IDs. Start with player death as loss, five Innie kills as win,
+and 256 steps as truncation.
 
-Snapshot the existing reward behavior in tests before refactoring it. Some
-conditions deserve separate review rather than accidental preservation, notably
-the `player_hp_pct != 0.5` damage condition and the large Y-position penalty.
-Introduce corrected rewards as a new named version so results remain comparable.
+The scenario map ID is 53. `Example_Full_State.txt` is on map3471 and is used
+only to lock parser compatibility; it is not a simulator reset state. Keep map
+ID, Y-position penalties, and Y-based truncation as scenario configuration so
+reward experiments do not alter mechanics.
 
-`info` should include the current fields plus simulation diagnostics:
+Review the existing `player_hp_pct != 0.5` damage condition separately; it can
+reward healing or apply a zero-value component in surprising cases. Corrected
+reward behavior should use a named version instead of silently changing old
+experiment semantics.
+
+`info` should include:
 
 ```text
 current_step, simulation_time_ms, reward_components, episode_outcome, is_win,
-action_applied, action_failure_reason, damage_events, death_events,
-cooldowns_remaining_ms
+action_applied, action_failure_reason, selected_target_id, damage_events,
+death_events, cooldowns_remaining_ms
 ```
 
-## Translation rules for C# mechanics
+## Baseline fidelity contract
 
-Port formulas literally before simplifying them:
+The first runnable environment can now be implemented without inventing missing
+map, target-selection, collision, or event-queue behavior. Name this profile
+`map53_open_entities_v1` and freeze these settings in one immutable scenario
+configuration:
 
-- preserve the order of casts, rounding, clamping, mitigation, and HP mutation;
-- use `math.ceil` where C# uses `Math.Ceiling` and explicit integer truncation
-  where C# casts `double` to `long`;
-- centralize seeded chance and integer rolls instead of calling Python's global
-  RNG;
-- separate raw damage, crit, block/dodge, AC reduction, and final application;
-- represent damage and HP as Python integers, while percentages and multipliers
-  remain floats;
-- keep spell target selection and AoE entity counts stable and deterministic;
-- represent DoTs as scheduled effects with absolute next-tick and expiry times;
-- apply NPC death once, clear aggro consistently, and cancel effects whose source
-  or target rules require cancellation.
+| Setting | Baseline value |
+|---|---|
+| Map | ID 53, 100 by 100, parsed from `map53.json` |
+| Terrain collision | Disabled; retain blocked data for a later profile |
+| Occupancy collision | Enabled for the player and living NPCs |
+| Player spawn | Uniform legal cell in X 45..55 and Y 40..50, inclusive |
+| NPC spawns | All 40 non-fixed template-5300 boxes, quantity two each |
+| Other NPCs | Fixed template 5399 excluded |
+| Objective | Kill five Innies |
+| Step duration | 200 ms |
+| Actions | Four cardinal moves, attack, spells 1 through 3 |
+| Target selection | Nearest living candidate, then lowest entity ID |
+| Basic attack/gear | Disabled by default; toggleable configuration |
+| Cooldowns | Absolute ready times using the supplied spell/family durations |
+| Event tie-break | Absolute due time, then enqueue sequence |
+| Episode end | Player death or five kills; truncate at 256 steps |
 
-The displayed player factors can seed a temporary measured configuration. They
-should not be confused with implementations of the missing server factor
-functions. Likewise, port the supplied AC reduction formula, but configure the
-reported 48.5% player reduction until its full player-side call path is known.
+Treat all interval endpoints as inclusive. If a spawn rectangle is full, fail
+reset with a diagnostic rather than loop indefinitely. A respawn with no free
+cell stays pending and retries at the next 200 ms boundary; record the reason in
+the event trace.
 
-## Implementation phases and acceptance gates
+### Known discrepancies and deferred fidelity
 
-### Phase 0 — Freeze the compatibility contract and collect missing inputs
+These items do not prevent implementation, but must remain visible:
 
-- Extract/shared-test the 11 actions and 26 observation fields.
-- Record at least one reset snapshot and short live trajectory with actions,
-  timestamps, player/enemy state, damage, and deaths.
-- Obtain the map collision data, NPC template, spell property records, and the
-  missing helper functions or evaluated outputs listed above.
-- Create a mechanics manifest that labels every value as source-derived,
-  measured, or approximated.
+1. `map53.json` stores `balanceCap=68`; the developer confirmed 150 and the
+   captured 274,599 Innie HP validates the level-150/bulk-0.5 calculation. The
+   baseline uses an explicit 150 override and preserves 68 as parsed metadata.
+2. `EventHandler.cs` defines priority-by-time and serial handling, but the
+   equal-priority behavior of `ConcurrentPriorityQueue` is unavailable. The
+   simulator's enqueue-sequence tie-break is therefore a documented deterministic
+   rule rather than a verified server detail.
+3. “50 +/- 5, 45 +/- 5” defines the player spawn rectangle but not a probability
+   distribution. The baseline uses a uniform integer-cell distribution.
+4. Gear is intentionally absent. The attack action returns `gear_disabled`, and
+   gear-derived damage, speed, and spell multiplier remain zero until one
+   complete gear profile is supplied.
+5. The blocked layer is parsed and validated but ignored. A later
+   `map53_blocked_v2` profile can enable it through the map adapter.
 
-Gate: action and observation golden tests pass, and no unknown value is presented
-as exact.
+Every configuration value should carry provenance (`source`, `developer`,
+`fixture`, `derived`, or `simulator_rule`). Approximate mechanics belong in a
+separately named profile and must never silently enter the baseline.
 
-### Phase 1 — Deterministic state, clock, map, and movement
+## Implementation phases
 
-- Implement dataclasses/configuration and an integer-ms event clock.
-- Implement a 100 by 100 tile map, bounds/collision, cardinal player movement,
-  seeded spawn construction, and stable entity IDs.
-- Implement NPC move-speed jitter, aggro checks/radius/drop, pursuit, and the
-  known NPC update order.
-- Expose a minimal Gymnasium environment with movement actions; combat actions
-  return documented failure reasons.
+### Phase 0 - Freeze contracts and fixtures
 
-Gate: same seed plus same actions produces byte-equal observations/events;
-different seeds vary only configured random elements; movement and timer tests
-pass at boundary timestamps.
+Deliverables:
 
-### Phase 2 — Base combat and lifecycle
+- Add `Mystic_Sim/actions.py` with one `IntEnum` and the canonical eight labels.
+- Make live `Mystic`, `MysticBC`, the simulator, trainers, and inference import
+  that definition when they migrate to the eight-action version.
+- Give the simulator its own registration, `YugenSaga/MysticSim-v0`, so live
+  socket behavior cannot be selected accidentally during simulation training.
+- Version action metadata in checkpoints and datasets. Existing 11-output
+  checkpoints cannot load into an eight-output policy head without migration.
+- Note the current movement-order difference: live Mystic uses up/down/left/
+  right, while MysticBC uses up/left/right/down. Define the canonical order as
+  up/down/left/right and provide an explicit legacy-BC remapping tool.
+- Store new demonstrations under a new dataset version rather than relabeling an
+  existing 11-action dataset in place.
+- Lock `Example_Full_State.txt` as a golden fixture for its exact observation,
+  selected entity IDs, dtype, and shape.
+- Add `mechanics_manifest.yaml` with every baseline value and its provenance.
+- Add schema assertions for `map53.json`: dimensions, tile scale, required
+  layers, map properties, 40 template-5300 boxes, and their quantities.
 
-- Implement player regeneration, NPC attacks, dodge/block/AC reduction, aggro
-  from damage, death, despawn, and configurable respawn.
-- Port `CalculateACReduction` and the supplied NPC mitigation functions with
-  golden numeric cases evaluated from C#.
-- Add the base `attack` only after its range, cadence, and damage path are known.
+Exit gate:
 
-Gate: deterministic combat traces match C# golden results for crit, dodge,
-block, normal damage, death, and simultaneous-event cases.
+- action mappings round-trip by label and integer;
+- legacy BC actions remap correctly in a fixture;
+- the full-state parser test passes without writing debug files;
+- malformed or unexpected map JSON fails with a precise validation message.
 
-### Phase 3 — Mystic spells and timed effects
+### Phase 1 - Build map, state, reset, and observation
 
-- Port spell 1, including target validation, consumption, mitigation, crit, and
-  optional splash behavior.
-- Port spell 2, including radius selection, AoE scaling, distance falloff, DoT
-  scheduling, refresh/stack semantics, and status multipliers.
-- Add cooldown/range/mana validation and define failed-cast behavior.
-- Add actions 3/5/6/7 only when their mechanics are available; keep their IDs
-  reserved until then.
+Implement data before behavior:
 
-Gate: spell golden cases cover zero/one/multiple targets, edge-of-range targets,
-insufficient MP, cooldown boundaries, crits, AoE counts, DoT expiry, and deaths.
+- `config.py`: frozen player, Innie, spell, timing, reward, and fidelity-profile
+  dataclasses. Validate positive maxima, durations, map bounds, and unique spell
+  IDs at construction.
+- `map_loader.py`: read Tiled JSON once, normalize object pixels to tile
+  rectangles, retain raw map properties, and create immutable spawn definitions.
+- `state.py`: slotted `PlayerState`, `MonsterState`, `SpawnBox`, `TimedEffect`,
+  `CooldownState`, and `WorldState`. Use integer HP/MP, integer tile coordinates,
+  integer milliseconds, and stable integer entity IDs.
+- `scenarios.py`: construct `map53_open_entities_v1`, apply the documented
+  level-150 override, omit template 5399, and seed all placement from the
+  environment generator.
+- Spawn player first, then spawn boxes by Tiled object ID and members by local
+  index. Reject occupied cells without consuming randomness outside the defined
+  retry loop. Keep entity IDs stable across death and respawn.
+- `observation.py`: pure state-to-vector encoding with the exact 26-element
+  `float32` contract. Rank living monsters by Manhattan observation distance and
+  entity ID, encode the nearest five, and zero-pad missing slots.
+- Keep Euclidean mechanics distance, Manhattan observation distance, and
+  direction encoding as separate tested functions.
 
-### Phase 4 — Mage reward parity and Gymnasium compliance
+Reset must return a fully valid state: 80 living Innies on unique cells, one
+legal player cell, no cooldowns/effects, zero kills, time zero, and all first
+event deadlines scheduled. Expose reset diagnostics such as seed, profile,
+spawn coordinates, parsed balance cap, and effective level override in `info`.
 
-- Connect pure observation and reward code to the engine.
-- Add explicit termination versus time-limit truncation.
-- Run `gymnasium.utils.env_checker.check_env`.
-- Add regression tests for Mage-compatible action, observation, reward, info,
-  reset, and terminal behavior.
+Exit gate:
 
-Gate: existing policy networks accept simulator observations/actions without
-shape or ordering changes, and all current environment tests continue to pass.
+- the map loader derives all 40 boxes and 80 Innies from JSON;
+- every reset entity is in bounds, inside its spawn rule, and non-overlapping;
+- the same seed produces identical state and observation;
+- a sample of different seeds changes legal spawn cells;
+- observation parity and direction/distance boundary tests pass;
+- reset performs no socket, sleep, render, or debug-file I/O.
 
-### Phase 5 — Training integration and parallelism
+### Phase 2 - Add the clock, scheduler, movement, and aggro
 
-- Add a trainer environment factory/CLI option (`live` or `simulation`) instead
-  of replacing Mage imports ad hoc.
-- First run the existing PPO loop with one simulated environment to establish
-  functional parity.
-- Then support multiple independent environments. The current PPO trainer
-  allocates buffers using `num_envs` but instantiates and steps only one `Mage`,
-  so vectorization requires a real `SyncVectorEnv`/`AsyncVectorEnv` path and
-  batched reset/terminal handling.
-- Benchmark engine steps separately from neural-network training and profile
-  before considering Cython, Numba, or a C++ core.
+- Implement `scheduler.py` with heap keys `(due_ms, enqueue_sequence)`, event
+  tokens for cancellation, trace records, and a guard against infinite
+  same-timestamp rescheduling.
+- Schedule player regeneration every 2,000 ms, NPC updates from each NPC's
+  jittered movement/attack deadlines, effect ticks at their exact intervals,
+  and respawns 14,000 ms after death.
+- Advance exactly 200 ms per Gym step while executing every due event at its own
+  timestamp. Test events both on and between decision boundaries.
+- Port the `NPC.cs` cardinal candidate generation and weighted pursuit branches
+  in source order. Do not substitute A* or another pathfinder.
+- Implement baseline legality: in bounds and destination unoccupied. A blocked
+  attempt changes facing and applies the source timer behavior without moving.
+- Port spawn-area return and idle random movement.
+- Port aggro radius 4, 1,500 ms acquisition checks, distance-18 drop, damage
+  aggro, invalid/dead target removal, and Euclidean comparisons.
+- Keep server-facing direction values separate from Mystic observation values.
+- Log event time, event kind, entity ID, RNG draws, before/after position, and
+  action result when trace mode is enabled.
 
-Gate: short seeded training runs complete, reset correctly after both termination
-and truncation, save/load checkpoints, and run multiple environments without
-shared state or global RNG.
+Exit gate:
 
-### Phase 6 — Fidelity validation and transfer
+- equal seed plus equal actions gives an identical event trace;
+- occupancy conflicts resolve by stable event order with no overlapping state;
+- cardinal pursuit, diagonal distance, blocked facing, random movement, aggro
+  acquire/drop, spawn return, and timer-reset branches match focused fixtures;
+- 900-1,100 ms movement jitter and 1,500 ms aggro boundaries are exact;
+- no event scheduled after a step boundary executes early.
 
-- Replay recorded live action sequences in simulation and compare positions,
-  HP/MP, target IDs, damage, deaths, and timer events step by step.
-- Track error by mechanic rather than only total return.
-- Randomize only measured uncertainty ranges (NPC timing, damage parameters,
-  spawns); keep an exact deterministic profile for regression tests.
-- Evaluate simulator-trained checkpoints in live Mage with exploration off.
-- Add discrepancies as fixtures, correct the model, and repeat. Limited live
-  fine-tuning comes after simulator behavior is stable.
+### Phase 3 - Port scaling, combat, death, and respawn
 
-Gate: define acceptable per-mechanic error thresholds from live traces and meet
-them on held-out recordings. High simulator reward alone is not a fidelity test.
+- Translate `ScaledCalcs` and `NPCRecursiveDmg` literally. Preserve lookup
+  growth, recurrence order, floating-point operations, and C# casts to `long`.
+- Verify levels 135, 149, 150, and 151, including HP 274,599 for effective level
+  150 and bulk factor 0.5.
+- Construct baseline Innies with HP 274,599, AC 2,250, toughness 15, raw damage
+  3,549, attack interval 1,000 ms, Euclidean radius 1, MP zero, and no spells.
+- Port player strength/intelligence factors, crit, dodge, block, facing bonuses,
+  AC reduction, magic/melee mitigation, `CanHit`, AoE scaling, HP mutation, and
+  regeneration with C# rounding at the same lines as the source.
+- Add the exact RNG helpers and preserve branch draw order. Trace every draw by
+  purpose so a test can detect an accidentally skipped roll.
+- Implement the NPC attack pipeline, including radius-1 cardinal reach and
+  diagonal rejection, attack deadline, player damage, and death.
+- Emit structured `DamageEvent`, `DeathEvent`, and `RespawnEvent` records. Death
+  occurs once, removes occupancy and aggro immediately, cancels invalid effects,
+  and schedules the original entity into its own spawn box after 14 seconds.
+- If its box has no free cell at the deadline, leave the entity dead and retry
+  placement at the next decision boundary without changing its ID.
+- Keep player gear disabled. Implement the facing-tile attack path behind
+  `gear_enabled`; baseline attempts return `gear_disabled` without RNG draws.
+
+Exit gate:
+
+- numeric formula goldens match independently calculated C# results;
+- normal, dodge, block, crit, mitigation, lethal, and already-dead cases pass;
+- NPCs cannot attack diagonally at radius 1;
+- regeneration occurs at exactly 2,000 ms and clamps to maxima;
+- death frees occupancy and respawn restores a legal, fully initialized entity;
+- RNG trace tests lock draw endpoints and draw order.
+
+### Phase 4 - Implement Mystic spells 1 through 3
+
+Build casting in layers:
+
+1. `targeting.py` returns the nearest living monster using Euclidean spell
+   eligibility distance and entity-ID tie-breaks. Targeted-or-self spells fall
+   back to the caster only when no valid monster exists.
+2. `cooldowns.py` checks fixed MP/HP eligibility plus slot/family absolute ready
+   times. Rejected casts consume no resources, cooldown, or combat RNG.
+3. Pure calculation functions return target allocations, raw damage, crit flags,
+   mitigation inputs, and resource costs without mutating world state.
+4. Mutation functions apply results in source order, emit events, schedule timed
+   effects, consume resources, and set cooldown deadlines.
+
+Implement Arcane Blast (416) first: nearest single target, 500 MP eligibility,
+3,500 ms slot/family cooldown, 33% current-MP consumption, and baseline-disabled
+Arcane Bomb splash. Then implement Acid Cloud (417): 1,000 MP eligibility,
+5,000 ms cooldown, radius capped at 4.25, initial damage, 1,000 ms ticks for
+6,000 ms, and 33% current-MP consumption. Finally implement Tempest Inferno
+(418): 750 MP eligibility, 1,750 ms cooldown, radius capped at 1.5, full/partial
+target allocation, 20% current-MP consumption from the supplied property record,
+and baseline-disabled trinket stun.
+
+Resolve an existing plan inconsistency in favor of the supplied property record:
+Tempest Inferno uses `manaConsumption=0.20`; do not retain the spell script's
+15% fallback when the property is present.
+
+Cooldowns begin only after a successful cast. At 200 ms decisions, first recast
+boundaries are 3,600 ms, 5,000 ms, and 1,800 ms. Timed effects use absolute
+deadlines, stable effect IDs, and explicit refresh/stack policy derived from the
+source. Baseline trinket/status modifiers remain disabled but represented in
+configuration.
+
+Exit gate:
+
+- each spell has pure numeric goldens and full state-transition tests;
+- tests cover no target, self fallback, exact range edge, insufficient MP,
+  cooldown edge, normal/critical hit, immunity, zero/one/many AoE targets,
+  partial-radius allocation, DoT tick/expiry, resource rounding, and kills;
+- a failed cast produces a reason and no hidden mutation or RNG draw;
+- cooldown and effect traces are deterministic under replay.
+
+### Phase 5 - Wrap the engine in Gymnasium and define rewards
+
+- Keep `env.py` thin: validate the action, call `engine.advance(action, 200)`,
+  encode state, calculate reward, and return the Gymnasium five-tuple.
+- Declare `Discrete(8)` and a 26-value `Box` with bounds that reflect coordinates,
+  direction codes, percentages, distance, and map ID.
+- Implement `reset(seed, options)` through `super().reset(seed=seed)`. Options may
+  select a fidelity profile or fixed fixture, but cannot mutate global state.
+- Use explicit engine events for damage and kills rather than inferring them from
+  disappeared entity IDs.
+- Preserve dashboard component names: `health_state`, `positioning`,
+  `damage_taken`, `damage_dealt`, `terminal`, and `killed`.
+- Add a `legacy_reward_v0` profile that snapshots current Mystic calculations and
+  a `combat_reward_v1` profile for training. The latter should reward normalized
+  enemy damage and kills, penalize normalized player damage and death, use a
+  small time cost, and avoid hard-coding the current `player_hp_pct != 0.5` bug.
+- Terminate on player death or the fifth Innie kill. Truncate at 256 steps. Keep
+  Y-boundary rules configurable and disabled unless the chosen training task
+  explicitly needs them.
+- Return diagnostics including profile, seed, simulation time, step, selected
+  target, action result/reason, reward components, kills, cooldowns, active
+  effects, and the step's damage/death/respawn events.
+
+Exit gate:
+
+- `gymnasium.utils.env_checker.check_env` passes;
+- reset/step observations always match declared shape, dtype, and bounds;
+- termination and truncation are never conflated;
+- seeded episode replay produces byte-equal observations, rewards, and traces;
+- all existing repository tests remain green.
+
+### Phase 6 - Integrate training and offline data
+
+- Add an environment factory/CLI setting choosing `live`, `simulation`, or
+  `simulation-vector`; do not replace live imports ad hoc inside trainers.
+- Start PPO/DQN with one simulator and a short deterministic smoke run. Verify
+  reset, save, resume, inference, and evaluation before vectorization.
+- Add `SyncVectorEnv` first, then benchmark `AsyncVectorEnv`. Each instance owns
+  state, scheduler, RNG, trace buffer, and scenario objects.
+- Save environment ID, action schema version, observation schema version,
+  fidelity profile, reward profile, map hash, mechanics-manifest hash, and seed
+  in every checkpoint/run configuration.
+- Create a Minari dataset version for eight-action Mystic data. Migrate legacy BC
+  data only through the explicit movement-index remap and removal policy for
+  spell actions 5/6/7; publish the result under a new dataset ID.
+- Update evaluation to reject incompatible action/observation metadata before
+  loading weights.
+
+Exit gate:
+
+- one- and multi-environment training complete short seeded runs;
+- save/resume produces the same next transition as uninterrupted training;
+- no state or RNG leaks between vector environments;
+- incompatible legacy checkpoints/datasets fail early with a useful message;
+- throughput is measured as engine steps/second and end-to-end learner SPS.
+
+### Phase 7 - Validate fidelity, then optimize
+
+- Record live map-53 trajectories containing actions, timestamps, positions,
+  facing, HP/MP, nearest targets, NPC moves/attacks, spell results, deaths, and
+  respawns. Keep separate training and held-out traces.
+- Replay the same action sequence from matched state/seed fixtures and compare
+  each mechanic: target choice, movement, event time, resource cost, raw/final
+  damage, status ticks, death, and respawn.
+- Report divergence at the first mismatching event rather than comparing only
+  total episode return.
+- Validate the level-150 override against live Innie HP; if map 53 actually uses
+  the JSON cap 68, add a new profile and retain the old one for reproducibility.
+- Enable the parsed blocked layer only as `map53_blocked_v2`, with new movement
+  parity fixtures and no observation/action schema change.
+- Profile after correctness. Optimize nearest-entity queries, occupancy storage,
+  event allocation, and observation encoding only when measurements justify it.
+  Consider NumPy batching, Numba/Cython, or a C++ core only after the Python
+  reference passes parity tests.
+- Evaluate simulator-trained policies in live Mystic with exploration disabled;
+  feed discrepancies back into fixtures before limited live fine-tuning.
+
+Exit gate:
+
+- per-mechanic tolerances are defined and met on held-out traces;
+- deterministic regression fixtures remain unchanged across optimization;
+- performance meets the chosen vector-training workload without weakening
+  mechanics or silently changing RNG order.
 
 ## First implementation slice
 
-The smallest useful milestone is a movement-and-survival environment, not the
-full spell system:
+Build the first reviewable vertical slice in this order:
 
-1. Share/freeze actions and extract the pure observation encoder.
-2. Create state/config/engine modules with the 200 ms seeded clock.
-3. Load a simple 100 by 100 collision map and spawn one Innie.
-4. Implement cardinal movement, aggro radius 4, 0.9–1.1-second NPC pursuit,
-   aggro drop beyond 18, and configurable contact attacks.
-5. Add player HP/MP and 2-second regeneration.
-6. Return Mage-compatible observations and a simple versioned survival reward.
-7. Validate the Gym API, determinism, timing, and observation parity.
+1. Create `Mystic_Sim` with actions, frozen configuration, state dataclasses,
+   map loader, scenario builder, and pure observation encoder.
+2. Register `YugenSaga/MysticSim-v0`; implement reset only and make map/reset/
+   observation tests pass.
+3. Add the scheduler and movement actions. Implement NPC movement and aggro with
+   attacks temporarily emitting trace-only events.
+4. Port scaling and defensive combat, then turn trace-only NPC attacks into real
+   damage, death, and respawn.
+5. Implement Arcane Blast end to end. This exercises targeting, cooldowns,
+   resources, RNG, damage, rewards, and kills before AoE/effects add complexity.
+6. Add Acid Cloud and its timed effect, then Tempest Inferno and partial-radius
+   allocation.
+7. Connect `combat_reward_v1`, termination/truncation, structured `info`, and the
+   Gymnasium checker.
+8. Run a short single-environment PPO smoke test, then add vector environments
+   and benchmarking.
 
-This slice tests the architecture and enables throughput measurement while the
-missing damage, spell properties, and map data are collected. It avoids baking
-guesses into the combat model that the policy would later exploit.
+The first mergeable milestone ends after step 3: a deterministic 100x100 map-53
+environment with 80 non-overlapping Innies, seeded reset, the exact observation,
+four movement actions, source-shaped NPC pursuit/aggro, and a 200 ms event clock.
+The second milestone ends after step 5 and is the first useful combat-training
+environment. The third milestone completes all three spells and training
+integration.
+
+## Definition of done for `MysticSim-v0`
+
+- The environment runs headlessly with no socket, rendering, sleep, or hot-path
+  file writes.
+- Its public contract is `Discrete(8)` plus the versioned 26-value observation.
+- `map53.json` drives dimensions and all template-5300 spawn regions.
+- Reset, event scheduling, movement, target selection, combat, cooldowns,
+  effects, death, and respawn are deterministic for a seed.
+- The three spell translations and all source-derived formulas have numeric and
+  state-transition tests.
+- Occupancy collision is enforced; blocked terrain remains disabled by profile.
+- Gear is disabled cleanly and can later be enabled through configuration.
+- Five kills wins, player death loses, and 256 actions truncate.
+- Gymnasium validation and the repository test suite pass.
+- Checkpoints record enough schema/profile metadata to prevent incompatible
+  live, legacy-11-action, or higher-fidelity models from being mixed silently.
+- At least one live map-53 trace can be replayed with a per-event comparison
+  report, even if some tolerances remain provisional.

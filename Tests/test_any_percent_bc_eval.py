@@ -11,7 +11,7 @@ from Inference.any_percent_bc_eval import (
     Actor,
     PreparedDataset,
     discrete_bc_actions,
-    mage_action_from_bc_index,
+    mystic_action_from_bc_index,
     evaluate_dataset,
     load_actor,
     prepare_dataset,
@@ -34,7 +34,7 @@ class AnyPercentBCEvaluationTests(unittest.TestCase):
 
         np.testing.assert_array_equal(actions, [0, 0, 2, 10])
 
-    def test_bc_movement_order_translates_to_mage_order(self):
+    def test_bc_movement_order_translates_to_mystic_order(self):
         env = SimpleNamespace(
             Actions=[
                 "up",
@@ -51,9 +51,9 @@ class AnyPercentBCEvaluationTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(mage_action_from_bc_index(env, 1), 2)
-        self.assertEqual(mage_action_from_bc_index(env, 2), 3)
-        self.assertEqual(mage_action_from_bc_index(env, 3), 1)
+        self.assertEqual(mystic_action_from_bc_index(env, 1), 2)
+        self.assertEqual(mystic_action_from_bc_index(env, 2), 3)
+        self.assertEqual(mystic_action_from_bc_index(env, 3), 1)
 
     def test_prepare_dataset_selects_top_return_episodes(self):
         low_return = SimpleNamespace(
@@ -72,7 +72,7 @@ class AnyPercentBCEvaluationTests(unittest.TestCase):
             return_value=FakeDataset([low_return, high_return]),
         ):
             prepared = prepare_dataset(
-                "mage/test-v0",
+                "mystic/test-v0",
                 top_fraction=0.5,
                 gamma=0.99,
                 normalize_state=False,

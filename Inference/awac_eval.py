@@ -1,4 +1,4 @@
-"""Evaluate a discrete AWAC checkpoint against the live Mage game."""
+"""Evaluate a discrete AWAC checkpoint against the live Mystic game."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import numpy as np
 import torch
 import tyro
 
-from Custom_enviornments.Test_Env.Mage import Mage
-from Custom_enviornments.Test_Env.Mage_BC import BC_ACTIONS_11
+from Custom_enviornments.Test_Env.Mystic import Mystic
+from Custom_enviornments.Test_Env.Mystic_BC import BC_ACTIONS_11
 from Offline.awac import AWAC_MODEL_FILENAME, Actor
 from Utils.model_paths import inference_checkpoint_path
 
@@ -48,7 +48,7 @@ def load_actor(
 
     actions = list(checkpoint["actions"])
     if actions != list(BC_ACTIONS_11):
-        raise ValueError("AWAC checkpoint action ordering does not match Mage BC actions")
+        raise ValueError("AWAC checkpoint action ordering does not match Mystic BC actions")
     state_dim = int(checkpoint["state_dim"])
     action_dim = int(checkpoint["action_dim"])
     if action_dim != len(actions):
@@ -91,7 +91,7 @@ def select_action(
 
 
 def evaluate_live(
-    env: Mage,
+    env: Mystic,
     actor: Actor,
     state_mean: np.ndarray,
     state_std: np.ndarray,
@@ -157,8 +157,8 @@ def main() -> None:
     actor, state_mean, state_std, actions = load_actor(checkpoint_path, device)
     print(f"device={device}")
     print(f"checkpoint={checkpoint_path}")
-    print("Initializing Mage; waiting for the first game ai_tick...")
-    env = Mage(actions=actions)
+    print("Initializing Mystic; waiting for the first game ai_tick...")
+    env = Mystic(actions=actions)
     try:
         evaluate_live(
             env,

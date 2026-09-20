@@ -105,7 +105,7 @@ not control manually launched trainers/recorders or another checkout. Stop
 those before running a sweep. After a force-killed runner, check the PID in
 the lock and clean up its processes before manually removing that stale lock.
 
-The runner uses the existing Mage reset/step protocol. It does not add game
+The runner uses the existing Mystic reset/step protocol. It does not add game
 seeding, verified post-reset observations, or deterministic world resets.
 Python seeds seed training/policy sampling only. Confirm consistent game
 conditions before interpreting comparisons. Evaluation is deterministic by
