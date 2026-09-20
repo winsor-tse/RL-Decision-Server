@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from Custom_enviornments.Test_Env.Env_16_BC import BC_ACTIONS_11
+from Custom_enviornments.Test_Env.Mage_BC import BC_ACTIONS_11
 from Inference.awac_eval import evaluate_live, load_actor, select_action
 from Offline.awac import Actor
 

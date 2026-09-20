@@ -46,7 +46,7 @@ class AnyPercentBCTrainingTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             config = TrainConfig(
-                dataset_id="env16/BC-v0",
+                dataset_id="mage/BC-v0",
                 update_steps=2,
                 buffer_size=8,
                 batch_size=2,

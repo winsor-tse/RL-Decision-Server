@@ -7,7 +7,7 @@ import random
 import numpy as np
 import torch
 
-from Custom_enviornments.Test_Env.Env_16 import Env16
+from Custom_enviornments.Test_Env.Mage import Mage
 from Sweeps.runner import write_json
 
 
@@ -23,13 +23,13 @@ def main():
     args = parser.parse_args()
     if args.episodes <= 0:
         parser.error("episodes must be positive")
-    # Controls policy sampling only. Env16 does not seed the external game.
+    # Controls policy sampling only. Mage does not seed the external game.
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     evaluator = import_module(f"Inference.{args.algorithm}_eval")
     device = torch.device("cuda" if not args.cpu and torch.cuda.is_available() else "cpu")
-    env = Env16()
+    env = Mage()
     try:
         model = evaluator.Agent(env).to(device)
         model.load_state_dict(torch.load(args.checkpoint, map_location=device, weights_only=True))

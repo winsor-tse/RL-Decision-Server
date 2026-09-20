@@ -31,7 +31,7 @@ ACTIONS_11 = [
 
 # This action space is specific to Test_Env.
 # A different game class should define its own env file and action list.
-class Env16(BaseEnv):
+class Mage(BaseEnv):
     """Yugen Saga environment with the current 11-action discrete action space."""
 
     def __init__(self, *, actions=None, config=None, socket=None):
@@ -72,7 +72,7 @@ class Env16(BaseEnv):
     def step(self, action):
         action_idx = self._normalize_action(action)
         if action_idx < 0 or action_idx >= len(self.Actions):
-            raise ValueError(f"Action index {action_idx} is outside Env_16.")
+            raise ValueError(f"Action index {action_idx} is outside Mage.")
 
         message = self.socket.recv_json()
         world_state = message.get("worldState", {})
@@ -94,7 +94,7 @@ class Env16(BaseEnv):
         *,
         parsed_next_state=None,
     ):
-        """Apply Env16 reward and episode rules to one received world state."""
+        """Apply Mage reward and episode rules to one received world state."""
         self.current_step += 1
         real_next_state = parsed_next_state
         if real_next_state is None:

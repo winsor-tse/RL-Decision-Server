@@ -1,6 +1,6 @@
-"""Human-demonstration variant of :mod:`Env_16` for Minari collection.
+"""Human-demonstration variant of :mod:`Mage` for Minari collection.
 
-``Env16BC`` never sends the captured player action back to the game. Every
+``MageBC`` never sends the captured player action back to the game. Every
 ZeroMQ tick receives a ``NoOp`` response; valid keyboard actions are only used
 as labels in the offline dataset. Ticks without a mapped key are acknowledged
 but are not exposed as Gym steps, except when they finish the preceding valid
@@ -17,15 +17,15 @@ from gymnasium.envs.registration import EnvSpec
 
 from Custom_enviornments.BaseEnv import BaseEnv
 from Custom_enviornments.Test_Env import Env_conditions
-from Custom_enviornments.Test_Env.Env_16 import Env16
+from Custom_enviornments.Test_Env.Mage import Mage
 from Offline.record_player import WindowsInputCapture
 
 
 LOGGER = logging.getLogger(__name__)
-ENV16_BC_ENV_ID = "YugenSaga/Env16BC-v0"
+MAGE_BC_ENV_ID = "YugenSaga/MageBC-v0"
 
 # This order intentionally follows the indices requested for the BC dataset.
-# It is separate from Env_16.ACTIONS_11, whose movement order is
+# It is separate from Mage.ACTIONS_11, whose movement order is
 # [up, down, left, right].
 BC_ACTIONS_11 = [
     "up",
@@ -121,8 +121,8 @@ def action_from_input(player_input: dict[str, Any]) -> tuple[int, str] | None:
     return None
 
 
-class Env16BC(Env16):
-    """Env16 reward/state logic with human actions and no-op game replies."""
+class MageBC(Mage):
+    """Mage reward/state logic with human actions and no-op game replies."""
 
     metadata = {"render_modes": []}
 
@@ -138,9 +138,9 @@ class Env16BC(Env16):
         # Directly constructed custom envs normally have spec=None. Providing
         # one lets Minari retain enough metadata to recover this environment.
         self.spec = EnvSpec(
-            id=ENV16_BC_ENV_ID,
+            id=MAGE_BC_ENV_ID,
             entry_point=(
-                "Custom_enviornments.Test_Env.Env_16_BC:Env16BC"
+                "Custom_enviornments.Test_Env.Mage_BC:MageBC"
             ),
             max_episode_steps=int(self.config["MAX_EPISODE_STEPS"]),
         )
@@ -234,7 +234,7 @@ class Env16BC(Env16):
         }
 
     def reset(self, seed=None, options=None):
-        # Bypass Env16.reset because it sends direction:up and does not capture
+        # Bypass Mage.reset because it sends direction:up and does not capture
         # a human action for the returned initial observation.
         BaseEnv.reset(self, seed=seed, options=options)
         self.input_capture.reset()
@@ -262,9 +262,9 @@ class Env16BC(Env16):
     def step(self, action):
         action_idx = self._normalize_action(action)
         if action_idx < 0 or action_idx >= len(self.Actions):
-            raise ValueError(f"Action index {action_idx} is outside Env16BC.")
+            raise ValueError(f"Action index {action_idx} is outside MageBC.")
         if self._pending_action is None:
-            raise RuntimeError("Call reset() before stepping Env16BC.")
+            raise RuntimeError("Call reset() before stepping MageBC.")
         if action_idx != self._pending_action:
             raise ValueError(
                 f"Expected captured action {self._pending_action}, got {action_idx}."

@@ -13,7 +13,7 @@ import tyro
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
-from Custom_enviornments.Test_Env.Env_16 import Env16
+from Custom_enviornments.Test_Env.Mage import Mage
 from Training.ppo_metrics import log_step_metrics
 from Utils.model_paths import training_checkpoint_path
 from Utils.ppo_checkpoint import (
@@ -138,7 +138,7 @@ def create_run_paths(
 ) -> tuple[str, Path, Path]:
     """Create one run directory and resolve its PyTorch checkpoint path."""
     run_timestamp = int(time.time()) if timestamp is None else timestamp
-    run_name = f"Env16__{args.exp_name}__{args.seed}__{run_timestamp}"
+    run_name = f"Mage__{args.exp_name}__{args.seed}__{run_timestamp}"
     run_directory = Path(runs_directory) / run_name
     checkpoint_path = training_checkpoint_path(
         run_directory,
@@ -231,7 +231,7 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     # env setup
-    envs = Env16()
+    envs = Mage()
 
     agent = Agent(envs).to(device)
     if args.restore_model_path:
@@ -532,7 +532,7 @@ if __name__ == "__main__":
                     "action_counts": torch.as_tensor(action_counts),
                 },
                 metadata={
-                    "environment": "Env16",
+                    "environment": "Mage",
                     "observation_shape": list(envs.single_observation_space.shape),
                     "action_names": list(envs.Actions),
                     "architecture": "feedforward_actor_critic",

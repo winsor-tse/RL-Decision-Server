@@ -1,7 +1,7 @@
 """Evaluate an any-percent behavior-cloning checkpoint.
 
 Dataset mode compares checkpoint predictions with recorded Minari actions.
-Live mode runs the same policy against ``Env16`` and is intended to be started
+Live mode runs the same policy against ``Mage`` and is intended to be started
 through ``RunOfflineRL.ps1`` so the WebSocket bridge is supervised alongside
 the evaluator.
 """
@@ -18,11 +18,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from Custom_enviornments.Test_Env.Env_16 import Env16
-from Custom_enviornments.Test_Env.Env_16_BC import BC_ACTIONS_11
+from Custom_enviornments.Test_Env.Mage import Mage
+from Custom_enviornments.Test_Env.Mage_BC import BC_ACTIONS_11
 
 
-DEFAULT_DATASET_ID = "env16/BC-v0"
+DEFAULT_DATASET_ID = "mage/BC-v0"
 
 
 class Actor(nn.Module):
@@ -155,7 +155,7 @@ def predict_actions(
 
 
 def discrete_bc_actions(predictions: np.ndarray) -> np.ndarray:
-    """Round scalar BC outputs to valid Env16BC action indices."""
+    """Round scalar BC outputs to valid MageBC action indices."""
 
     return np.clip(
         np.rint(predictions),
@@ -210,22 +210,22 @@ def evaluate_dataset(
     return mse, accuracy
 
 
-def env16_action_from_bc_index(env: Env16, bc_action: int) -> int:
-    """Translate Env16BC's action ordering into Env16's action ordering."""
+def mage_action_from_bc_index(env: Mage, bc_action: int) -> int:
+    """Translate MageBC's action ordering into Mage's action ordering."""
 
     action_name = BC_ACTIONS_11[bc_action]
     return env.Actions.index(action_name)
 
 
 def evaluate_live(
-    env: Env16,
+    env: Mage,
     actor: Actor,
     prepared: PreparedDataset,
     *,
     eval_episodes: int,
     device: torch.device,
 ) -> tuple[list[float], int]:
-    """Run a BC checkpoint against the live Env16 game stream."""
+    """Run a BC checkpoint against the live Mage game stream."""
 
     if eval_episodes <= 0:
         raise ValueError("eval_episodes must be greater than zero.")
@@ -247,7 +247,7 @@ def evaluate_live(
                 device,
             )
             bc_action = int(discrete_bc_actions(prediction)[0])
-            env_action = env16_action_from_bc_index(env, bc_action)
+            env_action = mage_action_from_bc_index(env, bc_action)
             observation, reward, terminated, truncated, info = env.step(
                 env_action
             )
@@ -327,7 +327,7 @@ def main(argv: list[str] | None = None) -> int:
         evaluate_dataset(actor, prepared, device, output_csv)
         return 0
 
-    env = Env16()
+    env = Mage()
     try:
         evaluate_live(
             env,

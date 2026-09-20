@@ -16,7 +16,7 @@ move, attack, spend mana, activate cooldowns, or implement enemy AI. It cannot
 train useful combat behavior yet. Read state through `GetState()`; returned
 references are live views, not snapshots.
 
-Action IDs match `Custom_enviornments/Test_Env/Env_16.py`: 0..3 are up, down,
+Action IDs match `Custom_enviornments/Test_Env/Mage.py`: 0..3 are up, down,
 left, right; 4 is attack; 5..10 are spell slots 1, 2, 3, 5, 6, 7. Cooldown array
 indices are separate: 0 is attack and 1..7 are spell slots. A successful cast
 at step t should set `ready_at_step = t + duration_steps`; it becomes available

@@ -33,7 +33,7 @@ class FakeRecurrentAgent(nn.Module):
         return observation, next_lstm_state
 
 
-class FakeEnv16:
+class FakeMage:
     def __init__(self):
         self.actions = []
         self.episode_step = 0
@@ -81,8 +81,8 @@ class PPOLSTMEvaluationTests(unittest.TestCase):
         self.assertEqual(action, 1)
         self.assertTrue(torch.equal(next_state[0], torch.ones(1, 1, 2)))
 
-    def test_evaluate_resets_lstm_state_between_env16_episodes(self):
-        env = FakeEnv16()
+    def test_evaluate_resets_lstm_state_between_mage_episodes(self):
+        env = FakeMage()
         model = FakeRecurrentAgent()
 
         episodic_returns, wins = evaluate(

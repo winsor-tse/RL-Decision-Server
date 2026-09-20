@@ -68,7 +68,7 @@ To record valid human actions as a Minari behavior-cloning dataset instead of
 raw SQLite frames, run:
 
 ```powershell
-.\RunRecorder.ps1 -Command "python -m Offline.record_minari --dataset-id env16/BC-v0 --max-steps 500"
+.\RunRecorder.ps1 -Command "python -m Offline.record_minari --dataset-id mage/BC-v0 --max-steps 500"
 ```
 
 Choose a new `-vN` suffix if that dataset already exists. The default Minari
@@ -81,7 +81,7 @@ Evaluate an any-percent behavior-cloning checkpoint against its dataset with:
 ```powershell
 .\RunOfflineRL.ps1 -Mode Dataset `
   -CheckpointPath "runs\bc-example\BC_model.pt" `
-  -DatasetId "env16/BC-v0"
+  -DatasetId "mage/BC-v0"
 ```
 
 Use `-Mode Live` to start the bridge and evaluate the same checkpoint against
@@ -93,7 +93,7 @@ Train a BC model directly from the local Minari dataset with:
 
 ```powershell
 .\RunOfflineRL.ps1 -Mode Train `
-  -DatasetId "env16/BC-v0" `
+  -DatasetId "mage/BC-v0" `
   -TopFraction 1.0 `
   -CheckpointsPath "runs"
 ```
@@ -114,14 +114,14 @@ Run these from the repo root:
 
 ```bash
 python -m compileall Custom_enviornments Utils Training Inference Automation Tests
-python -c "from Custom_enviornments.Test_Env import Env_16; print(Env_16.Env16.__name__)"
+python -c "from Custom_enviornments.Test_Env import Mage; print(Mage.Mage.__name__)"
 python -m unittest discover -s Tests -p "test_*.py"
 ```
 
 Expected output includes:
 
 ```text
-Env16
+Mage
 ```
 
 ### Check NVIDIA/PyTorch compatibility
@@ -210,7 +210,7 @@ python -m Training.PPO_lstm_server
 The active env is:
 
 ```text
-Custom_enviornments/Test_Env/Env_16.py
+Custom_enviornments/Test_Env/Mage.py
 ```
 
 The active env conditions are:
@@ -229,7 +229,7 @@ Open http://localhost:6006.
 
 ## 11. Evaluate A Checkpoint
 
-Evaluate recurrent PPO on the custom `Env16` environment:
+Evaluate recurrent PPO on the custom `Mage` environment:
 
 ```bash
 python -m Inference.ppo_lstm_eval

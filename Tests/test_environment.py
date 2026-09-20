@@ -4,7 +4,7 @@ import numpy as np
 
 from Custom_enviornments.Load_env_config import load_env_config
 from Custom_enviornments.Test_Env import Env_conditions
-from Custom_enviornments.Test_Env.Env_16 import ACTIONS_11, Env16
+from Custom_enviornments.Test_Env.Mage import ACTIONS_11, Mage
 
 
 def make_world_state(
@@ -59,7 +59,7 @@ class EnvironmentCorrectnessTests(unittest.TestCase):
 
     def test_normal_step_returns_boolean_termination_flags(self):
         world_state = make_world_state()
-        env = Env16.__new__(Env16)
+        env = Mage.__new__(Mage)
         env.Actions = list(ACTIONS_11)
         env.config = load_env_config()
         env.socket = FakeSocket(
@@ -92,7 +92,7 @@ class EnvironmentCorrectnessTests(unittest.TestCase):
 
         self.assertTrue(Env_conditions.is_episode_loss(death_state, previous))
 
-        env = Env16.__new__(Env16)
+        env = Mage.__new__(Mage)
         env.Actions = list(ACTIONS_11)
         env.config = load_env_config()
         env.socket = FakeSocket(
@@ -239,7 +239,7 @@ class EnvironmentCorrectnessTests(unittest.TestCase):
     def test_step_stores_the_true_next_entity_state(self):
         previous_world = make_world_state(enemy_id=1, enemy_hp=100)
         current_world = make_world_state(enemy_id=1, enemy_hp=25)
-        env = Env16.__new__(Env16)
+        env = Mage.__new__(Mage)
         env.Actions = list(ACTIONS_11)
         env.config = load_env_config()
         env.socket = FakeSocket(

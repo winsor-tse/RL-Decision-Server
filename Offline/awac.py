@@ -1,4 +1,4 @@
-"""Discrete AWAC for Env16, using local BC-Minari demonstrations."""
+"""Discrete AWAC for Mage, using local BC-Minari demonstrations."""
 
 import os
 import random
@@ -18,8 +18,8 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import trange
 
 from Custom_enviornments.Load_env_config import load_env_config
-from Custom_enviornments.Test_Env.Env_16 import Env16
-from Custom_enviornments.Test_Env.Env_16_BC import BC_ACTIONS_11
+from Custom_enviornments.Test_Env.Mage import Mage
+from Custom_enviornments.Test_Env.Mage_BC import BC_ACTIONS_11
 
 TensorBatch = List[torch.Tensor]
 AWAC_MODEL_FILENAME = "AWAC_model.pt"
@@ -28,7 +28,7 @@ AWAC_MODEL_FILENAME = "AWAC_model.pt"
 @dataclass
 class TrainConfig:
     name: str = "AWAC"
-    dataset_id: str = "env16/BC-v0"  # Local BC-Minari dataset, as in any_percent_bc.
+    dataset_id: str = "mage/BC-v0"  # Local BC-Minari dataset, as in any_percent_bc.
     checkpoints_path: str = "runs"
     seed: int = 42
     deterministic_torch: bool = False
@@ -61,7 +61,7 @@ class TrainConfig:
 def qlearning_dataset(dataset) -> Dict[str, np.ndarray]:
     """Keep all demonstrations and bootstrap across time-limit truncations."""
     if not isinstance(dataset.action_space, gym.spaces.Discrete):
-        raise ValueError("Env16 requires a discrete Minari action space")
+        raise ValueError("Mage requires a discrete Minari action space")
     if dataset.action_space.n != len(BC_ACTIONS_11) or dataset.action_space.start != 0:
         raise ValueError("Dataset must use the 11 zero-based BC action indices")
     fields = {key: [] for key in
@@ -73,7 +73,7 @@ def qlearning_dataset(dataset) -> Dict[str, np.ndarray]:
             continue
         obs = np.asarray(episode.observations, dtype=np.float32)
         if obs.shape != (len(actions) + 1, obs_size):
-            raise ValueError(f"Expected Env16 observations shaped (N+1, {obs_size}); got {obs.shape}")
+            raise ValueError(f"Expected Mage observations shaped (N+1, {obs_size}); got {obs.shape}")
         if actions.shape != (len(actions),) or not np.all(
             np.isfinite(actions) & (actions == np.floor(actions))
             & (actions >= 0) & (actions < len(BC_ACTIONS_11))
@@ -355,7 +355,7 @@ def train(config: TrainConfig):
     np.random.seed(config.seed)
     torch.manual_seed(config.seed)
     torch.use_deterministic_algorithms(config.deterministic_torch)
-    # Loading metadata/data never recovers Env16BC or opens a live game socket.
+    # Loading metadata/data never recovers MageBC or opens a live game socket.
     dataset = minari.load_dataset(config.dataset_id, download=False)
     data = qlearning_dataset(dataset)
     state_dim = data["observations"].shape[1]
@@ -398,9 +398,9 @@ def train(config: TrainConfig):
         episode_return, episode_length = 0.0, 0
         for step in trange(config.offline_iterations + config.online_iterations):
             if step == config.offline_iterations:
-                print("Online fine-tuning in Env16 (waiting for game ticks)")
+                print("Online fine-tuning in Mage (waiting for game ticks)")
                 # Match recorded labels: up, left, right, down, ...
-                env = Env16(actions=BC_ACTIONS_11)
+                env = Mage(actions=BC_ACTIONS_11)
                 raw_state, _ = env.reset(seed=config.seed)
                 state = (raw_state - mean) / std
             if step >= config.offline_iterations:

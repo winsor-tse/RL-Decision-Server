@@ -4,7 +4,7 @@ param(
     [ValidateSet("BC", "AWAC")]
     [string]$Algorithm = "BC",
     [string]$CheckpointPath = "",
-    [string]$DatasetId = "env16/BC-v0",
+    [string]$DatasetId = "mage/BC-v0",
     [int]$EvalEpisodes = 5,
     [int]$UpdateSteps = 1000000,
     [int]$OnlineIterations = 0,

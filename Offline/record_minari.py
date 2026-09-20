@@ -1,4 +1,4 @@
-"""Record live human demonstrations as a Minari Env16BC dataset."""
+"""Record live human demonstrations as a Minari MageBC dataset."""
 
 from __future__ import annotations
 
@@ -17,11 +17,11 @@ import minari
 from minari.dataset.minari_dataset import parse_dataset_id
 from minari.storage.datasets_root_dir import get_dataset_path
 
-from Custom_enviornments.Test_Env.Env_16_BC import Env16BC
+from Custom_enviornments.Test_Env.Mage_BC import MageBC
 from Offline.record_player import parse_no_op_action
 
 
-DEFAULT_DATASET_ID = "env16/BC-v0"
+DEFAULT_DATASET_ID = "mage/BC-v0"
 DEFAULT_MAX_STEPS = 500
 
 
@@ -71,7 +71,7 @@ def _save_collector(
                 algorithm_name="human behavior cloning demonstrations",
                 author=author,
                 description=(
-                    "Human Yugen Saga demonstrations recorded with Env16BC. "
+                    "Human Yugen Saga demonstrations recorded with MageBC. "
                     "The game received NoOp responses; only mapped keyboard "
                     "actions were included."
                 ),
@@ -106,7 +106,7 @@ def _observation_text(observation: Any) -> str:
 def _collect_and_save(
     *,
     collector: minari.DataCollector,
-    base_env: Env16BC,
+    base_env: MageBC,
     dataset_id: str,
     max_steps: int,
     author: str,
@@ -181,11 +181,11 @@ def record_minari_dataset(
     max_steps: int = DEFAULT_MAX_STEPS,
     no_op_action: Any = "NoOp",
     author: str = "Yugen Saga player",
-    raw_env: Env16BC | None = None,
+    raw_env: MageBC | None = None,
 ):
     """Collect at most ``max_steps`` valid human actions and save a dataset.
 
-    Invalid-key ticks are serviced inside :class:`Env16BC` and never become
+    Invalid-key ticks are serviced inside :class:`MageBC` and never become
     actions. Keyless death/truncation ticks may complete the preceding valid
     action. Every episode boundary is persisted immediately, and a partial
     final episode is flushed as truncated when collection stops or Ctrl+C is
@@ -200,11 +200,11 @@ def record_minari_dataset(
     if destination.exists():
         raise FileExistsError(
             f"Minari dataset {dataset_id!r} already exists at {destination}. "
-            "Choose a new version, for example env16/BC-v1."
+            "Choose a new version, for example mage/BC-v1."
         )
 
     base_env = (
-        raw_env if raw_env is not None else Env16BC(no_op_action=no_op_action)
+        raw_env if raw_env is not None else MageBC(no_op_action=no_op_action)
     )
     collector = minari.DataCollector(base_env, record_infos=True)
     try:
@@ -221,7 +221,7 @@ def record_minari_dataset(
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Record valid human Env16 actions into a Minari dataset."
+        description="Record valid human Mage actions into a Minari dataset."
     )
     parser.add_argument(
         "--dataset-id",

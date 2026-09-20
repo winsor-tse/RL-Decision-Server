@@ -67,7 +67,7 @@ Resume that same run using the training checkpoint printed by the trainer:
 
 ```powershell
 .\RunRL.ps1 `
-  -ResumeCheckpointPath "runs\Env16__PPO_lstm_server__1__1234\PPO_lstm_server_training.pt"
+  -ResumeCheckpointPath "runs\Mage__PPO_lstm_server__1__1234\PPO_lstm_server_training.pt"
 ```
 
 For feed-forward PPO, use `PPO_server_training.pt` instead. A normal inference
@@ -179,11 +179,11 @@ Record valid player actions into a local Minari dataset:
 
 ```powershell
 .\RunRecorder.ps1 `
-  -Command "python -m Offline.record_minari --dataset-id env16/BC-v0 --max-steps 500"
+  -Command "python -m Offline.record_minari --dataset-id mage/BC-v0 --max-steps 500"
 ```
 
 Minari dataset IDs are versioned and cannot be overwritten. Use a new suffix,
-such as `env16/BC-v1`, for another dataset.
+such as `mage/BC-v1`, for another dataset.
 
 ## `RunOfflineRL.ps1`
 
@@ -226,7 +226,7 @@ the bridge. BC live evaluation and AWAC training with positive
 | `-Mode` | `Train` | All | Selects training, dataset evaluation, or live evaluation. |
 | `-Algorithm` | `BC` | All | Selects `BC` or `AWAC`; AWAC Dataset mode is unsupported. |
 | `-CheckpointPath` | Empty | Dataset, Live | Required path to the selected algorithm's model checkpoint. |
-| `-DatasetId` | `env16/BC-v0` | All | Local Minari dataset ID. |
+| `-DatasetId` | `mage/BC-v0` | All | Local Minari dataset ID. |
 | `-EvalEpisodes` | `5` | Live | Number of live evaluation episodes. |
 | `-UpdateSteps` | `1000000` | Train | Offline gradient updates; maps to AWAC's `--offline-iterations`. |
 | `-OnlineIterations` | `0` | AWAC Train | Live fine-tuning updates after offline training; positive values enable the bridge. |
@@ -252,7 +252,7 @@ Train on every episode in the dataset:
 
 ```powershell
 .\RunOfflineRL.ps1 -Mode Train `
-  -DatasetId "env16/BC-v0" `
+  -DatasetId "mage/BC-v0" `
   -TopFraction 1.0 `
   -UpdateSteps 1000000 `
   -BatchSize 256 `
@@ -264,7 +264,7 @@ Short training run:
 
 ```powershell
 .\RunOfflineRL.ps1 -Mode Train `
-  -DatasetId "env16/BC-v0" `
+  -DatasetId "mage/BC-v0" `
   -UpdateSteps 10000 `
   -EvalEvery 1000
 ```
@@ -286,7 +286,7 @@ Train on the same local BC-Minari dataset:
 
 ```powershell
 .\RunOfflineRL.ps1 -Algorithm AWAC -Mode Train `
-  -DatasetId "env16/BC-v0" `
+  -DatasetId "mage/BC-v0" `
   -UpdateSteps 1000000 `
   -BatchSize 256 `
   -Device auto `
@@ -303,7 +303,7 @@ Train offline, then fine-tune against the live game:
 
 ```powershell
 .\RunOfflineRL.ps1 -Algorithm AWAC -Mode Train `
-  -DatasetId "env16/BC-v0" `
+  -DatasetId "mage/BC-v0" `
   -UpdateSteps 100000 `
   -OnlineIterations 100000 `
   -BatchSize 256 `
@@ -347,7 +347,7 @@ game must be connected before evaluation can progress.
 
 ```powershell
 .\RunOfflineRL.ps1 -Mode Dataset `
-  -DatasetId "env16/BC-v0" `
+  -DatasetId "mage/BC-v0" `
   -CheckpointPath "runs\bc-BC-v0-a1b2c3d4\BC_model.pt"
 ```
 
@@ -355,7 +355,7 @@ Choose the prediction CSV path:
 
 ```powershell
 .\RunOfflineRL.ps1 -Mode Dataset `
-  -DatasetId "env16/BC-v0" `
+  -DatasetId "mage/BC-v0" `
   -CheckpointPath "runs\bc-BC-v0-a1b2c3d4\BC_model.pt" `
   -OutputCsv "reports\bc_predictions.csv"
 ```
@@ -364,7 +364,7 @@ Choose the prediction CSV path:
 
 ```powershell
 .\RunOfflineRL.ps1 -Mode Live `
-  -DatasetId "env16/BC-v0" `
+  -DatasetId "mage/BC-v0" `
   -CheckpointPath "runs\bc-BC-v0-a1b2c3d4\BC_model.pt" `
   -EvalEpisodes 5 `
   -Device auto

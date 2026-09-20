@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import tyro
 
-from Custom_enviornments.Test_Env.Env_16 import Env16
+from Custom_enviornments.Test_Env.Mage import Mage
 from Training.PPO_server import Agent
 from Utils.model_paths import inference_checkpoint_path
 
@@ -100,8 +100,8 @@ def main() -> None:
         "PPO_server.pt",
     )
 
-    print("Initializing Custom_enviornments.Test_Env.Env_16.Env16...")
-    env = Env16()
+    print("Initializing Custom_enviornments.Test_Env.Mage.Mage...")
+    env = Mage()
     try:
         print(f"Loading model from {model_path}...")
         model = Agent(env).to(device)
