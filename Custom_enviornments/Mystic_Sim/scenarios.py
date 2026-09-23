@@ -1,5 +1,6 @@
 """Seeded reset construction, with explicit RNG consumption order."""
 from .state import MonsterState, PlayerState, WorldState
+from .scaled_calcs import scale_innie
 
 
 def sample_unoccupied(rng, x, y, width, height, occupancy):
@@ -14,6 +15,7 @@ def sample_unoccupied(rng, x, y, width, height, occupancy):
 
 
 def build_scenario(map_definition, config, rng):
+    innie = scale_innie(config.innie)
     if (map_definition.map_id, map_definition.width, map_definition.height) != (
             config.map_id, config.width, config.height):
         raise ValueError("Map dimensions/ID do not match scenario configuration")
@@ -34,9 +36,9 @@ def build_scenario(map_definition, config, rng):
             x, y = sample_unoccupied(rng, box.x, box.y, box.width, box.height, occupancy)
             # Exactly one movement draw after placement for each new life.
             movement_ms = int(rng.integers(config.innie.move_ms[0], config.innie.move_ms[1] + 1))
-            monster = MonsterState(entity_id, x, y, config.innie.max_hp, config.innie.max_mp,
-                                   config.innie, box, member, movement_ms, movement_ms,
-                                   config.innie.attack_ms, config.innie.aggro_check_ms,
+            monster = MonsterState(entity_id, x, y, innie.max_hp, innie.max_mp,
+                                   innie, box, member, movement_ms, movement_ms,
+                                   innie.attack_ms, innie.aggro_check_ms,
                                    spawn_x=x, spawn_y=y)
             world.monsters[entity_id] = monster
             occupancy[(x, y)] = entity_id

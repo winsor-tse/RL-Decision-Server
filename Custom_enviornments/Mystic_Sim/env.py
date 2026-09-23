@@ -1,6 +1,7 @@
 """Headless Gym environment with seeded reset and Phase 2 movement steps."""
 import gymnasium as gym
 import numpy as np
+from dataclasses import asdict
 
 from .actions import ACTIONS, contract_metadata
 from .config import ScenarioConfig
@@ -57,6 +58,10 @@ class MysticSimEnv(gym.Env):
             "npc_effective_level_override": self.config.innie.effective_level,
             "scheduled_event_count": len(self.world.events),
             "contract": contract_metadata(),
+            "regeneration": {"enabled": self.config.timing.regen_enabled,
+                             "interval_ms": self.config.timing.regen_ms,
+                             "hp_per_second_override": self.config.player.hp_regen_override,
+                             "mp_per_second_override": self.config.player.mp_regen_override},
         }
         return encode_observation(self.world), info
 
@@ -71,7 +76,10 @@ class MysticSimEnv(gym.Env):
                 "profile": self.config.profile, "action_applied": applied,
                 "action_failure_reason": reason, "kills": self.world.kills,
                 "selected_entity_ids": [m.entity_id for m in nearest_monsters(self.world)],
-                "combat_implemented": False, "reward_implemented": False,
+                "combat_implemented": True, "reward_implemented": False,
+                "damage_events": [asdict(e) for e in self.engine.damage_events],
+                "death_events": [asdict(e) for e in self.engine.death_events],
+                "respawn_events": [asdict(e) for e in self.engine.respawn_events],
                 "episode_outcome": "loss" if not self.world.player.alive else
                     "win" if terminated else "truncated" if truncated else None}
         if self.trace_enabled:

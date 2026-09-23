@@ -229,6 +229,18 @@ parameters:
     value: 2000
     provenance: source
     source: TimeFrame_Other_Details.txt
+  regen_enabled:
+    value: true
+    provenance: simulator_rule
+    source: User requested toggleable regeneration
+  hp_regen_per_second:
+    value: 113.0
+    provenance: developer
+    source: User correction of 226 HP every 2 seconds
+  mp_regen_per_second:
+    value: 832.0
+    provenance: developer
+    source: User correction of 1664 MP every 2 seconds
   spawn_distribution:
     value: uniform integer cells
     provenance: simulator_rule

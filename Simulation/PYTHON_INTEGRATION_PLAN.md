@@ -804,9 +804,9 @@ Exit gate:
 Implemented: absolute-time heap dispatch, stable ties, cancellation/generation
 checks, loop guard, 200 ms movement steps, source-ordered pursuit RNG, occupancy,
 facing and timer behavior, idle/spawn return, radius and damage aggro hooks,
-player-move acquisition, and optional per-step in-memory traces. Attack,
-regeneration, effect, and respawn events currently provide timing notifications;
-gameplay mutations remain Phase 3/4 work. Step reward is zero until reward work.
+player-move acquisition, and optional per-step in-memory traces. Phase 3 now adds
+attack, regeneration, death, and respawn mutations; effect damage remains Phase 4
+work. Step reward is zero until reward work.
 The README records provisional Timer.Reset semantics, 200 ms expired-timer
 polling, 1500 ms aggro rescheduling, and tick-before-expiry policy. These are
 explicit simulator conventions where complete server scheduling is unavailable.
@@ -843,6 +843,19 @@ Exit gate:
 
 ### Phase 3 - Port scaling, combat, death, and respawn
 
+Implemented in `scaled_calcs.py`, `combat.py`, and the event engine. Structured
+damage/death/respawn records are exposed in step info. Python unit tests in
+`Tests/test_mystic_sim_combat.py` validate numerical expectations, controlled RNG
+branches, event cancellation, death cleanup, respawn placement and retries,
+optional gear, and regeneration. Validation does not require executing the
+partial C# files or building a standalone C# project.
+
+Regeneration is toggleable with `TimingConfig.regen_enabled`. The corrected
+default restores 226 HP and 1664 MP every 2000 ms, capped at maxima. Internally
+these are per-second rates of 113 HP and 832 MP. Both rates
+and the interval are configurable. Set an override to `None` and supply the
+corresponding base stat to use the formula-derived per-second rate instead.
+
 - Translate `ScaledCalcs` and `NPCRecursiveDmg` literally. Preserve lookup
   growth, recurrence order, floating-point operations, and C# casts to `long`.
 - Verify levels 135, 149, 150, and 151, including HP 274,599 for effective level
@@ -866,10 +879,12 @@ Exit gate:
 
 Exit gate:
 
-- numeric formula goldens match independently calculated C# results;
+- Python unit tests match saved numeric expectations at the specified levels
+  and formula boundaries, without compiling or executing C#;
 - normal, dodge, block, crit, mitigation, lethal, and already-dead cases pass;
 - NPCs cannot attack diagonally at radius 1;
-- regeneration occurs at exactly 2,000 ms and clamps to maxima;
+- regeneration occurs at exactly 2,000 ms by default, scales per-second rates
+  with the configured interval, clamps to maxima, and respects its enable toggle;
 - death frees occupancy and respawn restores a legal, fully initialized entity;
 - RNG trace tests lock draw endpoints and draw order.
 

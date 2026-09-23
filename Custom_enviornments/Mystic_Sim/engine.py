@@ -5,6 +5,8 @@ from .movement import OFFSETS, SERVER_DIRECTIONS, legal_move, next_step_basic, o
 from .observation import direction_from_delta, euclidean_distance
 from .scheduler import Scheduler
 from .state import Direction
+from .state import PlayerState, DamageEvent, DeathEvent, RespawnEvent
+from . import combat
 
 
 class TracedRng:
@@ -26,6 +28,9 @@ class Engine:
         self.world, self.config = world, config
         self.trace_enabled = trace
         self.trace = []
+        self.damage_events = []
+        self.death_events = []
+        self.respawn_events = []
         self.scheduler = Scheduler(world)
         self.rng = TracedRng(rng, self.emit)
         self.pending_npc = {e.entity_id: e.sequence for e in world.events if e.kind == "npc_update"}
@@ -33,6 +38,132 @@ class Engine:
     def emit(self, kind, entity_id=None, **fields):
         if self.trace_enabled:
             self.trace.append(dict(time_ms=self.world.time_ms, kind=kind, entity_id=entity_id, **fields))
+
+    def entity(self, entity_id):
+        return self.world.player if entity_id == self.world.player.entity_id else self.world.monsters.get(entity_id)
+
+    def apply_damage(self, attacker, target, damage, *, raw_damage=None, damage_type="melee",
+                     crit=False, dodged=False, blocked=False):
+        if type(damage) is not int or damage < 0:
+            raise ValueError("Damage must be a nonnegative integer")
+        if target is None or not target.alive:
+            return None
+        before = target.hp
+        target.hp = max(0, before-damage)
+        event = DamageEvent(self.world.time_ms, attacker.entity_id, target.entity_id,
+                            damage if raw_damage is None else raw_damage, before-target.hp,
+                            before,target.hp,damage_type,crit,dodged,blocked)
+        self.damage_events.append(event)
+        self.emit("damage", target.entity_id, attacker=attacker.entity_id,
+                  damage=event.damage, hp_before=before, hp_after=target.hp,
+                  crit=crit, dodged=dodged, blocked=blocked)
+        if not target.alive:
+            self.handle_death(target, attacker.entity_id)
+        elif not isinstance(target, PlayerState):
+            self.add_damage_aggro(target.entity_id, attacker.entity_id)
+        return event
+
+    def handle_death(self, target, killer_id):
+        if target.death_recorded:
+            return
+        target.death_recorded = True
+        target.hp = 0
+        if self.world.occupancy.get((target.x,target.y)) == target.entity_id:
+            self.world.occupancy.pop((target.x,target.y))
+        self.world.effects[:] = [e for e in self.world.effects
+                                if target.entity_id not in (e.source_id,e.target_id)]
+        for event in self.world.events:
+            if event.entity_id == target.entity_id:
+                self.scheduler.cancel(event.sequence)
+        self.death_events.append(DeathEvent(self.world.time_ms,target.entity_id,killer_id))
+        self.emit("death",target.entity_id,killer_id=killer_id)
+        for npc in self.world.monsters.values():
+            if npc.aggro_target == target.entity_id:
+                npc.aggro_target = None
+        if isinstance(target, PlayerState):
+            target.cooldowns.slots.clear()
+            target.cooldowns.families.clear()
+        else:
+            self.pending_npc.pop(target.entity_id,None)
+            target.aggro_target = None
+            target.life_generation += 1
+            if killer_id == self.world.player.entity_id:
+                self.world.kills += 1
+            self.schedule_respawn(target.entity_id)
+
+    def melee_attack(self, attacker, target):
+        if not combat.can_hit(attacker,target):
+            return None
+        if isinstance(attacker,PlayerState) and not self.config.gear_enabled:
+            raise ValueError("Player melee requires enabled gear")
+        self.rng.entity_id = attacker.entity_id
+        if self.rng.chance(combat.dodge_chance(getattr(target.stats,"dexterity",0)),"dodge"):
+            return self.apply_damage(attacker,target,0,dodged=True)
+        crit = False
+        if isinstance(attacker,PlayerState):
+            if not self.config.gear_enabled:
+                raise ValueError("Player melee requires enabled gear")
+            crit = self.rng.chance(combat.melee_crit_chance(attacker.stats.dexterity),"melee_crit")
+            raw = int(self.config.gear.weapon_damage * combat.stat_factor(attacker.stats.strength)
+                      * (combat.crit_multiplier(attacker.stats) if crit else 1))
+        else:
+            raw = attacker.stats.raw_damage  # baseline NPC Strength=0 gives factor 1
+        damage,blocked = combat.mitigate(raw,attacker,target,self.rng)
+        return self.apply_damage(attacker,target,damage,raw_damage=raw,crit=crit,blocked=blocked)
+
+    def magic_damage(self, attacker, target, raw_damage, *, crit=False):
+        if not combat.can_hit(attacker,target,magic=True):
+            return None
+        self.rng.entity_id = attacker.entity_id
+        damage,blocked = combat.mitigate(raw_damage,attacker,target,self.rng,magic=True)
+        return self.apply_damage(attacker,target,damage,raw_damage=raw_damage,
+                                 damage_type="magic",crit=crit,blocked=blocked)
+
+    def regenerate(self):
+        p = self.world.player
+        if not p.alive:
+            return
+        before=(p.hp,p.mp)
+        if self.config.timing.regen_enabled:
+            for resource,stat in (("hp",p.stats.stamina),("mp",p.stats.wisdom)):
+                rate = getattr(p.stats,resource+"_regen_override")
+                if rate is None:
+                    rate = combat.regen_amount(stat,getattr(p,"max_"+resource),getattr(p.stats,"base_"+resource))
+                amount = int(round(rate*self.config.timing.regen_ms/1000))
+                setattr(p,resource,min(getattr(p,"max_"+resource),getattr(p,resource)+amount))
+        self.emit("regeneration",p.entity_id,before=before,after=(p.hp,p.mp),
+                  resources_applied=self.config.timing.regen_enabled)
+
+    def respawn(self, npc):
+        box = npc.spawn_box
+        now = self.world.time_ms
+        if not any((x,y) not in self.world.occupancy for y in range(box.y,box.y+box.height)
+                   for x in range(box.x,box.x+box.width)):
+            boundary = (now//self.config.timing.step_ms+1)*self.config.timing.step_ms
+            npc.respawn_at_ms = boundary
+            self.scheduler.schedule(boundary,"respawn",npc.entity_id,npc.life_generation)
+            self.emit("respawn_pending",npc.entity_id,reason="spawn_box_full",retry_at_ms=boundary)
+            return
+        self.rng.entity_id = npc.entity_id
+        while True:
+            x = self.rng.roll(box.x,box.x+box.width-1,"respawn_x")
+            y = self.rng.roll(box.y,box.y+box.height-1,"respawn_y")
+            if (x,y) not in self.world.occupancy: break
+        npc.x,npc.y = npc.spawn_x,npc.spawn_y = x,y
+        npc.hp,npc.mp = npc.max_hp,npc.max_mp
+        npc.move_interval_ms = self.rng.roll(npc.stats.move_ms[0],npc.stats.move_ms[1],"respawn_move_interval")
+        npc.next_move_ms = now+npc.move_interval_ms
+        npc.next_attack_ms = now+npc.stats.attack_ms
+        npc.next_aggro_ms = now+npc.stats.aggro_check_ms
+        npc.last_aggro_update_ms = now
+        npc.facing = Direction.UP
+        npc.aggro_target = npc.respawn_at_ms = None
+        npc.magic_immune = npc.death_recorded = False
+        npc.life_generation += 1
+        self.world.occupancy[(x,y)] = npc.entity_id
+        self.respawn_events.append(RespawnEvent(now,npc.entity_id,x,y,npc.life_generation,npc.move_interval_ms))
+        self.emit("respawn",npc.entity_id,position=(x,y),movement_ms=npc.move_interval_ms)
+        self.queue_npc(npc)
 
     def distance(self, npc):
         p = self.world.player
@@ -144,12 +275,13 @@ class Engine:
             self.npc_movement(npc)
         if (npc.aggro_target is not None and now >= npc.next_attack_ms
                 and self.distance(npc) <= npc.stats.attack_radius):
-            self.emit("npc_attack", npc.entity_id, target=p.entity_id, damage_applied=False)
+            self.melee_attack(npc,p)
+            self.emit("npc_attack", npc.entity_id, target=p.entity_id, damage_applied=True)
             npc.next_attack_ms = now + npc.stats.attack_ms
         self.queue_npc(npc)
 
     def schedule_respawn(self, npc_id):
-        """Schedule a lifecycle notification for Phase 3's actual respawn handler."""
+        """Schedule the original entity 50 seconds after death."""
         npc = self.world.monsters[npc_id]
         if npc.alive:
             raise ValueError("Cannot schedule respawn of a living NPC")
@@ -180,13 +312,13 @@ class Engine:
         elif event.kind == "regeneration":
             p = self.world.player
             if p.alive:
-                self.emit("regeneration", p.entity_id, resources_applied=False)
+                self.regenerate()
                 p.next_regen_ms = self.world.time_ms + self.config.timing.regen_ms
                 self.scheduler.schedule(p.next_regen_ms, "regeneration", p.entity_id)
         elif event.kind == "respawn":
             npc = self.world.monsters.get(event.entity_id)
             if npc is not None and not npc.alive and npc.life_generation == event.generation:
-                self.emit("respawn_due", npc.entity_id, respawn_applied=False)
+                self.respawn(npc)
         elif event.kind.startswith(("effect_tick:", "effect_expiry:")):
             kind, effect_id = event.kind.split(":", 1)
             for effect in list(self.world.effects):
@@ -207,6 +339,9 @@ class Engine:
         if isinstance(action, bool) or not isinstance(action, Integral) or not 0 <= action < 8:
             raise ValueError("Mystic action must be an integer from 0 through 7")
         self.trace = []
+        self.damage_events = []
+        self.death_events = []
+        self.respawn_events = []
         p = self.world.player
         if action < 4 and p.alive:
             applied = self.move(p, Direction(int(action)))
@@ -217,6 +352,17 @@ class Engine:
                     if npc.alive and npc.aggro_target is None and self.distance(npc) <= npc.stats.aggro_radius:
                         self.acquire(npc, "player_moved")
                         self.queue_npc(npc, self.world.time_ms)
+        elif action == 4 and p.alive and self.config.gear_enabled:
+            if self.world.time_ms < p.next_attack_ms:
+                applied,reason=False,"cooldown"
+            else:
+                dx,dy=OFFSETS[p.facing]
+                target=self.entity(self.world.occupancy.get((p.x+dx,p.y+dy)))
+                applied=combat.can_hit(p,target)
+                reason=None if applied else "no_target"
+                if applied:
+                    self.melee_attack(p,target)
+                    p.next_attack_ms=self.world.time_ms+self.config.gear.attack_ms
         else:
             applied = False
             reason = "player_dead" if not p.alive else "gear_disabled" if action == 4 else "spell_not_implemented"

@@ -33,11 +33,26 @@ class PlayerConfig:
     toughness: int = 7
     precision: int = 18
     class_spec: str = "Mystic"
+    base_hp: int | None = None
+    base_mp: int | None = None
+    # Per-second rates: restore 226 HP / 1664 MP at the default 2000 ms interval.
+    hp_regen_override: float | None = 113.0
+    mp_regen_override: float | None = 832.0
 
     def __post_init__(self):
         for name in self.__dataclass_fields__:
-            if name != "class_spec":
+            if name in ("hp_regen_override", "mp_regen_override"):
+                value = getattr(self, name)
+                if value is not None and (not isfinite(value) or value < 0):
+                    raise ValueError(f"{name} must be a nonnegative finite per-second rate")
+            elif name in ("base_hp", "base_mp"):
+                if getattr(self, name) is not None:
+                    integer(name, getattr(self, name))
+            elif name != "class_spec":
                 integer(name, getattr(self, name), 1 if name in ("level", "max_hp", "max_mp") else 0)
+        for resource in ("hp", "mp"):
+            if getattr(self, resource + "_regen_override") is None and getattr(self, "base_" + resource) is None:
+                raise ValueError(f"{resource} regeneration needs base stats or an explicit override")
         if self.class_spec != "Mystic":
             raise ValueError("This profile supports class_spec=Mystic only")
 
@@ -138,10 +153,15 @@ class TimingConfig:
     step_ms: int = 200
     regen_ms: int = 2000
     full_box_retry_ms: int = 200
+    regen_enabled: bool = True
 
     def __post_init__(self):
         for name in self.__dataclass_fields__:
-            integer(name, getattr(self, name), 1)
+            if name == "regen_enabled":
+                if type(self.regen_enabled) is not bool:
+                    raise ValueError("regen_enabled must be boolean")
+            else:
+                integer(name, getattr(self, name), 1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +178,19 @@ class RewardConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class GearConfig:
+    weapon_damage: int
+    attack_ms: int
+    spell_multiplier: float = 0.0
+
+    def __post_init__(self):
+        integer("weapon_damage", self.weapon_damage, 1)
+        integer("attack_ms", self.attack_ms, 1)
+        if not isfinite(self.spell_multiplier) or self.spell_multiplier < 0:
+            raise ValueError("spell_multiplier must be finite and nonnegative")
+
+
+@dataclass(frozen=True, slots=True)
 class ScenarioConfig:
     profile: str = "map53_open_entities_v1"
     map_id: int = 53
@@ -168,6 +201,7 @@ class ScenarioConfig:
     terrain_collision: bool = False
     entity_collision: bool = True
     gear_enabled: bool = False
+    gear: GearConfig | None = None
     player: PlayerConfig = field(default_factory=PlayerConfig)
     innie: InnieConfig = field(default_factory=InnieConfig)
     spells: tuple[SpellConfig, ...] = field(default_factory=baseline_spells)
@@ -183,8 +217,12 @@ class ScenarioConfig:
             integer(name, getattr(self, name), 1)
         if (self.profile, self.map_id, self.width, self.height) != ("map53_open_entities_v1", 53, 100, 100):
             raise ValueError("Only the 100x100 map53_open_entities_v1 profile is implemented")
-        if self.terrain_collision is not False or self.entity_collision is not True or self.gear_enabled is not False:
-            raise ValueError("Baseline requires entity collision, no terrain collision, and disabled gear")
+        if self.terrain_collision is not False or self.entity_collision is not True:
+            raise ValueError("Baseline requires entity collision and no terrain collision")
+        if (type(self.gear_enabled) is not bool
+                or (self.gear_enabled and not isinstance(self.gear, GearConfig))
+                or (not self.gear_enabled and self.gear is not None)):
+            raise ValueError("Enabled gear requires a GearConfig; disabled gear requires None")
         interval("player_spawn_x", self.player_spawn_x, self.width)
         interval("player_spawn_y", self.player_spawn_y, self.height)
         if not isinstance(self.spells, tuple) or not all(isinstance(s, SpellConfig) for s in self.spells):

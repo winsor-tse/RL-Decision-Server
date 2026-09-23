@@ -64,6 +64,9 @@ class PlayerState:
     facing: Direction = Direction.UP
     cooldowns: CooldownState = field(default_factory=CooldownState)
     next_regen_ms: int = 2000
+    next_attack_ms: int = 0
+    magic_immune: bool = False
+    death_recorded: bool = False
 
     @property
     def max_hp(self):
@@ -103,6 +106,8 @@ class MonsterState:
     spawn_x: int = 0
     spawn_y: int = 0
     last_aggro_update_ms: int = 0
+    magic_immune: bool = False
+    death_recorded: bool = False
 
     @property
     def max_hp(self):
@@ -126,6 +131,38 @@ class TimedEffect:
     expires_at_ms: int
     interval_ms: int
     generation: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class DamageEvent:
+    time_ms: int
+    attacker_id: int
+    target_id: int
+    raw_damage: int
+    damage: int
+    hp_before: int
+    hp_after: int
+    damage_type: str
+    crit: bool = False
+    dodged: bool = False
+    blocked: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class DeathEvent:
+    time_ms: int
+    entity_id: int
+    killer_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class RespawnEvent:
+    time_ms: int
+    entity_id: int
+    x: int
+    y: int
+    generation: int
+    move_interval_ms: int
 
 
 @dataclass(frozen=True, slots=True, order=True)

@@ -10,6 +10,7 @@ import numpy as np
 from numpy.testing import assert_array_equal
 
 from Custom_enviornments.Mystic_Sim.env import MysticSimEnv
+from Custom_enviornments.Mystic_Sim.config import ScenarioConfig, PlayerConfig
 from Custom_enviornments.Mystic_Sim.engine import Engine, TracedRng
 from Custom_enviornments.Mystic_Sim.movement import next_step_basic, outside_spawn_area
 from Custom_enviornments.Mystic_Sim.scheduler import Scheduler
@@ -161,7 +162,7 @@ class TimingTests(unittest.TestCase):
         self.assertEqual(npc.aggro_target,1)
         self.assertEqual(next(e['time_ms'] for e in env.engine.trace if e['kind']=='aggro_acquired'),0)
 
-    def test_attack_trace_cardinal_only_and_no_damage(self):
+    def test_attack_trace_cardinal_only_and_damage(self):
         env,w,npc=self.scene()
         npc.aggro_target=1; npc.next_attack_ms=0; npc.next_move_ms=99999
         w.player.x,w.player.y=46,51
@@ -171,7 +172,7 @@ class TimingTests(unittest.TestCase):
         env.engine.update_npc(npc)
         self.assertEqual(npc.next_attack_ms,1000)
         self.assertTrue(any(e['kind']=='npc_attack' for e in env.engine.trace))
-        self.assertEqual(w.player.hp,w.player.max_hp)
+        self.assertLess(w.player.hp,w.player.max_hp)
 
     def test_idle_random_and_source_spawn_boundary(self):
         env,w,npc=self.scene()
@@ -206,8 +207,8 @@ class TimingTests(unittest.TestCase):
         env.engine.scheduler.advance(50000,env.engine.dispatch)
         self.assertFalse(any(e['kind']=='respawn_due' for e in env.engine.trace))
         env.engine.scheduler.advance(50001,env.engine.dispatch)
-        self.assertTrue(any(e['kind']=='respawn_due' for e in env.engine.trace))
-        self.assertFalse(npc.alive) # actual respawn is Phase 3
+        self.assertTrue(any(e['kind']=='respawn' for e in env.engine.trace))
+        self.assertTrue(npc.alive)
 
     def test_equal_time_occupancy_first_wins(self):
         env,w,npc=self.scene()
@@ -260,7 +261,8 @@ class TimingTests(unittest.TestCase):
         self.assertNotIn((10,10),w.occupancy)
 
     def test_replay_no_io_and_intervals_unchanged(self):
-        a,b=MysticSimEnv(trace=True),MysticSimEnv(trace=True)
+        config=ScenarioConfig(player=replace(PlayerConfig(),max_hp=10000000))
+        a,b=MysticSimEnv(trace=True,config=config),MysticSimEnv(trace=True,config=config)
         a.reset(seed=7); b.reset(seed=7)
         intervals={i:m.move_interval_ms for i,m in a.world.monsters.items()}
         with patch.object(Path,'open',side_effect=AssertionError('file I/O')), \
@@ -279,7 +281,7 @@ class TimingTests(unittest.TestCase):
         self.assertEqual(intervals,{i:m.move_interval_ms for i,m in a.world.monsters.items()})
 
     def test_gym_api_limits_invalid_actions_and_reset(self):
-        env=MysticSimEnv()
+        env=MysticSimEnv(config=ScenarioConfig(player=replace(PlayerConfig(),max_hp=10000000)))
         with self.assertRaises(gym.error.ResetNeeded): env.step(0)
         check_env(env,skip_render_check=True)
         env.reset(seed=1)

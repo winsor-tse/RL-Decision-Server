@@ -1,12 +1,12 @@
-# Mystic simulator: Phases 0 through 2
+# Mystic simulator: Phases 0 through 3
 
 This package defines contracts, immutable map/configuration data, and seeded reset.
 Importing `Custom_enviornments.Mystic_Sim` registers `YugenSaga/MysticSim-v0`.
 The environment declares eight actions and 26 float32 observation values.
 `reset()` returns a fully initialized world and observation. `step()` advances
 200 simulated milliseconds, applying movement and dispatching scheduled NPC
-movement/aggro events. Rewards are currently zero; combat training requires the
-subsequent combat, spell, and reward phases.
+movement/aggro, combat, regeneration, death, and respawn events. Rewards are
+currently zero; complete combat training requires the spell and reward phases.
 
 ```python
 import gymnasium as gym
@@ -52,7 +52,7 @@ The sampled movement interval is never rerolled during a life.
 Aggro checks use Euclidean radius 4 and 1500 ms deadlines. Dead/invalid targets
 and targets farther than 18 tiles are dropped. Player movement also triggers
 the acquisition hook shown in `NPCScript.OnEntityMoved`. Damage acquisition is
-exposed as `engine.add_damage_aggro(npc_id, attacker_id)` for Phase 3.
+applied by the combat pipeline through `engine.add_damage_aggro`.
 
 Timing conventions pending fuller server traces:
 
@@ -68,18 +68,36 @@ Timing conventions pending fuller server traces:
 - The long-idle return jump refuses an occupied destination, enforcing the
   developer's entity-collision rule even on that source branch.
 
-Attacks, regeneration, effect ticks, and respawn deadlines are trace-only hooks:
-they do not apply damage, healing, or resurrect entities yet. An eligible attack
-records its deadline and resets the attack timer. `schedule_respawn` accepts only
-a dead NPC and schedules its notification 50000 ms later; it does not perform
-death cleanup. `schedule_effect` records tick/expiry deadlines with generation
-checks. Phase 3/4 supply their gameplay mutations and cancellation lifecycle.
+NPC attacks now apply dodge, block, facing, AC mitigation, and HP loss. Death
+records once, frees occupancy, clears aggro and invalid effects, and cancels
+pending entity events. An NPC respawns 50000 ms after death in its original box,
+retaining its ID and sampling one new movement interval for its next life. A
+full box retries at the next decision boundary without consuming placement RNG.
+Effect tick damage remains Phase 4 work.
 No on-move status effects or chain-aggro groups are active in this baseline.
 
-Action 4 reports `gear_disabled`; spell actions report `spell_not_implemented`.
+Action 4 reports `gear_disabled` by default. To enable facing-tile melee, pass
+`ScenarioConfig(gear_enabled=True, gear=GearConfig(weapon_damage=100, attack_ms=1000))`
+as `config`; these example gear values are explicit inputs, not baseline stats.
+Spell actions report `spell_not_implemented`.
 All valid actions still advance time. Invalid actions reject without advancing.
 Episodes truncate after 256 steps and require reset before another step. Step
-info explicitly reports `combat_implemented=False` and `reward_implemented=False`.
+info reports `combat_implemented=True` and `reward_implemented=False`, with
+structured `damage_events`, `death_events`, and `respawn_events` for that step.
+
+## Phase 3 regeneration and scaling
+
+Regeneration is configurable through `ScenarioConfig` and `TimingConfig`.
+`TimingConfig(regen_enabled=False)` disables healing. The default 2000 ms tick
+restores 226 HP and 1664 MP per tick, using the equivalent per-second rates
+`PlayerConfig.hp_regen_override=113.0` and `mp_regen_override=832.0`,
+clamped to maxima. Dead players do not regenerate. Change `regen_ms` to change
+the interval; amounts scale with its duration. For formula-derived rates, supply
+`base_hp`/`base_mp` and set the corresponding override to `None`.
+
+`scaled_calcs.py` derives Innie combat stats from effective level and bulk factor.
+`combat.py` contains pure stat, crit, dodge, block, mitigation, AoE, and regeneration
+functions. Tests cover the level-150 formula boundary and controlled RNG branches.
 
 ## Reset and state
 
@@ -110,8 +128,8 @@ a seed continues the environment RNG. Each NPC starts with move, attack, and
 aggro deadlines at its sampled interval, 1000 ms, and 1500 ms respectively.
 One NPC-update event is recorded at the earliest of those deadlines. Player
 regeneration is recorded at 2000 ms. Events are ordered by time and enqueue
-sequence; Phase 2 executes/reschedules them, while damage, death, and actual
-respawn remain later-phase work.
+sequence; the scheduler executes their Phase 3 gameplay mutations and reschedules
+live entities as needed.
 
 `info` includes the seed, profile, spawns, movement intervals, selected entity
 IDs, balance-cap provenance, event count, and contract metadata. Reset and
@@ -181,4 +199,8 @@ before spell calculations.
 .\RL_venv\Scripts\python.exe -m unittest Tests.test_mystic_sim_contracts
 .\RL_venv\Scripts\python.exe -m unittest Tests.test_mystic_sim_reset
 .\RL_venv\Scripts\python.exe -m unittest Tests.test_mystic_sim_timing
+.\RL_venv\Scripts\python.exe -m unittest Tests.test_mystic_sim_combat
 ```
+
+Phase 3 validation uses Python unit tests and saved numeric expectations. No C#
+compiler, runnable server project, or source files are required to run the tests.
