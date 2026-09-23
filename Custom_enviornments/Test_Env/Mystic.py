@@ -9,24 +9,9 @@ from Custom_enviornments.Test_Env import Env_conditions
 LOGGER = logging.getLogger(__name__)
 
 
-ACTIONS_11 = [
-    "up",
-    "down",
-    "left",
-    "right",
-    #"direction:up",
-    #"direction:down",
-    #"direction:left",
-    #"direction:right",
-    "attack",
-    "castSpell:1",
-    "castSpell:2",
-    "castSpell:3",
-    #"castSpell:4",
-    "castSpell:5",
-    "castSpell:6",
-    "castSpell:7",
-]
+from Custom_enviornments.Mystic_Sim.actions import LEGACY_LIVE_ACTIONS
+
+ACTIONS_11 = list(LEGACY_LIVE_ACTIONS)
 
 
 # This action space is specific to Test_Env.

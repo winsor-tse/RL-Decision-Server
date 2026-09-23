@@ -716,6 +716,15 @@ separately named profile and must never silently enter the baseline.
 
 ### Phase 0 - Freeze contracts and fixtures
 
+Implemented: canonical actions and schema metadata, versioned checkpoint helpers,
+strict legacy-BC JSON remapping, separate simulator registration scaffold,
+pure observation encoding, tracked/hash-identified fixtures, mechanics manifest,
+and map53 schema validation. See
+`Custom_enviornments/Mystic_Sim/README.md` for usage and compatibility boundaries.
+The live environments retain their legacy 11-action defaults until migration;
+the registered simulator deliberately raises `NotImplementedError` for reset
+and step until the corresponding engine phases are implemented.
+
 Deliverables:
 
 - Add `Mystic_Sim/actions.py` with one `IntEnum` and the canonical eight labels.

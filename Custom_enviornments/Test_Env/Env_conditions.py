@@ -143,19 +143,34 @@ def enemy_block(obs: Sequence[float], enemy_index: int):
     }
 
 
+def observation_monsters(data: dict):
+    """Stable payload-order ties preserve the existing live parser contract."""
+    world = data.get("worldState", data)
+    monsters = [entity for entity in world.get("entities", [])
+                if entity.get("type") == "monster"
+                and not entity.get("isCurrentPlayer", False)]
+    return sorted(monsters, key=lambda entity: distance_from_player(world["player"], entity))
+
+
 def parse_observation(data: dict, obs_size: int = OBS_SIZE):
+    """Live adapter retaining existing diagnostic writes."""
+    world = data.get("worldState", data)
+    save_world_state(world)
+    save_monster_ids(observation_monsters(world))
+    return encode_observation(world, obs_size)
+
+
+def encode_observation(data: dict, obs_size: int = OBS_SIZE):
     """
     Builds the fixed Yugen Saga observation vector used by the RL agent.
 
     Layout:
-    - player mapID, map X, map Y, direction, HP pct, MP pct
+    - player map X, map Y, direction, HP pct, MP pct, mapID
     - nearest enemy distance, direction, HP pct, MP pct
     - second nearest enemy distance, direction, HP pct, MP pct
     """
     world = data.get("worldState", data)
-    save_world_state(world)
     player = world["player"]
-    entities = world.get("entities", [])
 
     player_direction = DIRECTION_MAP.get(
         player.get("direction", "idle"),
@@ -170,13 +185,7 @@ def parse_observation(data: dict, obs_size: int = OBS_SIZE):
         float(player.get("mapID", 0)[3:]),
     ]
 
-    monsters = [
-        entity
-        for entity in entities
-        if entity.get("type") == "monster" and not entity.get("isCurrentPlayer", False)
-    ]
-    monsters.sort(key=lambda monster: distance_from_player(player, monster))
-    save_monster_ids(monsters)
+    monsters = observation_monsters(world)
 
     for monster in monsters[:MAX_ENEMIES]:        
         obs.extend(

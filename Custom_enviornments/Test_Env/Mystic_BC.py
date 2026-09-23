@@ -27,19 +27,9 @@ MYSTIC_BC_ENV_ID = "YugenSaga/MysticBC-v0"
 # This order intentionally follows the indices requested for the BC dataset.
 # It is separate from Mystic.ACTIONS_11, whose movement order is
 # [up, down, left, right].
-BC_ACTIONS_11 = [
-    "up",
-    "left",
-    "right",
-    "down",
-    "attack",
-    "castSpell:1",
-    "castSpell:2",
-    "castSpell:3",
-    "castSpell:5",
-    "castSpell:6",
-    "castSpell:7",
-]
+from Custom_enviornments.Mystic_Sim.actions import LEGACY_BC_ACTIONS
+
+BC_ACTIONS_11 = list(LEGACY_BC_ACTIONS)
 
 KEY_TO_ACTION_INDEX = {
     "W": 0,
