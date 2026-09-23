@@ -722,8 +722,8 @@ pure observation encoding, tracked/hash-identified fixtures, mechanics manifest,
 and map53 schema validation. See
 `Custom_enviornments/Mystic_Sim/README.md` for usage and compatibility boundaries.
 The live environments retain their legacy 11-action defaults until migration;
-the registered simulator deliberately raises `NotImplementedError` for reset
-and step until the corresponding engine phases are implemented.
+the registered simulator now supports Phase 1 reset and Phase 2 movement steps.
+Damage, spells, and combat reward remain later-phase work.
 
 Deliverables:
 
@@ -753,6 +753,15 @@ Exit gate:
 - malformed or unexpected map JSON fails with a precise validation message.
 
 ### Phase 1 - Build map, state, reset, and observation
+
+Implemented: frozen validated configuration; bundled map53 loading and immutable
+tile/spawn definitions; slotted runtime state; player-first seeded placement of
+80 non-overlapping Innies; one movement-interval draw per life; initial event
+records/deadlines; pure nearest-five observation encoding; and reset diagnostics.
+Tests cover seeds, state isolation, full-box rejection, RNG order/endpoints,
+map normalization, fixture parity, direction/distance boundaries, and no reset I/O.
+Initial player/NPC facing is up, a documented reset convention. Runtime event
+execution is implemented in Phase 2 below.
 
 Implement data before behavior:
 
@@ -791,6 +800,16 @@ Exit gate:
 - reset performs no socket, sleep, render, or debug-file I/O.
 
 ### Phase 2 - Add the clock, scheduler, movement, and aggro
+
+Implemented: absolute-time heap dispatch, stable ties, cancellation/generation
+checks, loop guard, 200 ms movement steps, source-ordered pursuit RNG, occupancy,
+facing and timer behavior, idle/spawn return, radius and damage aggro hooks,
+player-move acquisition, and optional per-step in-memory traces. Attack,
+regeneration, effect, and respawn events currently provide timing notifications;
+gameplay mutations remain Phase 3/4 work. Step reward is zero until reward work.
+The README records provisional Timer.Reset semantics, 200 ms expired-timer
+polling, 1500 ms aggro rescheduling, and tick-before-expiry policy. These are
+explicit simulator conventions where complete server scheduling is unavailable.
 
 - Implement `scheduler.py` with heap keys `(due_ms, enqueue_sequence)`, event
   tokens for cancellation, trace records, and a guard against infinite

@@ -1,4 +1,4 @@
-"""Headless Mystic simulator contracts. Engine implementation follows Phase 0."""
+"""Headless Mystic simulator with seeded reset and deterministic movement steps."""
 from gymnasium.envs.registration import register, registry
 
 ENV_ID = "YugenSaga/MysticSim-v0"

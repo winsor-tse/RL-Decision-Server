@@ -125,8 +125,12 @@ class MysticPhaseZeroTests(unittest.TestCase):
         self.assertEqual(env.action_space.n, 8)
         self.assertEqual(env.observation_space.shape, (26,))
         self.assertNotIn("BaseEnv", [base.__name__ for base in type(env.unwrapped).__mro__])
-        with self.assertRaisesRegex(NotImplementedError, "Phase 1"):
-            env.reset(seed=1)
+        observation, info = env.reset(seed=1)
+        self.assertTrue(env.observation_space.contains(observation))
+        self.assertEqual(len(info["npc_spawns"]), 80)
+        observation, reward, terminated, truncated, info = env.step(0)
+        self.assertTrue(env.observation_space.contains(observation))
+        self.assertEqual(info["simulation_time_ms"], 200)
         env.close()
 
     def test_manifest_corrections_and_provenance(self):

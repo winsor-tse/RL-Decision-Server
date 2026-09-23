@@ -1,6 +1,10 @@
-"""Phase 0 validation of the supplied map53 Tiled export; no spawn simulation."""
+"""Validate Tiled map53 and normalize immutable map/spawn definitions."""
 import json
 from pathlib import Path
+
+from .state import MapDefinition, SpawnBox
+
+DEFAULT_MAP_PATH = Path(__file__).with_name("data") / "map53.json"
 
 
 def require(condition, path, message):
@@ -96,3 +100,28 @@ def load_map53(path):
         raise ValueError(f"map53 JSON: {exc}") from exc
     validate_map53(data)
     return data
+
+
+def normalize_map53(data):
+    validate_map53(data)
+    layers = {layer["name"]: layer for layer in data["layers"]}
+    boxes, excluded = [], []
+    for obj in sorted(layers["data"]["objects"], key=lambda obj: obj["id"]):
+        if obj.get("type") != "NPC":
+            continue
+        props = properties(obj["properties"], f"objects[{obj['id']}].properties")
+        box = SpawnBox(obj["id"], props["id"], int(obj["x"] / data["tilewidth"]),
+                       int(obj["y"] / data["tileheight"]), int(obj["width"] / data["tilewidth"]),
+                       int(obj["height"] / data["tileheight"]), props["quantity"], props["fixed"])
+        (boxes if box.template_id == 5300 else excluded).append(box)
+    return MapDefinition(
+        53, data["width"], data["height"], data["tilewidth"], data["tileheight"],
+        tuple(sorted(properties(data["properties"], "properties").items())),
+        tuple(boxes), tuple(excluded),
+        frozenset((i % data["width"], i // data["width"])
+                  for i, tile in enumerate(layers["blocked"]["data"]) if tile),
+    )
+
+
+def load_map_definition(path=DEFAULT_MAP_PATH):
+    return normalize_map53(load_map53(path))
