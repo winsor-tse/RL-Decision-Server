@@ -131,6 +131,8 @@ class TimedEffect:
     expires_at_ms: int
     interval_ms: int
     generation: int = 0
+    tick_damage: int = 0
+    crit: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +148,22 @@ class DamageEvent:
     crit: bool = False
     dodged: bool = False
     blocked: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class CastEvent:
+    time_ms: int
+    caster_id: int
+    spell_id: int
+    target_id: int
+    target_ids: tuple[int, ...]
+    mp_before: int
+    mp_after_fixed: int
+    mp_after: int
+    hp_before: int
+    hp_after: int
+    crit: bool
+    ready_at_ms: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +204,7 @@ class WorldState:
     step_count: int = 0
     kills: int = 0
     next_event_sequence: int = 0
+    next_effect_sequence: int = 0
 
     def enqueue(self, due_ms, kind, entity_id, generation=0):
         """Return a cancellation token; order equal-time events by insertion."""

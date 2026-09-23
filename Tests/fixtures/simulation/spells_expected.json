@@ -1,0 +1,11 @@
+{
+  "description": "Python regression expectations for baseline stats, MP 15108, HP 9463, one target at distance 1, no block. No C# execution required.",
+  "cases": [
+    {"slot": 1, "crit": false, "base": 5950, "total": 55997, "initial": 55997, "tick": 0, "charge": 4821, "mp_after": 9787},
+    {"slot": 1, "crit": true, "base": 5950, "total": 112580, "initial": 112580, "tick": 0, "charge": 4821, "mp_after": 9787},
+    {"slot": 2, "crit": false, "base": 2497, "total": 23499, "initial": 17859, "tick": 939, "charge": 4656, "mp_after": 9452},
+    {"slot": 2, "crit": true, "base": 2497, "total": 47245, "initial": 35906, "tick": 1889, "charge": 4656, "mp_after": 9452},
+    {"slot": 3, "crit": false, "base": 4740, "total": 44609, "initial": 44609, "tick": 0, "charge": 2872, "mp_after": 11486},
+    {"slot": 3, "crit": true, "base": 4740, "total": 89685, "initial": 89685, "tick": 0, "charge": 2872, "mp_after": 11486}
+  ]
+}

@@ -53,7 +53,7 @@ provide their missing entity, map, spell-property, and status-effect types.
 | NPC update order         | Drop invalid aggro, check new aggro, move/face, then attack. RedBot additionally attempts configured spells.                                                      |
 | Innie scaling            | `ScaledCalcs.GetEnemyHP`, `NPCRecursiveDmg.GetDamage`, and the RedBot scaling path are now supplied.                                                              |
 | Regeneration timing      | Ten environment steps at the 200 ms decision interval.                                                                                                            |
-| World distance           | `EntityBase.Distance` is Euclidean and controls combat, spell radii, aggro range, and range checks.                                                               |
+| World distance           | `EntityBase.Distance` is Euclidean for attack/spell radii and aggro. Casting eligibility uses an inclusive rectangle: abs(dx) <= 16 and abs(dy) <= 10. |
 | Observation distance     | The client-supplied distances in the fixture equal Manhattan distance; Mystic also uses Manhattan as its fallback.                                                |
 | Spawn boxes              | `map53.json` contains 40 non-fixed 10 by 10 template-5300 boxes with two Innies each, for 80 baseline Innies. A dead Innie respawns at a random unoccupied point in its own box after 50 seconds. |
 | Collision scope          | The JSON blocked layer contains 5,088 marked cells, but terrain blocking is explicitly deferred. Baseline legality checks map bounds and entity occupancy only. |
@@ -67,9 +67,12 @@ not sleep or accumulate floating-point timer drift.
 Do not use one generic distance helper. The simulator needs two named metrics:
 
 - `euclidean_distance` for server mechanics (`EntityBase.Distance`, attack
-  radius, spell radius, and aggro/range comparisons);
+  radius, spell radius, and aggro comparisons);
 - `observation_distance` using Manhattan distance to reproduce the world-state
   payload and Mystic observation.
+
+Casting eligibility separately checks both coordinate deltas against the
+inclusive 16-X/10-Y rectangle; it is not a distance metric.
 
 ## Developer-answer status
 
@@ -805,8 +808,8 @@ Implemented: absolute-time heap dispatch, stable ties, cancellation/generation
 checks, loop guard, 200 ms movement steps, source-ordered pursuit RNG, occupancy,
 facing and timer behavior, idle/spawn return, radius and damage aggro hooks,
 player-move acquisition, and optional per-step in-memory traces. Phase 3 now adds
-attack, regeneration, death, and respawn mutations; effect damage remains Phase 4
-work. Step reward is zero until reward work.
+attack, regeneration, death, and respawn mutations; Phase 4 adds Acid effect
+damage. Step reward is zero until reward work.
 The README records provisional Timer.Reset semantics, 200 ms expired-timer
 polling, 1500 ms aggro rescheduling, and tick-before-expiry policy. These are
 explicit simulator conventions where complete server scheduling is unavailable.
@@ -890,10 +893,27 @@ Exit gate:
 
 ### Phase 4 - Implement Mystic spells 1 through 3
 
+Implemented: pure spell calculations, nearest Euclidean targeting, fixed-cost
+eligibility, slot/family cooldowns, cast transactions, all three damage pipelines,
+Acid tick snapshots, structured cast records, and Python numeric/state-transition
+tests in `Tests/test_mystic_sim_spells.py`.
+
+**Confirmed casting and refresh rules:** eligible targets must satisfy both
+`abs(dx) <= 16` and `abs(dy) <= 10`. Rank eligible monsters by Euclidean distance
+and entity ID; retain Euclidean AoE radii. Acid refreshes rather than stacks for
+the same caster/target pair, replacing the damage/crit snapshot and restarting
+tick and expiry deadlines. Different casters' effects coexist independently.
+Stable Acid IDs use effect name plus caster ID per target, and each application
+receives a new generation; refresh cancels the previous queued callbacks.
+Existing scheduler behavior is
+unchanged: ticks at +1000..+5000 ms, expiry at +6000 ms, no expiry-time tick. The
+missing TickEffect implementation prevents claiming that endpoint is confirmed.
+AoE enumeration uses stable entity-ID order because the map enumerator is absent.
+
 Build casting in layers:
 
-1. `targeting.py` returns the nearest living monster using Euclidean spell
-   eligibility distance and entity-ID tie-breaks. Targeted-or-self spells fall
+1. `targeting.py` filters living monsters by the inclusive 16-X/10-Y casting
+   rectangle, then ranks by Euclidean distance and entity ID. Targeted-or-self spells fall
    back to the caster only when no valid monster exists.
 2. `cooldowns.py` checks fixed MP/HP affordability plus slot/family absolute
    ready times. Rejected casts consume no resources, cooldown, or combat RNG.
@@ -919,14 +939,14 @@ Tempest Inferno uses `manaConsumption=0.20`; do not retain the spell script's
 
 Cooldowns begin only after a successful cast. At 200 ms decisions, first recast
 boundaries are 3,600 ms, 5,000 ms, and 1,800 ms. Timed effects use absolute
-deadlines, stable effect IDs, and explicit refresh/stack policy derived from the
-source. Baseline trinket/status modifiers remain disabled but represented in
+deadlines and stable effect IDs. Refresh is per caster/target; different casters
+stack independently. Baseline trinket/status modifiers remain disabled but represented in
 configuration.
 
 Exit gate:
 
 - each spell has pure numeric goldens and full state-transition tests;
-- tests cover no target, self fallback, exact range edge, insufficient MP,
+- tests cover no target, self fallback, exact AoE radius edge, insufficient MP,
   cooldown edge, normal/critical hit, immunity, zero/one/many AoE targets,
   partial-radius allocation, DoT tick/expiry, fixed-before-percentage resource
   order, post-cost damage input, resource rounding, no-hit Tempest cost, and kills;

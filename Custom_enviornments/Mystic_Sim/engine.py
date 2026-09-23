@@ -1,12 +1,12 @@
-"""Phase 2 movement engine; combat/effect events are explicit trace-only hooks."""
+"""Absolute-time movement, combat, casting, and effect transactions."""
 from numbers import Integral
 
 from .movement import OFFSETS, SERVER_DIRECTIONS, legal_move, next_step_basic, outside_spawn_area
 from .observation import direction_from_delta, euclidean_distance
 from .scheduler import Scheduler
 from .state import Direction
-from .state import PlayerState, DamageEvent, DeathEvent, RespawnEvent
-from . import combat
+from .state import PlayerState, DamageEvent, DeathEvent, RespawnEvent, CastEvent, TimedEffect
+from . import combat, cooldowns, targeting, spells
 
 
 class TracedRng:
@@ -31,6 +31,7 @@ class Engine:
         self.damage_events = []
         self.death_events = []
         self.respawn_events = []
+        self.cast_events = []
         self.scheduler = Scheduler(world)
         self.rng = TracedRng(rng, self.emit)
         self.pending_npc = {e.entity_id: e.sequence for e in world.events if e.kind == "npc_update"}
@@ -133,6 +134,105 @@ class Engine:
                 setattr(p,resource,min(getattr(p,"max_"+resource),getattr(p,resource)+amount))
         self.emit("regeneration",p.entity_id,before=before,after=(p.hp,p.mp),
                   resources_applied=self.config.timing.regen_enabled)
+
+    def cast(self, slot):
+        p, now = self.world.player, self.world.time_ms
+        spell = next(s for s in self.config.spells if s.slot == slot)
+        target = targeting.select_target(self.world, spell)
+        reason = cooldowns.rejection(p, spell, now, target)
+        if reason:
+            self.emit("cast_rejected", p.entity_id, spell_id=spell.spell_id, reason=reason)
+            return False, reason
+        _, radius = spells.radii(spell, p.stats)
+        partial = ()
+        if slot == 1:
+            targets = (target,)
+        else:
+            targets = targeting.area_targets(self.world, target, radius)
+            if slot == 3:
+                partial = targeting.area_targets(self.world, target, min(radius + .413, spell.max_radius), inner=radius)
+        before_mp, before_hp = p.mp, p.hp
+        p.mp -= spell.mp_cost
+        p.hp = max(1, p.hp - spell.hp_cost)
+        post_cost_mp = p.mp
+        self.rng.entity_id = p.entity_id
+        crit = self.rng.chance(combat.spell_crit_chance(p.stats.dexterity, p.stats.wisdom), "spell_crit")
+        result = spells.calculate(spell, p.stats, p.mp, p.hp,
+                                  tuple((m.entity_id, targeting.distance(target, m)) for m in targets + partial),
+                                  caster_distance=targeting.distance(p, target),
+                                  partial_ids=tuple(m.entity_id for m in partial), crit=crit,
+                                  spell_multiplier=self.config.gear.spell_multiplier if self.config.gear_enabled else 0)
+
+        def consume():
+            p.mp -= result.mp_consumption
+            p.hp -= result.hp_consumption
+            self.emit("spell_resources", p.entity_id, spell_id=spell.spell_id,
+                      mp_before=before_mp, mp_after_fixed=post_cost_mp, mp_after=p.mp,
+                      hp_before=before_hp, hp_after=p.hp)
+
+        for allocation in result.allocations:
+            if slot == 2 and allocation.raw_damage <= 0:
+                continue  # The Acid script skips its initial-damage loop at zero.
+            victim = self.entity(allocation.target_id)
+            # Acid's distance factor is applied after magic mitigation.
+            damage, blocked = combat.mitigate(allocation.raw_damage, p, victim, self.rng, magic=True)
+            damage = int(damage * allocation.falloff)
+            if slot == 1:
+                consume()  # Arcane spends percentage resources before main-target damage.
+            self.apply_damage(p, victim, damage, raw_damage=allocation.raw_damage,
+                              damage_type="magic", crit=crit, blocked=blocked)
+        if slot != 1:
+            consume()
+        if slot == 2:
+            for allocation in result.allocations:
+                if self.entity(allocation.target_id).alive:
+                    self.add_acid(spell, allocation, crit)
+        cooldowns.start(p, spell, now)
+        self.emit("cooldown_started", p.entity_id, slot=slot,
+                  ready_at_ms=p.cooldowns.slots[slot], family=spell.family,
+                  family_ready_at_ms=p.cooldowns.families.get(spell.family))
+        event = CastEvent(now, p.entity_id, spell.spell_id, target.entity_id,
+                          tuple(a.target_id for a in result.allocations), before_mp, post_cost_mp,
+                          p.mp, before_hp, p.hp, crit, p.cooldowns.slots[slot])
+        self.cast_events.append(event)
+        self.emit("cast", p.entity_id, spell_id=spell.spell_id, target_id=target.entity_id,
+                  target_ids=event.target_ids, ready_at_ms=event.ready_at_ms,
+                  radius=result.radius, raw_damage=result.total_damage, crit=crit)
+        return True, None
+
+    def add_acid(self, spell, allocation, crit, *, source_id=None):
+        w = self.world
+        source_id = w.player.entity_id if source_id is None else source_id
+        generation = w.next_effect_sequence
+        w.next_effect_sequence += 1
+        effect_id = f"{spell.effect_id}:{source_id}"
+        previous = [e for e in w.effects if (e.effect_id, e.source_id, e.target_id)
+                    == (effect_id, source_id, allocation.target_id)]
+        for old in previous:
+            w.effects.remove(old)
+            for event in w.events:
+                if (event.entity_id == old.target_id and event.generation == old.generation
+                        and event.kind in ("effect_tick:" + effect_id, "effect_expiry:" + effect_id)):
+                    self.scheduler.cancel(event.sequence)
+        # Refresh replaces the snapshot and restarts duration and tick interval.
+        # Other casters have distinct IDs, so their effects remain independent.
+        effect = TimedEffect(effect_id, source_id, allocation.target_id,
+                             w.time_ms + spell.tick_interval_ms, w.time_ms + spell.duration_ms,
+                             spell.tick_interval_ms, generation, allocation.tick_damage, crit)
+        self.schedule_effect(effect)
+        self.emit("effect_refreshed" if previous else "effect_added", effect.target_id,
+                  effect_id=effect_id, generation=generation, tick_damage=effect.tick_damage,
+                  next_tick_ms=effect.next_tick_ms, expires_at_ms=effect.expires_at_ms)
+
+    def tick_effect(self, effect):
+        target, source = self.entity(effect.target_id), self.entity(effect.source_id)
+        applied = bool(effect.tick_damage and target and source and target.alive and source.alive)
+        if applied:
+            # TickEffect callback directly calls Damaged: no immunity, block, or crit reroll.
+            self.apply_damage(source, target, effect.tick_damage,
+                              damage_type="dot", crit=effect.crit)
+        self.emit("effect_tick", effect.target_id, effect_id=effect.effect_id,
+                  generation=effect.generation, damage_applied=applied)
 
     def respawn(self, npc):
         box = npc.spawn_box
@@ -325,12 +425,14 @@ class Engine:
                 if (effect.effect_id, effect.target_id, effect.generation) != (effect_id, event.entity_id, event.generation):
                     continue
                 if kind == "effect_expiry":
-                    self.world.effects.remove(effect)
+                    if effect in self.world.effects:
+                        self.world.effects.remove(effect)
+                    self.emit("effect_expired", effect.target_id, effect_id=effect.effect_id,
+                              generation=effect.generation)
                 else:
-                    self.emit("effect_tick", event.entity_id, effect_id=effect_id, damage_applied=False)
+                    self.tick_effect(effect)
                     effect.next_tick_ms += effect.interval_ms
-                    # Tick at expiry is excluded; effects are [start, expiry).
-                    if effect.next_tick_ms < effect.expires_at_ms:
+                    if effect in self.world.effects and effect.next_tick_ms < effect.expires_at_ms:
                         self.scheduler.schedule(effect.next_tick_ms, event.kind, event.entity_id, event.generation)
         else:
             raise ValueError(f"Unsupported event kind {event.kind!r}")
@@ -342,6 +444,7 @@ class Engine:
         self.damage_events = []
         self.death_events = []
         self.respawn_events = []
+        self.cast_events = []
         p = self.world.player
         if action < 4 and p.alive:
             applied = self.move(p, Direction(int(action)))
@@ -363,9 +466,11 @@ class Engine:
                 if applied:
                     self.melee_attack(p,target)
                     p.next_attack_ms=self.world.time_ms+self.config.gear.attack_ms
+        elif action >= 5:
+            applied, reason = self.cast(int(action) - 4)
         else:
             applied = False
-            reason = "player_dead" if not p.alive else "gear_disabled" if action == 4 else "spell_not_implemented"
+            reason = "player_dead" if not p.alive else "gear_disabled"
         self.emit("action", p.entity_id, action=int(action), applied=applied, reason=reason)
         self.scheduler.advance(self.world.time_ms + self.config.timing.step_ms, self.dispatch)
         self.world.step_count += 1

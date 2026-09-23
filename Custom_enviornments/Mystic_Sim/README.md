@@ -1,4 +1,4 @@
-# Mystic simulator: Phases 0 through 3
+# Mystic simulator: Phases 0 through 4
 
 This package defines contracts, immutable map/configuration data, and seeded reset.
 Importing `Custom_enviornments.Mystic_Sim` registers `YugenSaga/MysticSim-v0`.
@@ -6,7 +6,8 @@ The environment declares eight actions and 26 float32 observation values.
 `reset()` returns a fully initialized world and observation. `step()` advances
 200 simulated milliseconds, applying movement and dispatching scheduled NPC
 movement/aggro, combat, regeneration, death, and respawn events. Rewards are
-currently zero; complete combat training requires the spell and reward phases.
+currently zero; rewards remain Phase 5 work. The three Mystic spells are active,
+with rectangular casting eligibility and per-caster Acid refresh behavior.
 
 ```python
 import gymnasium as gym
@@ -64,7 +65,7 @@ Timing conventions pending fuller server traces:
   value meaning a future timer origin. A successful aggro move at the baseline
   1000 ms attack interval therefore sets attack readiness to now + 1500 ms.
 - Effect timing hooks use ticks before expiry, with no tick at the expiry
-  timestamp. Actual Acid Cloud tick/expiry semantics must be validated in Phase 4.
+  timestamp. Exact server Acid Cloud tick/expiry semantics remain unconfirmed.
 - The long-idle return jump refuses an occupied destination, enforcing the
   developer's entity-collision rule even on that source branch.
 
@@ -73,17 +74,18 @@ records once, frees occupancy, clears aggro and invalid effects, and cancels
 pending entity events. An NPC respawns 50000 ms after death in its original box,
 retaining its ID and sampling one new movement interval for its next life. A
 full box retries at the next decision boundary without consuming placement RNG.
-Effect tick damage remains Phase 4 work.
+Acid effects now apply their saved tick damage.
 No on-move status effects or chain-aggro groups are active in this baseline.
 
 Action 4 reports `gear_disabled` by default. To enable facing-tile melee, pass
 `ScenarioConfig(gear_enabled=True, gear=GearConfig(weapon_damage=100, attack_ms=1000))`
 as `config`; these example gear values are explicit inputs, not baseline stats.
-Spell actions report `spell_not_implemented`.
+Actions 5, 6, and 7 cast Arcane Blast, Acid Cloud, and Tempest Inferno.
 All valid actions still advance time. Invalid actions reject without advancing.
 Episodes truncate after 256 steps and require reset before another step. Step
 info reports `combat_implemented=True` and `reward_implemented=False`, with
-structured `damage_events`, `death_events`, and `respawn_events` for that step.
+structured `damage_events`, `death_events`, `respawn_events`, and `cast_events`
+for that step. Spell support is reported as `spells_implemented=True`.
 
 ## Phase 3 regeneration and scaling
 
@@ -98,6 +100,47 @@ the interval; amounts scale with its duration. For formula-derived rates, supply
 `scaled_calcs.py` derives Innie combat stats from effective level and bulk factor.
 `combat.py` contains pure stat, crit, dodge, block, mitigation, AoE, and regeneration
 functions. Tests cover the level-150 formula boundary and controlled RNG branches.
+
+## Phase 4 casting and effects
+
+`targeting.py` selects the nearest living, nonimmune monster by Euclidean
+distance, then entity ID. Acid and Tempest fall back to the caster when none
+exists. AoE targets are processed by entity ID, with full Tempest targets before
+partial targets. `cooldowns.py` checks fixed HP/MP costs and absolute slot/family
+deadlines. `spells.py` performs pure calculations with an explicit crit input;
+the engine owns RNG draws and mutations.
+
+| Spell | Fixed MP | Later remaining-MP charge | Cooldown | Radius |
+|---|---:|---:|---:|---|
+| Arcane Blast | 500 | 33% | 3500 ms | Single target |
+| Acid Cloud | 1000 | 33% | 5000 ms | At most 4.25 |
+| Tempest Inferno | 750 | 20%, only with targets | 1750 ms | At most 1.5 |
+
+Damage uses MP after the fixed charge. Percentage charges use midpoint-to-even
+rounding. First cooldown-ready decisions after a cast at zero are 3600, 5000,
+and 1800 ms. Rejected casts leave resources, cooldowns, effects, and combat RNG
+unchanged; a Gym step still advances the world and can dispatch existing events.
+
+Acid initial damage applies AoE scaling before mitigation, then distance falloff.
+Its per-target effect snapshots AoE-scaled tick damage and crit. Ticks bypass new
+crit/block/AC calculations, following the supplied callback. The existing
+scheduler convention gives ticks at +1000 through +5000 ms and expiry at +6000
+ms, without a tick at expiry. Death removes effects. IDs are `acid:<caster ID>`
+per target, with distinct generations for later applications.
+
+Casting eligibility requires `abs(target.x - caster.x) <= 16` and
+`abs(target.y - caster.y) <= 10`, including the corners. Euclidean distance ranks
+eligible targets and determines AoE radii; it does not define casting eligibility.
+Acid refreshes the same caster's effect on each affected target, replacing saved
+damage/crit and restarting the tick interval and six-second duration. Old queued
+ticks and expiry are cancelled and generation checks prevent stale callbacks.
+Different caster IDs retain independent effects on the same target. The baseline
+environment still controls one player; effect identity and scheduling support
+independent sources.
+
+`SpellRules` explicitly represents disabled Arcane Bomb, Sunburnt, and Tempest
+Meteor modifiers; attempts to enable these unsupported modifiers reject during
+configuration. Numeric fixtures and unit tests require no C# compiler or server.
 
 ## Reset and state
 
@@ -200,6 +243,7 @@ before spell calculations.
 .\RL_venv\Scripts\python.exe -m unittest Tests.test_mystic_sim_reset
 .\RL_venv\Scripts\python.exe -m unittest Tests.test_mystic_sim_timing
 .\RL_venv\Scripts\python.exe -m unittest Tests.test_mystic_sim_combat
+.\RL_venv\Scripts\python.exe -m unittest Tests.test_mystic_sim_spells
 ```
 
 Phase 3 validation uses Python unit tests and saved numeric expectations. No C#

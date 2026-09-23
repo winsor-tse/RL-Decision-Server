@@ -77,6 +77,8 @@ class MysticSimEnv(gym.Env):
                 "action_failure_reason": reason, "kills": self.world.kills,
                 "selected_entity_ids": [m.entity_id for m in nearest_monsters(self.world)],
                 "combat_implemented": True, "reward_implemented": False,
+                "spells_implemented": True,
+                "cast_events": [asdict(e) for e in self.engine.cast_events],
                 "damage_events": [asdict(e) for e in self.engine.damage_events],
                 "death_events": [asdict(e) for e in self.engine.death_events],
                 "respawn_events": [asdict(e) for e in self.engine.respawn_events],

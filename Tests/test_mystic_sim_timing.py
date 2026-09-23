@@ -270,7 +270,8 @@ class TimingTests(unittest.TestCase):
              patch('socket.socket',side_effect=AssertionError('socket')), \
              patch('time.sleep',side_effect=AssertionError('sleep')):
             for i in range(200):
-                action=[0,2,1,3,4,5,6,7][i%8]
+                # This movement-only test requires all NPCs to remain alive.
+                action=[0,2,1,3,4][i%5]
                 ra,rb=a.step(action),b.step(action)
                 assert_array_equal(ra[0],rb[0])
                 self.assertEqual(ra[1:],rb[1:])

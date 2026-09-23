@@ -457,3 +457,13 @@ notes:
 - MP cost is subtracted before spell formulas; percentage consumption follows the
   spell body.
 - Displayed rounded combat factors are reference checks, not exact outputs.
+- User-confirmed casting eligibility is rectangular, abs(dx) <= 16 and abs(dy)
+  <= 10 inclusively. Eligible targets are ranked by Euclidean distance and ID.
+- User-confirmed Acid effects refresh for the same caster/target pair and stack
+  independently for different casters. Refresh replaces the snapshot, restarts
+  tick and duration deadlines, and cancels old callbacks.
+- Acid uses saved tick damage without new crit/block/AC rolls. Existing scheduler
+  convention ticks at 1000 through 5000 ms and expires at 6000 ms; the missing
+  TickEffect implementation leaves server endpoint parity unconfirmed.
+- Spell AoE enumeration uses stable entity-ID order; full Tempest targets precede
+  partial targets. The map enumerator implementation is not supplied.

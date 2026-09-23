@@ -111,14 +111,17 @@ class SpellConfig:
     cast_level: int = 0
     effect_id: str | None = None
     effect_level: int = 0
+    hp_cost: int = 0
+    vita_consumption: float = 0.0
+    base_damage: float = 1126.7
 
     def __post_init__(self):
         for name in ("spell_id", "slot", "cooldown_ms"):
             integer(name, getattr(self, name), 1)
         for name in ("mp_cost", "family_cooldown_ms", "duration_ms", "tick_interval_ms",
-                     "level", "cast_level", "effect_level"):
+                     "level", "cast_level", "effect_level", "hp_cost"):
             integer(name, getattr(self, name))
-        for name in ("mana_consumption", "mana_factor", "damage_percent", "initial_damage_percent", "tick_percent"):
+        for name in ("mana_consumption", "mana_factor", "damage_percent", "initial_damage_percent", "tick_percent", "vita_consumption"):
             value = getattr(self, name)
             if not isfinite(value) or not 0 <= value <= 1:
                 raise ValueError(f"{name} must be in [0, 1]")
@@ -133,6 +136,20 @@ class SpellConfig:
             raise ValueError("Unsupported target mode")
         if bool(self.family) != bool(self.family_cooldown_ms):
             raise ValueError("Family and family cooldown must be specified together")
+        if not isfinite(self.base_damage) or self.base_damage < 0:
+            raise ValueError("base_damage must be finite and nonnegative")
+
+
+@dataclass(frozen=True, slots=True)
+class SpellRules:
+    arcane_bomb: bool = False
+    sunburnt: bool = False
+    tempest_meteor: bool = False
+
+    def __post_init__(self):
+        if any(getattr(self, name) is not False for name in
+               ("arcane_bomb", "sunburnt", "tempest_meteor")):
+            raise ValueError("Trinket/status modifiers are disabled in the baseline")
 
 
 def baseline_spells():
@@ -202,6 +219,7 @@ class ScenarioConfig:
     entity_collision: bool = True
     gear_enabled: bool = False
     gear: GearConfig | None = None
+    spell_rules: SpellRules = field(default_factory=SpellRules)
     player: PlayerConfig = field(default_factory=PlayerConfig)
     innie: InnieConfig = field(default_factory=InnieConfig)
     spells: tuple[SpellConfig, ...] = field(default_factory=baseline_spells)
@@ -210,7 +228,7 @@ class ScenarioConfig:
 
     def __post_init__(self):
         for name, cls in (("player", PlayerConfig), ("innie", InnieConfig),
-                          ("timing", TimingConfig), ("reward", RewardConfig)):
+                          ("timing", TimingConfig), ("reward", RewardConfig), ("spell_rules", SpellRules)):
             if not isinstance(getattr(self, name), cls):
                 raise ValueError(f"{name} must be a {cls.__name__}")
         for name in ("map_id", "width", "height"):
