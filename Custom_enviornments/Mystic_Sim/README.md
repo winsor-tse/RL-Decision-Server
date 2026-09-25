@@ -61,9 +61,12 @@ Timing conventions pending fuller server traces:
   fragment does not show an `AggroCheckTimer.Reset` call.
 - Adjacent facing leaves the movement deadline unchanged, as C# does. Expired
   timers are reconsidered 200 ms later to avoid zero-time polling loops.
-- The missing `Timer.Reset` implementation is modeled with a negative reset
-  value meaning a future timer origin. A successful aggro move at the baseline
-  1000 ms attack interval therefore sets attack readiness to now + 1500 ms.
+- A successful aggro move partially resets attack readiness to now plus
+  `min(attack_ms / 2, attack_ms - 500)`, or 50 ms when `attack_ms <= 500`.
+  The confirmed 1000 ms interval therefore becomes ready at now + 500 ms.
+  Half-millisecond deadlines round up to the next integer millisecond. Blocked
+  moves, adjacent facing, and movement without aggro leave attack readiness alone.
+  After attacking, the normal full attack interval applies.
 - Effect timing hooks use ticks before expiry, with no tick at the expiry
   timestamp. Exact server Acid Cloud tick/expiry semantics remain unconfirmed.
 - The long-idle return jump refuses an occupied destination, enforcing the

@@ -250,8 +250,10 @@ pathfinder:
 - when the preferred tile is invalid, the source chooses among alternatives
   using its explicit blocked-path branches and inclusive random rolls;
 - a successful NPC move changes position and facing, runs the on-move effects,
-  resets the move timer, and pushes the attack timer back according to the
-  `NPC.Move` formula;
+  resets the move timer, and partially resets attack readiness while aggroed:
+  now plus `min(attack_ms / 2, attack_ms - 500)`, or 50 ms for intervals at or
+  below 500 ms. A 1000 ms interval becomes ready after 500 ms, not 1500 ms.
+  Fractional milliseconds round up on the integer clock;
 - a blocked move changes facing, runs on-move effects, and resets the move timer
   without changing position;
 - idle random movement uniformly chooses one of four cardinal offsets, returns
@@ -810,7 +812,7 @@ facing and timer behavior, idle/spawn return, radius and damage aggro hooks,
 player-move acquisition, and optional per-step in-memory traces. Phase 3 now adds
 attack, regeneration, death, and respawn mutations; Phase 4 adds Acid effect
 damage. Phase 5 supplies versioned step rewards.
-The README records provisional Timer.Reset semantics, 200 ms expired-timer
+The README records confirmed partial attack resets after movement, 200 ms expired-timer
 polling, 1500 ms aggro rescheduling, and tick-before-expiry policy. These are
 explicit simulator conventions where complete server scheduling is unavailable.
 

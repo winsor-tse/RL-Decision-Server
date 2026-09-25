@@ -452,6 +452,10 @@ spells:
       provenance: source
       source: TimeFrame_Other_Details.txt
 notes:
+- Successful aggro movement partially resets attack readiness to now plus
+  min(attack_ms / 2, attack_ms - 500), or 50 ms for attack_ms <= 500, as clarified
+  by the user. Baseline readiness is now + 500 ms. Fractional milliseconds round
+  up; blocked and unaggroed movement do not change attack readiness.
 - Respawn correction is 50000 ms despite old template row.
 - Base movement interval is sampled once per life; attack interval is not jittered.
 - MP cost is subtracted before spell formulas; percentage consumption follows the

@@ -125,16 +125,48 @@ class TimingTests(unittest.TestCase):
         npc.move_interval_ms=937
         w.time_ms=1000
         engine.move(npc,Direction.RIGHT,npc=True)
-        self.assertEqual((npc.next_move_ms,npc.next_attack_ms),(1937,2500))
+        self.assertEqual((npc.next_move_ms,npc.next_attack_ms),(1937,1500))
         self.assertEqual(npc.move_interval_ms,937)
         w.time_ms=1100
         w.occupancy[(47,50)]=99
         engine.move(npc,Direction.RIGHT,npc=True)
-        self.assertEqual((npc.x,npc.y,npc.next_move_ms,npc.next_attack_ms),(46,50,2037,2500))
+        self.assertEqual((npc.x,npc.y,npc.next_move_ms,npc.next_attack_ms),(46,50,2037,1500))
         w.player.x,w.player.y=47,50
         engine.npc_movement(npc)
         self.assertEqual(npc.next_move_ms,2037)  # FaceEntity does not reset timer
         self.assertEqual(npc.facing,Direction.RIGHT)
+
+    def test_movement_partial_attack_reset_speed_branches(self):
+        for speed, wait in ((250,50),(500,50),(501,1),(750,250),
+                            (1000,500),(1001,501),(2000,1000),(2001,1001)):
+            with self.subTest(speed=speed):
+                env,w,npc=self.scene()
+                npc.stats=replace(npc.stats,attack_ms=speed)
+                npc.aggro_target=1
+                npc.next_attack_ms=99999
+                w.time_ms=1000
+                self.assertTrue(env.engine.move(npc,Direction.RIGHT,npc=True))
+                self.assertEqual(npc.next_attack_ms,1000+wait)
+        env,w,npc=self.scene()
+        npc.next_attack_ms=1234
+        env.engine.move(npc,Direction.RIGHT,npc=True)
+        self.assertEqual(npc.next_attack_ms,1234)  # Idle movement does not reset attacks.
+
+    def test_moved_npc_attacks_at_partial_deadline_then_full_cadence(self):
+        env,w,npc=self.scene()
+        del w.occupancy[(npc.x,npc.y)]
+        npc.x,npc.y=48,50
+        w.occupancy[(48,50)]=npc.entity_id
+        npc.aggro_target=1
+        w.time_ms=1000
+        env.engine.move(npc,Direction.RIGHT,npc=True)
+        env.engine.queue_npc(npc)
+        env.engine.scheduler.advance(1499,env.engine.dispatch)
+        self.assertEqual(env.engine.damage_events,[])
+        env.engine.scheduler.advance(1500,env.engine.dispatch)
+        self.assertEqual(len(env.engine.damage_events),1)
+        self.assertEqual(env.engine.damage_events[0].time_ms,1500)
+        self.assertEqual(npc.next_attack_ms,2500)
 
     def test_aggro_boundaries_drop_damage_and_player_move(self):
         env,w,npc=self.scene()

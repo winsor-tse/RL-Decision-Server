@@ -315,9 +315,10 @@ class Engine:
             self.world.occupancy[destination] = entity.entity_id
             if npc and entity.aggro_target is not None:
                 speed = entity.stats.attack_ms
-                delay = 50 if speed <= 500 else min(speed // 2, speed - 500)
-                # Timer.Reset(negative) is modeled as a future timer origin.
-                entity.next_attack_ms = self.world.time_ms + speed + delay
+                # Partial reset: this is the remaining wait, not an extra interval.
+                # Round half milliseconds up so an integer clock never attacks early.
+                delay = 50 if speed <= 500 else min((speed + 1) // 2, speed - 500)
+                entity.next_attack_ms = self.world.time_ms + delay
         if npc:
             entity.next_move_ms = self.world.time_ms + entity.move_interval_ms
             self.emit("on_move", entity.entity_id, effects_applied=False)
