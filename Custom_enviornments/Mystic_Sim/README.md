@@ -1,12 +1,12 @@
-# Mystic simulator: Phases 0 through 4
+# Mystic simulator: Phases 0 through 5
 
 This package defines contracts, immutable map/configuration data, and seeded reset.
 Importing `Custom_enviornments.Mystic_Sim` registers `YugenSaga/MysticSim-v0`.
 The environment declares eight actions and 26 float32 observation values.
 `reset()` returns a fully initialized world and observation. `step()` advances
 200 simulated milliseconds, applying movement and dispatching scheduled NPC
-movement/aggro, combat, regeneration, death, and respawn events. Rewards are
-currently zero; rewards remain Phase 5 work. The three Mystic spells are active,
+movement/aggro, combat, regeneration, death, and respawn events. Rewards use the
+versioned `combat_reward_v1` training profile by default. The three spells are active,
 with rectangular casting eligibility and per-caster Acid refresh behavior.
 
 ```python
@@ -83,7 +83,7 @@ as `config`; these example gear values are explicit inputs, not baseline stats.
 Actions 5, 6, and 7 cast Arcane Blast, Acid Cloud, and Tempest Inferno.
 All valid actions still advance time. Invalid actions reject without advancing.
 Episodes truncate after 256 steps and require reset before another step. Step
-info reports `combat_implemented=True` and `reward_implemented=False`, with
+info reports `combat_implemented=True` and `reward_implemented=True`, with
 structured `damage_events`, `death_events`, `respawn_events`, and `cast_events`
 for that step. Spell support is reported as `spells_implemented=True`.
 
@@ -152,7 +152,9 @@ another copy of the same validated baseline map.
 
 `ScenarioConfig` contains frozen player, Innie, spell, timing, and reward
 configuration. The default profile is `map53_open_entities_v1`. Reset options
-accept only that environment's profile; unknown options fail explicitly.
+accept that environment's fidelity `profile` and an optional `reward_profile`;
+unknown options fail explicitly. Reward selection is local to the episode and
+does not modify the constructor configuration or other environments.
 Map properties retain cap 68, while Innie stats use the confirmed level-150
 override. Terrain is ignored, entity occupancy is enforced, and fixed template
 5399 is excluded.
@@ -181,6 +183,51 @@ Runtime observation ranks living monsters by Manhattan distance and entity ID,
 emits five blocks, and zero-pads unused blocks. Mechanics use a separate
 Euclidean distance helper; server and observation direction codes are explicitly
 converted. The supplied full-state golden vector is reproduced exactly.
+
+## Phase 5 rewards and episode rules
+
+`rewards.py` and `diagnostics.py` keep `env.py` focused on the Gym five-tuple.
+The eight-action space and 26-value float32 observation contract are unchanged.
+Default episodes terminate on death or five kills and truncate at 256 steps.
+Death takes precedence over a simultaneous kill goal; termination takes
+precedence over a simultaneous time limit. `episode_end_reason` distinguishes
+`player_death`, `kill_goal`, `step_limit`, and optional `y_boundary` truncation.
+
+`combat_reward_v1` uses actual damage/death events, including DoT damage and
+overkill capped at remaining HP. Regeneration cannot mask damage taken, and
+moving an enemy outside the observation does not earn a kill reward.
+
+| Dashboard component | Default training calculation |
+|---|---|
+| `health_state` | -0.001 per decision (time cost) |
+| `positioning` | 0 |
+| `damage_taken` | -player damage / player maximum HP |
+| `damage_dealt` | Sum of player damage / each enemy's maximum HP |
+| `terminal` | -5 for death; 0 otherwise |
+| `killed` | +1 per confirmed player kill |
+
+The returned reward is exactly the sum of these six components. Weights, kill
+goal, and time limit are configurable through frozen `RewardConfig` fields.
+`y_bounds=None` disables Y restrictions. For a task needing them, set inclusive
+`y_bounds=(25, 99)`; leaving the interval truncates without a death penalty.
+
+`legacy_reward_v0` snapshots the live health thresholds, blocked-move penalty,
+distance shaping, signed player HP-delta quirk, and coefficients (25 for enemy
+damage, 10 per kill, -100 for death). Enemy damage and kills use explicit events
+instead of live disappearance heuristics. Legacy alone retains healing rewards
+and the `hp != 0.5` branch for comparison. Its old Y shaping is opt-in via
+`legacy_y_penalty_below=31`; it is separate from episode truncation.
+
+```python
+observation, info = env.reset(seed=42, options={"reward_profile": "legacy_reward_v0"})
+```
+
+A later reset without options restores the configured default profile. Reset and
+step diagnostics include seed, profiles, clock/step, action/result, selected
+target, components, kills, cooldowns, active effects, and event ledgers. The
+selected target on step is captured at action time (None for movement/no target).
+Returned dictionaries are detached from engine state. No fixed-fixture reset
+option is introduced; seeded reset is the supported reproducible initialization.
 
 ## Actions and artifact compatibility
 
@@ -244,6 +291,7 @@ before spell calculations.
 .\RL_venv\Scripts\python.exe -m unittest Tests.test_mystic_sim_timing
 .\RL_venv\Scripts\python.exe -m unittest Tests.test_mystic_sim_combat
 .\RL_venv\Scripts\python.exe -m unittest Tests.test_mystic_sim_spells
+.\RL_venv\Scripts\python.exe -m unittest Tests.test_mystic_sim_rewards
 ```
 
 Phase 3 validation uses Python unit tests and saved numeric expectations. No C#

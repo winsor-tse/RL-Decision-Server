@@ -726,7 +726,7 @@ and map53 schema validation. See
 `Custom_enviornments/Mystic_Sim/README.md` for usage and compatibility boundaries.
 The live environments retain their legacy 11-action defaults until migration;
 the registered simulator now supports Phase 1 reset and Phase 2 movement steps.
-Damage, spells, and combat reward remain later-phase work.
+Damage, spells, and combat reward are now implemented through Phases 3–5 below.
 
 Deliverables:
 
@@ -809,7 +809,7 @@ checks, loop guard, 200 ms movement steps, source-ordered pursuit RNG, occupancy
 facing and timer behavior, idle/spawn return, radius and damage aggro hooks,
 player-move acquisition, and optional per-step in-memory traces. Phase 3 now adds
 attack, regeneration, death, and respawn mutations; Phase 4 adds Acid effect
-damage. Step reward is zero until reward work.
+damage. Phase 5 supplies versioned step rewards.
 The README records provisional Timer.Reset semantics, 200 ms expired-timer
 polling, 1500 ms aggro rescheduling, and tick-before-expiry policy. These are
 explicit simulator conventions where complete server scheduling is unavailable.
@@ -954,6 +954,22 @@ Exit gate:
 - cooldown and effect traces are deterministic under replay.
 
 ### Phase 5 - Wrap the engine in Gymnasium and define rewards
+
+Implemented in `env.py`, `rewards.py`, and `diagnostics.py`, with tests in
+`Tests/test_mystic_sim_rewards.py`. Both reward profiles pass Gymnasium's checker.
+The default training weights are enemy damage +1 normalized by enemy max HP,
+player damage -1 normalized by player max HP, kill +1, death -5, and time -0.001
+per decision under `health_state`. All six dashboard component names are retained.
+Enemy damage and kill rewards come from explicit engine events, never lost IDs.
+Legacy preserves live coefficients/shaping and its signed player HP-delta quirk
+for comparison; training uses damage events even if regeneration heals that step.
+
+`RewardConfig` makes weights, kill goal, step limit, optional inclusive `y_bounds`,
+and optional `legacy_y_penalty_below` configurable. Y rules default to disabled.
+Death overrides a simultaneous kill goal, and termination overrides truncation.
+Reset accepts the existing fidelity profile and an episode-local `reward_profile`;
+it validates before mutating state. Fixed fixture reset is not exposed. Diagnostics
+are detached snapshots, with the selected target captured at action time.
 
 - Keep `env.py` thin: validate the action, call `engine.advance(action, 200)`,
   encode state, calculate reward, and return the Gymnasium five-tuple.

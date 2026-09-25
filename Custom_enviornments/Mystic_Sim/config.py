@@ -186,12 +186,29 @@ class RewardConfig:
     profile: str = "combat_reward_v1"
     win_kills: int = 5
     max_episode_steps: int = 256
+    enemy_damage_weight: float = 1.0
+    kill_bonus: float = 1.0
+    player_damage_weight: float = 1.0
+    death_penalty: float = 5.0
+    time_cost: float = 0.001
+    y_bounds: tuple[int, int] | None = None
+    legacy_y_penalty_below: int | None = None
 
     def __post_init__(self):
         integer("win_kills", self.win_kills, 1)
         integer("max_episode_steps", self.max_episode_steps, 1)
         if self.profile not in ("combat_reward_v1", "legacy_reward_v0"):
             raise ValueError("Unknown reward profile")
+        for name in ("enemy_damage_weight", "kill_bonus", "player_damage_weight", "death_penalty", "time_cost"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be a finite nonnegative number")
+        if self.y_bounds is not None:
+            interval("y_bounds", self.y_bounds, 100)
+        if self.legacy_y_penalty_below is not None:
+            integer("legacy_y_penalty_below", self.legacy_y_penalty_below)
+            if self.legacy_y_penalty_below >= 100:
+                raise ValueError("legacy_y_penalty_below must be within the map")
 
 
 @dataclass(frozen=True, slots=True)

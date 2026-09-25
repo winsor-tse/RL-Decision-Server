@@ -32,6 +32,7 @@ class Engine:
         self.death_events = []
         self.respawn_events = []
         self.cast_events = []
+        self.selected_target_id = None
         self.scheduler = Scheduler(world)
         self.rng = TracedRng(rng, self.emit)
         self.pending_npc = {e.entity_id: e.sequence for e in world.events if e.kind == "npc_update"}
@@ -139,6 +140,7 @@ class Engine:
         p, now = self.world.player, self.world.time_ms
         spell = next(s for s in self.config.spells if s.slot == slot)
         target = targeting.select_target(self.world, spell)
+        self.selected_target_id = target.entity_id if target else None
         reason = cooldowns.rejection(p, spell, now, target)
         if reason:
             self.emit("cast_rejected", p.entity_id, spell_id=spell.spell_id, reason=reason)
@@ -437,7 +439,9 @@ class Engine:
         else:
             raise ValueError(f"Unsupported event kind {event.kind!r}")
 
-    def advance(self, action):
+    def advance(self, action, duration_ms=None):
+        if duration_ms is not None and (type(duration_ms) is not int or duration_ms != self.config.timing.step_ms):
+            raise ValueError("Advance duration must equal the configured decision interval")
         if isinstance(action, bool) or not isinstance(action, Integral) or not 0 <= action < 8:
             raise ValueError("Mystic action must be an integer from 0 through 7")
         self.trace = []
@@ -445,6 +449,7 @@ class Engine:
         self.death_events = []
         self.respawn_events = []
         self.cast_events = []
+        self.selected_target_id = None
         p = self.world.player
         if action < 4 and p.alive:
             applied = self.move(p, Direction(int(action)))
@@ -461,6 +466,7 @@ class Engine:
             else:
                 dx,dy=OFFSETS[p.facing]
                 target=self.entity(self.world.occupancy.get((p.x+dx,p.y+dy)))
+                self.selected_target_id = target.entity_id if target else None
                 applied=combat.can_hit(p,target)
                 reason=None if applied else "no_target"
                 if applied:

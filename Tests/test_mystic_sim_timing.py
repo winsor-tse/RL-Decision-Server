@@ -290,7 +290,7 @@ class TimingTests(unittest.TestCase):
             with self.assertRaises(ValueError): env.step(invalid)
         self.assertEqual(env.world.time_ms,0)
         for _ in range(256): result=env.step(4)
-        self.assertEqual(result[1:4],(0.0,False,True))
+        self.assertEqual(result[1:4],(-env.config.reward.time_cost,False,True))
         with self.assertRaises(gym.error.ResetNeeded): env.step(0)
         env.reset(seed=1)
         self.assertEqual(env.world.time_ms,0)
