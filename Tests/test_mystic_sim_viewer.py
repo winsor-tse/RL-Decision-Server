@@ -52,6 +52,30 @@ class ViewerTests(unittest.TestCase):
         self.assertNotEqual(original,session.info['npc_spawns'])
         self.assertEqual(session.total_reward,0)
 
+    def test_default_viewer_truncates_at_environment_limit_and_stays_stopped(self):
+        session=PlaySession()
+        self.addCleanup(session.close)
+        self.assertTrue(session.training_rules)
+        self.assertEqual(session.env.reward_config.max_episode_steps,256)
+        session.env.world.events.clear()  # Isolate the time limit from combat.
+        self.assertIsNone(session.step())  # Paused frames do not count.
+        session.paused=False
+        for step in range(1,257):
+            info=session.step()
+            self.assertEqual(info['current_step'],step)
+            self.assertEqual(session.env.episode_done,step==256)
+        self.assertEqual(info['episode_outcome'],'truncated')
+        self.assertEqual(info['episode_end_reason'],'step_limit')
+        self.assertIn('step limit',session.log[-1])
+        for _ in range(3):
+            self.assertIsNone(session.step())
+        self.assertEqual(session.env.world.step_count,256)
+        self.assertEqual(session.env.world.time_ms,51200)
+        session.reset()
+        self.assertEqual(session.info['current_step'],0)
+        self.assertIsNone(session.info['episode_end_reason'])
+        self.assertEqual(session.step()['current_step'],1)
+
     @unittest.skipUnless(importlib.util.find_spec('pygame'), 'Optional pygame viewer dependency not installed')
     def test_dummy_driver_renders_real_simulation(self):
         with tempfile.TemporaryDirectory() as temp:

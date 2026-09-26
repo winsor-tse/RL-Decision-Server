@@ -46,12 +46,19 @@ outer 0..99 coordinate bounds also remain hard boundaries.
 Melee remains disabled as in the baseline. Idle time uses its nonmutating attack
 action (4) to advance the clock without adding a ninth training action.
 
-Default **free play** removes the five-kill and 256-step stopping points so you
-can explore and watch respawns; player death still ends play. To use the exact
-training episode limits with the viewer's blocked-terrain profile:
+The viewer defaults to **training rules**, using the current environment's
+five-kill goal and 256-step limit. The panel shows **Steps: current / max**.
+The environment truncates on decision 256 (not 257), stops advancing, and shows
+**TRUNCATED** with **STEP LIMIT** and the final counter. Other episode endings
+show their own reason. Press R to reset the counter and start again. Idle
+decisions count; paused/render-only frames do not.
+
+For exploration and respawn testing, explicitly select **free play**, which
+overrides the kill and step limits (the panel shows the overridden limit).
+Player death and Y-boundary truncation still end play:
 
 ```powershell
-.\RL_venv\Scripts\python.exe -m Custom_enviornments.Mystic_Sim.viewer --training-rules --seed 42
+.\RL_venv\Scripts\python.exe -m Custom_enviornments.Mystic_Sim.viewer --free-play --seed 42
 ```
 
 The viewer and headless training both use `map53` with terrain and entity

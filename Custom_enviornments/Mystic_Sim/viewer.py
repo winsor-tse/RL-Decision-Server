@@ -13,7 +13,7 @@ from .targeting import select_target
 
 class PlaySession:
     """UI state stays outside the Gym environment and never edits combat state."""
-    def __init__(self, seed=42, training_rules=False):
+    def __init__(self, seed=42, training_rules=True):
         config = ScenarioConfig()
         if not training_rules:
             config = replace(config, reward=replace(config.reward,
@@ -48,6 +48,9 @@ class PlaySession:
             self.log.append('You died. R to restart.' if event['entity_id'] == 1 else f"Innie {event['entity_id']} defeated")
         for event in self.info['respawn_events']:
             self.log.append(f"Innie {event['entity_id']} respawned")
+        if self.env.episode_done:
+            reason = self.info['episode_end_reason'].replace('_', ' ')
+            self.log.append(f"{self.info['episode_outcome'].capitalize()}: {reason}. R to restart.")
         return self.info
 
     def close(self):
@@ -267,6 +270,10 @@ class Viewer:
             self.text(f'{target.hp:,} / {target.max_hp:,} HP',x,450,self.MUTED,self.small)
         self.text(f'Kills {w.kills}    Respawning {sum(not m.alive for m in w.monsters.values())}',x,479)
         self.text(f'Reward {self.session.total_reward:+.3f}',x,504,self.MUTED,self.small)
+        # Read the actual environment limit; viewer frames are not decisions.
+        limit = self.session.env.reward_config.max_episode_steps
+        self.text(f'Steps: {w.step_count} / {limit}',x,523,
+                  self.RED if w.step_count >= limit else self.TEXT,self.small)
         self.text('CONTROLS',x,542,self.BLUE)
         for i,line in enumerate(('WASD / arrows   Move','1 / 2 / 3   Cast (hold to repeat)',
                                  'Space   Pause       R   Restart','Shift+R   New seed    Tab   Map',
@@ -292,13 +299,24 @@ class Viewer:
             rect=surface.get_rect(center=self.view.center)
             self.pg.draw.rect(self.screen,self.PANEL,rect.inflate(40,28),border_radius=10)
             self.screen.blit(surface,rect)
+            if self.session.env.episode_done:
+                reason = self.session.info['episode_end_reason'].replace('_', ' ').upper()
+                detail = self.font.render(f"{reason}  |  Steps: {w.step_count} / {self.session.env.reward_config.max_episode_steps}",True,self.TEXT)
+                detail_rect = detail.get_rect(midtop=(self.view.centerx,rect.bottom+20))
+                self.pg.draw.rect(self.screen,self.PANEL,detail_rect.inflate(24,12),border_radius=6)
+                self.screen.blit(detail,detail_rect)
         self.pg.display.flip()
 
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--seed',type=int,default=42)
-    parser.add_argument('--training-rules',action='store_true',help='Stop at five kills / 256 decisions')
+    modes=parser.add_mutually_exclusive_group()
+    modes.add_argument('--training-rules',dest='training_rules',action='store_true',
+                       help='Use environment episode limits (default: five kills / 256 decisions)')
+    modes.add_argument('--free-play',dest='training_rules',action='store_false',
+                       help='Override kill and step limits for exploration; death and Y boundaries still end play')
+    parser.set_defaults(training_rules=True)
     parser.add_argument('--smoke-test',action='store_true',help='Run scripted steps and render with SDL dummy driver')
     parser.add_argument('--screenshot',type=Path,help='Save the final frame as a PNG')
     args=parser.parse_args(argv)
