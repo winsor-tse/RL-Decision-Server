@@ -170,6 +170,40 @@ class SpellTests(unittest.TestCase):
             damage.append(engine.damage_events[0].damage)
         self.assertLess(damage[1],damage[0])
 
+    def test_global_cooldown_blocks_all_other_spells_until_exact_deadline(self):
+        for first in (1,2,3):
+            for second in (1,2,3):
+                if first == second:
+                    continue
+                with self.subTest(first=first,second=second):
+                    env,w,engine=self.scene(rolls=[False]*4)
+                    self.assertTrue(engine.cast(first)[0])
+                    self.assertEqual(w.player.cooldowns.global_ready_at_ms,300)
+                    w.time_ms=299
+                    self.assert_rejected_unchanged(w,engine,second,'global_cooldown')
+                    w.time_ms=300
+                    self.assertTrue(engine.cast(second)[0])
+                    self.assertEqual(w.player.cooldowns.global_ready_at_ms,600)
+
+    def test_global_cooldown_decision_boundary_movement_and_reset(self):
+        env,w,engine=self.scene(rolls=[False]*4)
+        result=env.step(5)
+        self.assertEqual(result[4]['cooldowns']['global_ready_at_ms'],300)
+        result=env.step(6)  # Attempt at 200 ms, before deadline.
+        self.assertEqual(result[4]['action_failure_reason'],'global_cooldown')
+        self.assertEqual(w.player.cooldowns.global_ready_at_ms,300)
+        self.assertTrue(env.step(6)[4]['action_applied'])  # Attempt at 400 ms.
+        self.assertEqual(w.player.cooldowns.global_ready_at_ms,700)
+        self.assertTrue(env.step(0)[4]['action_applied'])  # Movement at 600 ms is legal.
+        env.reset(seed=42)
+        self.assertEqual(env.world.player.cooldowns.global_ready_at_ms,0)
+
+    def test_failed_cast_does_not_start_global_cooldown(self):
+        env,w,engine=self.scene(rolls=[])
+        w.player.mp=499
+        self.assert_rejected_unchanged(w,engine,1,'insufficient_mp')
+        self.assertEqual(w.player.cooldowns.global_ready_at_ms,0)
+
     def test_acid_exact_area_edge_falloff_and_shared_crit(self):
         # Override cap to a lattice-representable distance for inclusive edge tests.
         acid = replace(baseline_spells()[1], max_radius=4.0)

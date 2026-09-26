@@ -255,7 +255,8 @@ class Viewer:
         names=['Arcane Blast','Acid Cloud','Tempest Inferno']
         for i,spell in enumerate(self.session.env.config.spells):
             y=271+i*47
-            ready=max(w.player.cooldowns.slots.get(spell.slot,0),w.player.cooldowns.families.get(spell.family,0))
+            ready=max(w.player.cooldowns.slots.get(spell.slot,0),
+                      w.player.cooldowns.families.get(spell.family,0),w.player.cooldowns.global_ready_at_ms)
             wait=max(0,ready-w.time_ms)/1000
             state=f'{wait:.1f}s' if wait else 'READY' if w.player.mp>=spell.mp_cost else 'LOW MP'
             self.text(f'{i+1}   {names[i]}',x,y)

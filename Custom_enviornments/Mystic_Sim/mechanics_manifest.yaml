@@ -452,6 +452,9 @@ spells:
       provenance: source
       source: TimeFrame_Other_Details.txt
 notes:
+- User-confirmed global spell cooldown is 300 ms after any successful cast,
+  shared across all spell slots. It does not block movement; rejected casts do
+  not start or extend it. At 200 ms decisions the next ready spell can cast at 400 ms.
 - Successful aggro movement partially resets attack readiness to now plus
   min(attack_ms / 2, attack_ms - 500), or 50 ms for attack_ms <= 500, as clarified
   by the user. Baseline readiness is now + 500 ms. Fractional milliseconds round

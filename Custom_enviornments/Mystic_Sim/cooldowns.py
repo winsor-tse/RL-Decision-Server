@@ -15,6 +15,8 @@ def rejection(player, spell, now, target):
         return "cooldown"
     if spell.family and now < player.cooldowns.families.get(spell.family, 0):
         return "family_cooldown"
+    if now < player.cooldowns.global_ready_at_ms:
+        return "global_cooldown"
     if player.mp < spell.mp_cost:
         return "insufficient_mp"
     if player.hp < spell.hp_cost:
@@ -22,7 +24,8 @@ def rejection(player, spell, now, target):
     return None
 
 
-def start(player, spell, now):
+def start(player, spell, now, *, global_cooldown_ms):
+    player.cooldowns.global_ready_at_ms = now + global_cooldown_ms
     player.cooldowns.slots[spell.slot] = now + spell.cooldown_ms
     if spell.family:
         player.cooldowns.families[spell.family] = now + spell.family_cooldown_ms

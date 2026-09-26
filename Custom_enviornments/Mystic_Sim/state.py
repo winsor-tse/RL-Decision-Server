@@ -49,6 +49,7 @@ class MapDefinition:
 
 @dataclass(slots=True)
 class CooldownState:
+    global_ready_at_ms: int = 0
     slots: dict[int, int] = field(default_factory=dict)
     families: dict[str, int] = field(default_factory=dict)
 

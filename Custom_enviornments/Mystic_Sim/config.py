@@ -142,11 +142,13 @@ class SpellConfig:
 
 @dataclass(frozen=True, slots=True)
 class SpellRules:
+    global_cooldown_ms: int = 300
     arcane_bomb: bool = False
     sunburnt: bool = False
     tempest_meteor: bool = False
 
     def __post_init__(self):
+        integer("global_cooldown_ms", self.global_cooldown_ms)
         if any(getattr(self, name) is not False for name in
                ("arcane_bomb", "sunburnt", "tempest_meteor")):
             raise ValueError("Trinket/status modifiers are disabled in the baseline")

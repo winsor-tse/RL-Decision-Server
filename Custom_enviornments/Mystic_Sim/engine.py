@@ -85,6 +85,7 @@ class Engine:
         if isinstance(target, PlayerState):
             target.cooldowns.slots.clear()
             target.cooldowns.families.clear()
+            target.cooldowns.global_ready_at_ms = 0
         else:
             self.pending_npc.pop(target.entity_id,None)
             target.aggro_target = None
@@ -189,10 +190,11 @@ class Engine:
             for allocation in result.allocations:
                 if self.entity(allocation.target_id).alive:
                     self.add_acid(spell, allocation, crit)
-        cooldowns.start(p, spell, now)
+        cooldowns.start(p, spell, now, global_cooldown_ms=self.config.spell_rules.global_cooldown_ms)
         self.emit("cooldown_started", p.entity_id, slot=slot,
                   ready_at_ms=p.cooldowns.slots[slot], family=spell.family,
-                  family_ready_at_ms=p.cooldowns.families.get(spell.family))
+                  family_ready_at_ms=p.cooldowns.families.get(spell.family),
+                  global_ready_at_ms=p.cooldowns.global_ready_at_ms)
         event = CastEvent(now, p.entity_id, spell.spell_id, target.entity_id,
                           tuple(a.target_id for a in result.allocations), before_mp, post_cost_mp,
                           p.mp, before_hp, p.hp, crit, p.cooldowns.slots[slot])

@@ -949,6 +949,12 @@ Resolve an existing plan inconsistency in favor of the supplied property record:
 Tempest Inferno uses `manaConsumption=0.20`; do not retain the spell script's
 15% fallback when the property is present.
 
+Every successful spell starts a shared 300 ms global cooldown, in addition to
+its slot/family cooldowns. No spell can cast before that absolute deadline;
+movement remains available. At 200 ms decisions, another ready spell can first
+cast at +400 ms. Rejected casts neither start nor extend this cooldown and consume
+no resources or combat RNG. Reset/death clears the shared deadline.
+
 Cooldowns begin only after a successful cast. At 200 ms decisions, first recast
 boundaries are 3,600 ms, 5,000 ms, and 1,800 ms. Timed effects use absolute
 deadlines and stable effect IDs. Refresh is per caster/target; different casters

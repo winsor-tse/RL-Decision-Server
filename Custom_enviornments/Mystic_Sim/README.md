@@ -175,7 +175,12 @@ the engine owns RNG draws and mutations.
 
 Damage uses MP after the fixed charge. Percentage charges use midpoint-to-even
 rounding. First cooldown-ready decisions after a cast at zero are 3600, 5000,
-and 1800 ms. Rejected casts leave resources, cooldowns, effects, and combat RNG
+and 1800 ms. Every successful spell also starts a shared 300 ms global cooldown
+(`SpellRules.global_cooldown_ms`). A different ready spell can cast at exactly
++300 ms, or the +400 ms decision on the default 200 ms clock. This does not
+block movement. The viewer includes this shared deadline in all spell timers;
+step info exposes `cooldowns.global_ready_at_ms`. Rejected casts leave resources,
+cooldowns, effects, and combat RNG
 unchanged; a Gym step still advances the world and can dispatch existing events.
 
 Acid initial damage applies AoE scaling before mitigation, then distance falloff.
