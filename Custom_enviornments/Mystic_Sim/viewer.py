@@ -14,7 +14,7 @@ from .targeting import select_target
 class PlaySession:
     """UI state stays outside the Gym environment and never edits combat state."""
     def __init__(self, seed=42, training_rules=False):
-        config = ScenarioConfig(profile="map53_blocked_v2", terrain_collision=True)
+        config = ScenarioConfig()
         if not training_rules:
             config = replace(config, reward=replace(config.reward,
                               win_kills=2**31-1, max_episode_steps=2**31-1))

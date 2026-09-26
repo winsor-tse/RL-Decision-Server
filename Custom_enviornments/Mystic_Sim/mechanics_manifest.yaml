@@ -1,5 +1,5 @@
 manifest_version: 1
-profile: map53_open_entities_v1
+profile: map53
 parameters:
   map_id:
     value: 53
@@ -63,7 +63,7 @@ parameters:
     source: Developer/user answers in integration plan; corrections override older
       fragments
   terrain_collision:
-    value: false
+    value: true
     provenance: developer
     source: Developer/user answers in integration plan; corrections override older
       fragments
@@ -452,9 +452,12 @@ spells:
       provenance: source
       source: TimeFrame_Other_Details.txt
 notes:
-- Viewer uses map53_blocked_v2; all map blocked cells and outer bounds prevent
-  player/NPC movement, and spawning/respawning exclude blocked cells. The original
-  map53_open_entities_v1 headless default remains available for reproducibility.
+- map53 is the single map profile in the viewer and headless environment. Terrain
+  and entity collision are required; spawning/respawning exclude blocked cells.
+- legacy_y_penalty_below defaults to 31 for both reward profiles, applying
+  -100 times (31 - player Y) below that row. legacy_y_penalty_above defaults to 85,
+  applying -100 times (player Y - 85) above that row. Simulator episodes truncate
+  at Y <= 29 or Y >= 87, retaining the boundary-step penalty. Live rules are unchanged.
 - User-confirmed global spell cooldown is 300 ms after any successful cast,
   shared across all spell slots. It does not block movement; rejected casts do
   not start or extend it. At 200 ms decisions the next ready spell can cast at 400 ms.

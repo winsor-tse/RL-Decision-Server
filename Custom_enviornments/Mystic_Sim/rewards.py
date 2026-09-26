@@ -40,8 +40,6 @@ def calculate(world, config, previous_obs, obs, action, damage_events, death_eve
         parts["health_state"] = -.50 if hp < .25 else -.15 if hp < .50 else 0.0
         if action <= 3 and obs[0] == previous_obs[0] and obs[1] == previous_obs[1]:
             parts["positioning"] -= 10
-        if config.legacy_y_penalty_below is not None and obs[1] < config.legacy_y_penalty_below:
-            parts["positioning"] -= 100 * (config.legacy_y_penalty_below - float(obs[1]))
         closest = float(obs[6])
         parts["positioning"] += min(3, 9 - min(abs(closest - 5), 4) ** 2)
         hp_lost = float(previous_obs[3]) - hp
@@ -51,4 +49,8 @@ def calculate(world, config, previous_obs, obs, action, damage_events, death_eve
         parts["damage_dealt"] = 25 * dealt
         parts["killed"] = 10.0 * killed
         parts["terminal"] = -100.0 if outcome == "loss" else 0.0
+    if config.legacy_y_penalty_below is not None and obs[1] < config.legacy_y_penalty_below:
+        parts["positioning"] -= 100 * (config.legacy_y_penalty_below - float(obs[1]))
+    if config.legacy_y_penalty_above is not None and obs[1] > config.legacy_y_penalty_above:
+        parts["positioning"] -= 100 * (float(obs[1]) - config.legacy_y_penalty_above)
     return {key: float(value) for key, value in parts.items()}

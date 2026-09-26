@@ -32,7 +32,7 @@ One action executes per decision; held spells take priority over movement.
 Targets are selected automatically by the simulator. Blue is the player, amber
 is an idle Innie, red is aggro, and green rings indicate Acid. The gold ring
 marks the nearest eligible target. Dead Innies display respawn countdowns.
-Dark terrain is solid: the viewer uses `map53_blocked_v2`, which enforces the
+Dark terrain is solid: the viewer uses `map53`, which enforces the
 map's blocked-tile layer for players, NPCs, spawn placement, and respawns. The
 outer 0..99 coordinate bounds also remain hard boundaries.
 Melee remains disabled as in the baseline. Idle time uses its nonmutating attack
@@ -46,12 +46,10 @@ training episode limits with the viewer's blocked-terrain profile:
 .\RL_venv\Scripts\python.exe -m Custom_enviornments.Mystic_Sim.viewer --training-rules --seed 42
 ```
 
-For headless training on the same solid map, construct `MysticSimEnv` with
-`ScenarioConfig(profile="map53_blocked_v2", terrain_collision=True)`. The default
-headless `map53_open_entities_v1` profile remains available unchanged for older
-experiments. The two profiles have different movement/spawn behavior; record
-the selected profile with training checkpoints. Terrain does not add spell
-line-of-sight restrictions.
+The viewer and headless training both use `map53` with terrain and entity
+collision enabled by default. Use `MysticSimEnv()` or `ScenarioConfig()`; no
+special terrain profile is needed. Terrain does not add spell line-of-sight
+restrictions. Old map-profile names are no longer accepted.
 
 Rendering is 60 FPS with independent 200 ms simulation decisions. Focus loss
 pauses the viewer. Excess wall-clock lag is capped so returning to a stalled
@@ -222,12 +220,12 @@ or the ignored C# source directory. An explicit `map_path` may be passed for
 another copy of the same validated baseline map.
 
 `ScenarioConfig` contains frozen player, Innie, spell, timing, and reward
-configuration. The default profile is `map53_open_entities_v1`. Reset options
+configuration. The default profile is `map53`. Reset options
 accept that environment's fidelity `profile` and an optional `reward_profile`;
 unknown options fail explicitly. Reward selection is local to the episode and
 does not modify the constructor configuration or other environments.
 Map properties retain cap 68, while Innie stats use the confirmed level-150
-override. Terrain is ignored, entity occupancy is enforced, and fixed template
+override. Terrain and entity occupancy are enforced, and fixed template
 5399 is excluded.
 
 Reset samples player X then Y in inclusive ranges 45..55 and 40..50, then visits
@@ -262,7 +260,7 @@ The eight-action space and 26-value float32 observation contract are unchanged.
 Default episodes terminate on death or five kills and truncate at 256 steps.
 Death takes precedence over a simultaneous kill goal; termination takes
 precedence over a simultaneous time limit. `episode_end_reason` distinguishes
-`player_death`, `kill_goal`, `step_limit`, and optional `y_boundary` truncation.
+`player_death`, `kill_goal`, `step_limit`, and `y_boundary` truncation.
 
 `combat_reward_v1` uses actual damage/death events, including DoT damage and
 overkill capped at remaining HP. Regeneration cannot mask damage taken, and
@@ -271,7 +269,7 @@ moving an enemy outside the observation does not earn a kill reward.
 | Dashboard component | Default training calculation |
 |---|---|
 | `health_state` | -0.001 per decision (time cost) |
-| `positioning` | 0 |
+| `positioning` | -100 * (31 - Y) below 31; -100 * (Y - 85) above 85; otherwise 0 |
 | `damage_taken` | -player damage / player maximum HP |
 | `damage_dealt` | Sum of player damage / each enemy's maximum HP |
 | `terminal` | -5 for death; 0 otherwise |
@@ -279,15 +277,20 @@ moving an enemy outside the observation does not earn a kill reward.
 
 The returned reward is exactly the sum of these six components. Weights, kill
 goal, and time limit are configurable through frozen `RewardConfig` fields.
-`y_bounds=None` disables Y restrictions. For a task needing them, set inclusive
-`y_bounds=(25, 99)`; leaving the interval truncates without a death penalty.
+The simulator defaults to inclusive `y_bounds=(30, 86)`: reaching Y <= 29 or
+Y >= 87 truncates. The boundary step still receives its positioning penalty
+(-200 at 29 or 87), without a death penalty. Rows 30 and 86 receive -100 and
+continue; rows 31 through 85 receive no Y penalty. Set `y_bounds=None` only to
+explicitly disable Y truncation. These task rules apply only to the simulator.
 
 `legacy_reward_v0` snapshots the live health thresholds, blocked-move penalty,
 distance shaping, signed player HP-delta quirk, and coefficients (25 for enemy
 damage, 10 per kill, -100 for death). Enemy damage and kills use explicit events
 instead of live disappearance heuristics. Legacy alone retains healing rewards
-and the `hp != 0.5` branch for comparison. Its old Y shaping is opt-in via
-`legacy_y_penalty_below=31`; it is separate from episode truncation.
+and the `hp != 0.5` branch for comparison. Both reward profiles enable
+`legacy_y_penalty_below=31` and `legacy_y_penalty_above=85` by default, applying
+the same Y penalties alongside boundary truncation. Set either threshold to
+`None` only to explicitly disable that side's shaping.
 
 ```python
 observation, info = env.reset(seed=42, options={"reward_profile": "legacy_reward_v0"})
@@ -348,8 +351,8 @@ selected IDs are stored separately. The pure
 raw map data. `load_map_definition(path)` normalizes immutable geometry, and
 `scenarios.build_scenario` constructs episode state. Changes to map dimensions,
 properties, spawn layout, or quantities fail
-explicitly so a changed map requires review. Terrain remains disabled in the
-baseline even though the blocked layer is validated.
+explicitly so a changed map requires review. The validated blocked layer is
+always enforced in map53.
 
 `mechanics_manifest.yaml` records baseline parameters and provenance. It preserves
 the JSON cap 68 separately from the confirmed effective level 150, the corrected

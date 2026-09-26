@@ -2,13 +2,15 @@
 
 ## Current scope
 
-Map collision update: `map53_blocked_v2` is implemented and selected by the
-Pygame viewer. Its blocked-tile layer constrains player/NPC movement, pathfinding,
-spawn placement, and respawns. Select it for matching headless training with
-`ScenarioConfig(profile="map53_blocked_v2", terrain_collision=True)`. The original
-`map53_open_entities_v1` remains the headless default for reproducibility; references
-below to disabled terrain describe that original profile. Both profiles enforce
-the outer 0..99 coordinate bounds. No spell line-of-sight rule is introduced.
+The single map profile is `map53`, used by both the viewer and headless training.
+Terrain and entity collision are always enabled for movement, pathfinding,
+spawning, and respawning, alongside the outer 0..99 coordinate bounds. No spell
+line-of-sight rule is introduced. Both reward profiles default to
+`legacy_y_penalty_below=31` and `legacy_y_penalty_above=85`: subtract
+100 * (31 - Y) below 31, or 100 * (Y - 85) above 85. Simulator episodes truncate
+at Y <= 29 or Y >= 87 (inclusive continuing bounds 30..86); the final step retains
+its penalty. These task rules do not change live Mystic. Old open/blocked
+map-profile names are removed.
 
 The next priority is to train PPO on the current Mystic simulator and validate
 that the same policy contract works with live Mystic through the existing ZMQ
@@ -74,7 +76,7 @@ provide their missing entity, map, spell-property, and status-effect types.
 | World distance           | `EntityBase.Distance` is Euclidean for attack/spell radii and aggro. Casting eligibility uses an inclusive rectangle: abs(dx) <= 16 and abs(dy) <= 10. |
 | Observation distance     | The client-supplied distances in the fixture equal Manhattan distance; Mystic also uses Manhattan as its fallback.                                                |
 | Spawn boxes              | `map53.json` contains 40 non-fixed 10 by 10 template-5300 boxes with two Innies each, for 80 baseline Innies. A dead Innie respawns at a random unoccupied point in its own box after 50 seconds. |
-| Collision scope          | The JSON blocked layer contains 5,088 marked cells, but terrain blocking is explicitly deferred. Baseline legality checks map bounds and entity occupancy only. |
+| Collision scope          | The JSON blocked layer contains 5,088 marked cells, but terrain blocking is enforced. Baseline legality checks map bounds, terrain, and entity occupancy. |
 | Mystic ranges            | The exact`Ranges.Mystic` formula is supplied in `TimeFrame_Other_Details.txt`.                                                                                    |
 | Spell records            | Exact properties are supplied for Arcane Blast (416), Acid Cloud (417), and Tempest Inferno (418).                                                                |
 
@@ -100,7 +102,7 @@ inclusive 16-X/10-Y rectangle; it is not a distance metric.
 | 100x100 map and spawn layout            | Resolved for baseline      | Parse dimensions, tile size, properties, and NPC object rectangles from `map53.json`. Use the 40 template-5300 boxes and exclude the fixed template-5399 NPC from the Innie-only scenario. Do not enable the blocked tile layer yet. |
 | Player start and objective              | Resolved for baseline      | Sample the player from `x=50+/-5`, `y=45+/-5`, rejecting occupied cells. The episode objective is five Innie kills; no separate objective-area geometry is required for v0. |
 | `EntityBase.Distance` metric            | Resolved                   | Port Euclidean distance exactly for mechanics; retain Manhattan distance for Mystic observations.                                                                                                                            |
-| NPC movement, facing, path choice       | Resolved for baseline      | Port `NPC.cs`. A candidate cell is legal when it is inside map bounds and contains neither the player nor another living NPC. Terrain blocking remains disabled. |
+| NPC movement, facing, path choice       | Resolved for baseline      | Port `NPC.cs`. A candidate cell is legal when it is inside map bounds and contains neither the player nor another living NPC. Terrain blocking is enforced. |
 | Innie combat template                   | Resolved for baseline      | Use template 5300, balance cap 150, bulk 0.5, HP 274,599, MP 0, AC 2,250, toughness 15, raw damage 3,549, one-second attacks, one sampled 0.9–1.1-second movement interval per life, radius 1, 50-second respawn, and no NPC spells. |
 | Player/spell shared formulas            | Resolved for baseline      | Port`Player.cs`, `Entitybase.cs`, `BaseSpell.txt`, and the supplied Mystic range formula.                                                                                                                                    |
 | Spell properties                        | Resolved                   | Use the supplied records for spell IDs 416, 417, and 418.                                                                                                                                                                    |
@@ -685,13 +687,13 @@ death_events, cooldowns_remaining_ms
 
 The first runnable environment can now be implemented without inventing missing
 map, target-selection, collision, or event-queue behavior. Name this profile
-`map53_open_entities_v1` and freeze these settings in one immutable scenario
+`map53` and freeze these settings in one immutable scenario
 configuration:
 
 | Setting | Baseline value |
 |---|---|
 | Map | ID 53, 100 by 100, parsed from `map53.json` |
-| Terrain collision | Disabled; retain blocked data for a later profile |
+| Terrain collision | Enabled; enforce the parsed blocked cells |
 | Occupancy collision | Enabled for the player and living NPCs |
 | Player spawn | Uniform legal cell in X 45..55 and Y 40..50, inclusive |
 | NPC spawns | All 40 non-fixed template-5300 boxes, quantity two each |
@@ -728,8 +730,7 @@ These items do not prevent implementation, but must remain visible:
 4. Gear is intentionally absent. The attack action returns `gear_disabled`, and
    gear-derived damage, speed, and spell multiplier remain zero until one
    complete gear profile is supplied.
-5. The blocked layer is parsed and validated but ignored. A later
-   `map53_blocked_v2` profile can enable it through the map adapter.
+5. The blocked layer is parsed, validated, and enforced in map53 for all entities.
 
 Every configuration value should carry provenance (`source`, `developer`,
 `fixture`, `derived`, or `simulator_rule`). Approximate mechanics belong in a
@@ -796,7 +797,7 @@ Implement data before behavior:
 - `state.py`: slotted `PlayerState`, `MonsterState`, `SpawnBox`, `TimedEffect`,
   `CooldownState`, and `WorldState`. Use integer HP/MP, integer tile coordinates,
   integer milliseconds, and stable integer entity IDs.
-- `scenarios.py`: construct `map53_open_entities_v1`, apply the documented
+- `scenarios.py`: construct `map53`, apply the documented
   level-150 override, omit template 5399, and seed all placement from the
   environment generator.
 - Spawn player first, then spawn boxes by Tiled object ID and members by local
@@ -991,7 +992,9 @@ Legacy preserves live coefficients/shaping and its signed player HP-delta quirk
 for comparison; training uses damage events even if regeneration heals that step.
 
 `RewardConfig` makes weights, kill goal, step limit, optional inclusive `y_bounds`,
-and optional `legacy_y_penalty_below` configurable. Y rules default to disabled.
+and `legacy_y_penalty_below` configurable. The Y penalty defaults to row 31 for
+both reward profiles, with the matching upper penalty above 85. Simulator
+Y-boundary truncation defaults to Y <= 29 or Y >= 87.
 Death overrides a simultaneous kill goal, and termination overrides truncation.
 Reset accepts the existing fidelity profile and an episode-local `reward_profile`;
 it validates before mutating state. Fixed fixture reset is not exposed. Diagnostics
@@ -1012,8 +1015,8 @@ are detached snapshots, with the selected target captured at action time.
   enemy damage and kills, penalize normalized player damage and death, use a
   small time cost, and avoid hard-coding the current `player_hp_pct != 0.5` bug.
 - Terminate on player death or the fifth Innie kill. Truncate at 256 steps. Keep
-  Y-boundary rules configurable and disabled unless the chosen training task
-  explicitly needs them.
+  Y-boundary rules configurable; the simulator task truncates at Y <= 29 or
+  Y >= 87 and applies penalties below 31 and above 85.
 - Return diagnostics including profile, seed, simulation time, step, selected
   target, action result/reason, reward components, kills, cooldowns, active
   effects, and the step's damage/death/respawn events.
@@ -1416,9 +1419,8 @@ Before running policy-driven live sessions:
    level-150 Innie template, movement interval per life, 226 HP/1664 MP per
    two seconds, fixed-before-percentage MP costs, 16-X/10-Y casting rectangle,
    and per-caster Acid refresh against the connected version. Preserve old
-   profiles when live evidence requires a new fidelity configuration. Enable
-   terrain collision only if the compared live task uses it, under a separate
-   tested profile such as `map53_blocked_v2`.
+   evidence when live behavior differs. Terrain collision is always enabled in
+   map53; test the actual obstacle layout against the live task.
 7. Evaluate frozen simulator-trained PPO checkpoints through the live ZMQ
    adapter using deterministic action selection. Record both sides' task and
    reward profiles, kills, survival, damage, spell success, and action timing.
@@ -1496,7 +1498,7 @@ integration.
   effects, death, and respawn are deterministic for a seed.
 - The three spell translations and all source-derived formulas have numeric and
   state-transition tests.
-- Occupancy collision is enforced; blocked terrain remains disabled by profile.
+- Terrain and occupancy collision are enforced in map53.
 - Gear is disabled cleanly and can later be enabled through configuration.
 - Five kills wins, player death loses, and 256 actions truncate.
 - Gymnasium validation and the repository test suite pass.

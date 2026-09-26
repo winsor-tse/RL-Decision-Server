@@ -1,4 +1,4 @@
-"""Immutable configuration for the map53_open_entities_v1 baseline."""
+"""Immutable configuration for map53."""
 from dataclasses import dataclass, field
 from math import isfinite
 
@@ -193,8 +193,9 @@ class RewardConfig:
     player_damage_weight: float = 1.0
     death_penalty: float = 5.0
     time_cost: float = 0.001
-    y_bounds: tuple[int, int] | None = None
-    legacy_y_penalty_below: int | None = None
+    y_bounds: tuple[int, int] | None = (30, 86)  # Inclusive playable rows; truncate at <=29 or >=87.
+    legacy_y_penalty_below: int | None = 31
+    legacy_y_penalty_above: int | None = 85
 
     def __post_init__(self):
         integer("win_kills", self.win_kills, 1)
@@ -211,6 +212,13 @@ class RewardConfig:
             integer("legacy_y_penalty_below", self.legacy_y_penalty_below)
             if self.legacy_y_penalty_below >= 100:
                 raise ValueError("legacy_y_penalty_below must be within the map")
+        if self.legacy_y_penalty_above is not None:
+            integer("legacy_y_penalty_above", self.legacy_y_penalty_above)
+            if self.legacy_y_penalty_above >= 100:
+                raise ValueError("legacy_y_penalty_above must be within the map")
+        if (self.legacy_y_penalty_below is not None and self.legacy_y_penalty_above is not None
+                and self.legacy_y_penalty_below > self.legacy_y_penalty_above):
+            raise ValueError("Y penalty thresholds must be ordered")
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,13 +236,13 @@ class GearConfig:
 
 @dataclass(frozen=True, slots=True)
 class ScenarioConfig:
-    profile: str = "map53_open_entities_v1"
+    profile: str = "map53"
     map_id: int = 53
     width: int = 100
     height: int = 100
     player_spawn_x: tuple[int, int] = (45, 55)
     player_spawn_y: tuple[int, int] = (40, 50)
-    terrain_collision: bool = False
+    terrain_collision: bool = True
     entity_collision: bool = True
     gear_enabled: bool = False
     gear: GearConfig | None = None
@@ -252,10 +260,10 @@ class ScenarioConfig:
                 raise ValueError(f"{name} must be a {cls.__name__}")
         for name in ("map_id", "width", "height"):
             integer(name, getattr(self, name), 1)
-        if self.profile not in ("map53_open_entities_v1", "map53_blocked_v2") or (self.map_id, self.width, self.height) != (53,100,100):
-            raise ValueError("Only the 100x100 map53 open and blocked profiles are implemented")
-        if self.terrain_collision is not (self.profile == "map53_blocked_v2") or self.entity_collision is not True:
-            raise ValueError("Terrain collision must match the profile; entity collision is required")
+        if self.profile != "map53" or (self.map_id, self.width, self.height) != (53,100,100):
+            raise ValueError("Only the 100x100 map53 profile is implemented")
+        if self.terrain_collision is not True or self.entity_collision is not True:
+            raise ValueError("map53 requires terrain and entity collision")
         if (type(self.gear_enabled) is not bool
                 or (self.gear_enabled and not isinstance(self.gear, GearConfig))
                 or (not self.gear_enabled and self.gear is not None)):

@@ -9,7 +9,7 @@ from Custom_enviornments.Mystic_Sim.state import Direction
 
 class TerrainTests(unittest.TestCase):
     def scene(self, seed=42):
-        env = MysticSimEnv(config=ScenarioConfig(profile='map53_blocked_v2',terrain_collision=True))
+        env = MysticSimEnv(config=ScenarioConfig())
         env.reset(seed=seed)
         self.addCleanup(env.close)
         return env
@@ -76,14 +76,15 @@ class TerrainTests(unittest.TestCase):
         self.assertTrue(npc.alive)
         self.assertEqual((npc.x,npc.y),free)
 
-    def test_old_open_profile_retains_terrain_behavior(self):
+    def test_map53_always_enforces_terrain(self):
         env=MysticSimEnv()
         self.addCleanup(env.close)
         env.reset(seed=42)
         cell=next(c for c in env.world.map.blocked_cells if c not in env.world.occupancy)
-        self.assertTrue(legal_move(env.world,*cell))
+        self.assertFalse(legal_move(env.world,*cell))
+        self.assertEqual(env.config.profile,'map53')
         with self.assertRaises(ValueError):
-            ScenarioConfig(profile='map53_blocked_v2',terrain_collision=False)
+            ScenarioConfig(terrain_collision=False)
 
 
 if __name__=='__main__':

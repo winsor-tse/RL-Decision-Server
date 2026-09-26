@@ -79,8 +79,9 @@ class TimingTests(unittest.TestCase):
         w.occupancy.pop((50,49))
         w.player.x,w.player.y=0,0
         w.occupancy[(0,0)]=1
-        self.assertFalse(env.step(2)[4]["action_applied"])
-        self.assertFalse(env.step(0)[4]["action_applied"])
+        # Exercise hard map collision directly, independently of Gym Y truncation.
+        self.assertFalse(env.engine.advance(2)[0])
+        self.assertFalse(env.engine.advance(0)[0])
         self.assertEqual(w.time_ms,800)
 
     def test_hard_map_edges_block_player_and_npc(self):
@@ -217,7 +218,8 @@ class TimingTests(unittest.TestCase):
         env.engine.update_npc(npc)
         self.assertFalse(any(e['kind']=='npc_attack' for e in env.engine.trace))
         w.player.x,w.player.y=46,50
-        env.engine.update_npc(npc)
+        with patch.object(env.engine.rng,'chance',return_value=False):
+            env.engine.update_npc(npc)
         self.assertEqual(npc.next_attack_ms,1000)
         self.assertTrue(any(e['kind']=='npc_attack' for e in env.engine.trace))
         self.assertLess(w.player.hp,w.player.max_hp)
@@ -338,7 +340,8 @@ class TimingTests(unittest.TestCase):
             with self.assertRaises(ValueError): env.step(invalid)
         self.assertEqual(env.world.time_ms,0)
         for _ in range(256): result=env.step(4)
-        self.assertEqual(result[1:4],(-env.config.reward.time_cost,False,True))
+        self.assertEqual(result[2:4],(False,True))
+        self.assertEqual(result[1],sum(result[4]['reward_components'].values()))
         with self.assertRaises(gym.error.ResetNeeded): env.step(0)
         env.reset(seed=1)
         self.assertEqual(env.world.time_ms,0)

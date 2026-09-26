@@ -158,11 +158,10 @@ class MysticResetTests(unittest.TestCase):
         self.assertEqual(rng.calls, [(45, 56), (40, 51), (10, 20), (31, 41), (900, 1101),
                                      (10, 20), (31, 41), (900, 1101)])
 
-    def test_terrain_disabled_at_reset(self):
-        # All cells marked blocked still leave placement legal in the open profile.
+    def test_all_blocked_map_rejects_reset(self):
         map_def = replace(self.map, blocked_cells=frozenset((x, y) for x in range(100) for y in range(100)))
-        world = build_scenario(map_def, ScenarioConfig(), np.random.default_rng(3))
-        self.assertEqual(len(world.occupancy), 81)
+        with self.assertRaises(ValueError):
+            build_scenario(map_def, ScenarioConfig(), np.random.default_rng(3))
 
     def test_observation_padding_ties_dead_monsters_and_directions(self):
         env = MysticSimEnv()
@@ -216,7 +215,7 @@ class MysticResetTests(unittest.TestCase):
                  lambda: RewardConfig(win_kills=0), lambda: ScenarioConfig(player_spawn_x=(99,100)),
                  lambda: ScenarioConfig(player_spawn_y=(50,40)), lambda: ScenarioConfig(width=99),
                  lambda: ScenarioConfig(spells=(baseline_spells()[0],)*3),
-                 lambda: ScenarioConfig(terrain_collision=True), lambda: ScenarioConfig(player={}),
+                 lambda: ScenarioConfig(terrain_collision=False), lambda: ScenarioConfig(player={}),
                  lambda: replace(baseline_spells()[0], cooldown_ms=-1),
                  lambda: replace(baseline_spells()[1], tick_interval_ms=0)]
         for create in cases:

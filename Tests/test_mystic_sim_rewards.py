@@ -92,8 +92,8 @@ class RewardTests(unittest.TestCase):
         self.assertEqual(result[4]['episode_end_reason'],'step_limit')
         self.assertEqual(result[4]['reward_components']['terminal'],0)
 
-    def test_y_rules_opt_in_and_exact_edges(self):
-        env=self.scene()
+    def test_y_rules_can_be_disabled_or_overridden(self):
+        env=self.scene(RewardConfig(y_bounds=None))
         env.world.player.y=0
         self.assertEqual(env.step(4)[2:4],(False,False))
         for y, outside in ((24,True),(25,False),(60,False),(61,True)):
@@ -128,7 +128,38 @@ class RewardTests(unittest.TestCase):
         env=self.scene(RewardConfig(profile='legacy_reward_v0'))
         obs=encode_observation(env.world);obs[1]=0
         parts=rewards.calculate(env.world,env.reward_config,obs,obs,4,[],[],None)
-        self.assertEqual(parts['positioning'],3)  # No implicit Y penalty.
+        self.assertEqual(parts['positioning'],-3097)  # +3 shaping, -3100 Y penalty.
+
+    def test_y_penalty_enabled_for_both_profiles(self):
+        for profile in ('combat_reward_v1','legacy_reward_v0'):
+            env=self.scene(RewardConfig(profile=profile))
+            obs=encode_observation(env.world)
+            for y,penalty in ((31,0),(30,-100),(29,-200)):
+                obs[1]=y
+                parts=rewards.calculate(env.world,env.reward_config,obs,obs,4,[],[],None)
+                self.assertEqual(parts['positioning'],penalty+(3 if profile=='legacy_reward_v0' else 0))
+            config=replace(env.reward_config,legacy_y_penalty_below=None)
+            self.assertEqual(rewards.calculate(env.world,config,obs,obs,4,[],[],None)['positioning'],
+                             3 if profile=='legacy_reward_v0' else 0)
+
+    def test_sim_y_penalty_and_truncation_boundaries(self):
+        for profile in ('combat_reward_v1','legacy_reward_v0'):
+            for y,penalty,truncated in ((28,-300,True),(29,-200,True),(30,-100,False),
+                                        (31,0,False),(85,0,False),(86,-100,False),
+                                        (87,-200,True),(88,-300,True)):
+                with self.subTest(profile=profile,y=y):
+                    env=self.scene(RewardConfig(profile=profile))
+                    env.world.player.y=y
+                    env.world.monsters[2].y=y  # Keep legacy distance shaping constant at +3.
+                    obs,reward,term,trunc,info=env.step(4)
+                    self.assertEqual((term,trunc),(False,truncated))
+                    self.assertEqual(info['reward_components']['positioning'],
+                                     penalty+(3 if profile=='legacy_reward_v0' else 0))
+                    self.assertEqual(reward,sum(info['reward_components'].values()))
+                    if truncated:
+                        self.assertEqual(info['episode_end_reason'],'y_boundary')
+                        self.assertEqual(info['reward_components']['terminal'],0)
+                        with self.assertRaises(gym.error.ResetNeeded): env.step(4)
 
     def test_reset_profiles_are_local_and_validation_is_atomic(self):
         a,b=self.scene(),self.scene()

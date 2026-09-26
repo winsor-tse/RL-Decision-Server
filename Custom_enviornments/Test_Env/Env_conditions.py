@@ -231,8 +231,10 @@ def get_reward_components(
     if prev_obs is None or not np.any(prev_obs):
         return components
 
+    #Must be below 31, do not wander - Negative rewards
     if obs[1] < 31:
         components["positioning"] += -100 * (31 - float(obs[1]))
+        #Eventually this should be truncation not just negative reward
 
     if len(obs) > 6:
         closest = obs[6]
@@ -258,6 +260,7 @@ def get_reward_components(
     assumed_dead_ids = set()
     missing_enemy_ids = prev_ent_state.keys() - true_next_ent_state.keys()
     
+    #Specific to Live Game itself since respawn needs to change maps (TP from spawn map)
     if obs[5] == 53 and prev_obs[5] == 53:
         for enemy_id in missing_enemy_ids:
             previous_enemy = prev_ent_state[enemy_id]
