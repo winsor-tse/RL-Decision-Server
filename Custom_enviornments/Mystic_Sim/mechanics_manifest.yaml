@@ -1,0 +1,482 @@
+manifest_version: 1
+profile: map53
+parameters:
+  map_id:
+    value: 53
+    provenance: source
+    source: map53.json
+  width:
+    value: 100
+    provenance: source
+    source: map53.json
+  height:
+    value: 100
+    provenance: source
+    source: map53.json
+  tile_size:
+    value: 32
+    provenance: source
+    source: map53.json
+  parsed_balance_cap:
+    value: 68
+    provenance: source
+    source: map53.json
+  innie_boxes:
+    value: 40
+    provenance: source
+    source: map53.json
+  innies_per_box:
+    value: 2
+    provenance: source
+    source: map53.json
+  blocked_cells:
+    value: 5088
+    provenance: source
+    source: map53.json
+  excluded_templates:
+    value:
+    - 5399
+    provenance: source
+    source: map53.json
+  npc_effective_level:
+    value: 150
+    provenance: developer
+    source: Developer/user answers in integration plan; corrections override older
+      fragments
+  respawn_ms:
+    value: 50000
+    provenance: developer
+    source: Developer/user answers in integration plan; corrections override older
+      fragments
+  player_spawn_x_inclusive:
+    value:
+    - 45
+    - 55
+    provenance: developer
+    source: Developer/user answers in integration plan; corrections override older
+      fragments
+  player_spawn_y_inclusive:
+    value:
+    - 40
+    - 50
+    provenance: developer
+    source: Developer/user answers in integration plan; corrections override older
+      fragments
+  terrain_collision:
+    value: true
+    provenance: developer
+    source: Developer/user answers in integration plan; corrections override older
+      fragments
+  entity_collision:
+    value: true
+    provenance: developer
+    source: Developer/user answers in integration plan; corrections override older
+      fragments
+  gear_enabled:
+    value: false
+    provenance: developer
+    source: Developer/user answers in integration plan; corrections override older
+      fragments
+  spell_multiplier:
+    value: 0
+    provenance: developer
+    source: Developer/user answers in integration plan; corrections override older
+      fragments
+  fixed_mp_cost_before_spell:
+    value: true
+    provenance: developer
+    source: Developer/user answers in integration plan; corrections override older
+      fragments
+  target_selection:
+    value: nearest living eligible monster
+    provenance: developer
+    source: Developer/user answers in integration plan; corrections override older
+      fragments
+  player_level:
+    value: 135
+    provenance: source
+    source: Current_Player_Stats.txt
+  player_max_hp:
+    value: 9463
+    provenance: source
+    source: Current_Player_Stats.txt
+  player_max_mp:
+    value: 15108
+    provenance: source
+    source: Current_Player_Stats.txt
+  player_ac:
+    value: 3292
+    provenance: source
+    source: Current_Player_Stats.txt
+  player_strength:
+    value: 100
+    provenance: source
+    source: Current_Player_Stats.txt
+  player_stamina:
+    value: 100
+    provenance: source
+    source: Current_Player_Stats.txt
+  player_intelligence:
+    value: 578
+    provenance: source
+    source: Current_Player_Stats.txt
+  player_wisdom:
+    value: 578
+    provenance: source
+    source: Current_Player_Stats.txt
+  player_dexterity:
+    value: 194
+    provenance: source
+    source: Current_Player_Stats.txt
+  player_ferocity:
+    value: 11
+    provenance: source
+    source: Current_Player_Stats.txt
+  player_acuity:
+    value: 22
+    provenance: source
+    source: Current_Player_Stats.txt
+  player_toughness:
+    value: 7
+    provenance: source
+    source: Current_Player_Stats.txt
+  player_precision:
+    value: 18
+    provenance: source
+    source: Current_Player_Stats.txt
+  innie_template:
+    value: 5300
+    provenance: source
+    source: NPC.cs; Current_NPC_Script.txt; Innie_Script_Extends_NPC.txt; ScaledCalcs.txt
+      (effective level 150)
+  innie_bulk_factor:
+    value: 0.5
+    provenance: source
+    source: NPC.cs; Current_NPC_Script.txt; Innie_Script_Extends_NPC.txt; ScaledCalcs.txt
+      (effective level 150)
+  innie_max_hp:
+    value: 274599
+    provenance: derived
+    source: NPC.cs; Current_NPC_Script.txt; Innie_Script_Extends_NPC.txt; ScaledCalcs.txt
+      (effective level 150)
+  innie_max_mp:
+    value: 0
+    provenance: source
+    source: NPC.cs; Current_NPC_Script.txt; Innie_Script_Extends_NPC.txt; ScaledCalcs.txt
+      (effective level 150)
+  innie_ac:
+    value: 2250
+    provenance: derived
+    source: NPC.cs; Current_NPC_Script.txt; Innie_Script_Extends_NPC.txt; ScaledCalcs.txt
+      (effective level 150)
+  innie_toughness:
+    value: 15
+    provenance: derived
+    source: NPC.cs; Current_NPC_Script.txt; Innie_Script_Extends_NPC.txt; ScaledCalcs.txt
+      (effective level 150)
+  innie_raw_damage:
+    value: 3549
+    provenance: derived
+    source: NPC.cs; Current_NPC_Script.txt; Innie_Script_Extends_NPC.txt; ScaledCalcs.txt
+      (effective level 150)
+  innie_attack_ms:
+    value: 1000
+    provenance: source
+    source: NPC.cs; Current_NPC_Script.txt; Innie_Script_Extends_NPC.txt; ScaledCalcs.txt
+      (effective level 150)
+  innie_attack_radius:
+    value: 1
+    provenance: source
+    source: NPC.cs; Current_NPC_Script.txt; Innie_Script_Extends_NPC.txt; ScaledCalcs.txt
+      (effective level 150)
+  innie_move_ms_inclusive:
+    value:
+    - 900
+    - 1100
+    provenance: source
+    source: NPC.cs; Current_NPC_Script.txt; Innie_Script_Extends_NPC.txt; ScaledCalcs.txt
+      (effective level 150)
+  innie_move_draws_per_life:
+    value: 1
+    provenance: source
+    source: NPC.cs; Current_NPC_Script.txt; Innie_Script_Extends_NPC.txt; ScaledCalcs.txt
+      (effective level 150)
+  innie_aggro_radius:
+    value: 4
+    provenance: source
+    source: NPC.cs; Current_NPC_Script.txt; Innie_Script_Extends_NPC.txt; ScaledCalcs.txt
+      (effective level 150)
+  innie_aggro_check_ms:
+    value: 1500
+    provenance: source
+    source: NPC.cs; Current_NPC_Script.txt; Innie_Script_Extends_NPC.txt; ScaledCalcs.txt
+      (effective level 150)
+  innie_aggro_drop_distance:
+    value: 18
+    provenance: source
+    source: NPC.cs; Current_NPC_Script.txt; Innie_Script_Extends_NPC.txt; ScaledCalcs.txt
+      (effective level 150)
+  innie_spells:
+    value: []
+    provenance: source
+    source: NPC.cs; Current_NPC_Script.txt; Innie_Script_Extends_NPC.txt; ScaledCalcs.txt
+      (effective level 150)
+  step_ms:
+    value: 200
+    provenance: source
+    source: TimeFrame_Other_Details.txt
+  regen_ms:
+    value: 2000
+    provenance: source
+    source: TimeFrame_Other_Details.txt
+  regen_enabled:
+    value: true
+    provenance: simulator_rule
+    source: User requested toggleable regeneration
+  hp_regen_per_second:
+    value: 113.0
+    provenance: developer
+    source: User correction of 226 HP every 2 seconds
+  mp_regen_per_second:
+    value: 832.0
+    provenance: developer
+    source: User correction of 1664 MP every 2 seconds
+  spawn_distribution:
+    value: uniform integer cells
+    provenance: simulator_rule
+    source: PYTHON_INTEGRATION_PLAN.md
+  event_order:
+    value:
+    - due_ms
+    - enqueue_sequence
+    provenance: simulator_rule
+    source: PYTHON_INTEGRATION_PLAN.md
+  target_tie_break:
+    value: entity_id
+    provenance: simulator_rule
+    source: PYTHON_INTEGRATION_PLAN.md
+  observation_tie_break:
+    value: stable payload order for live fixture; entity_id for future simulator
+    provenance: simulator_rule
+    source: PYTHON_INTEGRATION_PLAN.md
+  win_kills:
+    value: 5
+    provenance: simulator_rule
+    source: PYTHON_INTEGRATION_PLAN.md
+  max_episode_steps:
+    value: 256
+    provenance: simulator_rule
+    source: PYTHON_INTEGRATION_PLAN.md
+  full_box_retry_ms:
+    value: 200
+    provenance: simulator_rule
+    source: PYTHON_INTEGRATION_PLAN.md
+  arcane_bomb_enabled:
+    value: false
+    provenance: simulator_rule
+    source: PYTHON_INTEGRATION_PLAN.md
+  tempest_meteor_enabled:
+    value: false
+    provenance: simulator_rule
+    source: PYTHON_INTEGRATION_PLAN.md
+  sunburnt_enabled:
+    value: false
+    provenance: simulator_rule
+    source: PYTHON_INTEGRATION_PLAN.md
+spells:
+  416:
+    target:
+      value: all
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    targetMode:
+      value: targeted
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    cooldown:
+      value: 3500
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    mpCost:
+      value: 500
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    animation:
+      value: 29
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    manaFactor:
+      value: 0.45
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    damagePercent:
+      value: 0.75
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    manaConsumption:
+      value: 0.33
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    family:
+      value: arcane-blast
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    familyCooldown:
+      value: 3500
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    sfx:
+      value: 27
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+  417:
+    target:
+      value: all
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    targetMode:
+      value: targetedOrSelf
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    cooldown:
+      value: 5000
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    mpCost:
+      value: 1000
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    animation:
+      value: 118
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    manaFactor:
+      value: 0.275
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    damagePercent:
+      value: 0.75
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    manaConsumption:
+      value: 0.33
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    initialDamagePercent:
+      value: 0.76
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    tickPercent:
+      value: 0.04
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    duration:
+      value: 6000
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    interval:
+      value: 1000
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    effectId:
+      value: acid
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    effectLevel:
+      value: 2
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    minRadius:
+      value: 2.5
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    maxRadius:
+      value: 4.25
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    level:
+      value: 70
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    tickAnimation:
+      value: 118
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    sfx:
+      value: 5
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+  418:
+    target:
+      value: all
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    targetMode:
+      value: targetedOrSelf
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    cooldown:
+      value: 1750
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    mpCost:
+      value: 750
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    castLevel:
+      value: 134
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    manaFactor:
+      value: 0.45
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    manaConsumption:
+      value: 0.2
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    damagePercent:
+      value: 0.775
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    animation:
+      value: 2
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    level:
+      value: 125
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+    sfx:
+      value: 119
+      provenance: source
+      source: TimeFrame_Other_Details.txt
+notes:
+- map53 is the single map profile in the viewer and headless environment. Terrain
+  and entity collision are required; spawning/respawning exclude blocked cells.
+- legacy_y_penalty_below defaults to 31 for both reward profiles, applying
+  -100 times (31 - player Y) below that row. legacy_y_penalty_above defaults to 85,
+  applying -100 times (player Y - 85) above that row. Simulator episodes truncate
+  at Y <= 29 or Y >= 87, retaining the boundary-step penalty. Live rules are unchanged.
+- User-confirmed global spell cooldown is 300 ms after any successful cast,
+  shared across all spell slots. It does not block movement; rejected casts do
+  not start or extend it. At 200 ms decisions the next ready spell can cast at 400 ms.
+- Successful aggro movement partially resets attack readiness to now plus
+  min(attack_ms / 2, attack_ms - 500), or 50 ms for attack_ms <= 500, as clarified
+  by the user. Baseline readiness is now + 500 ms. Fractional milliseconds round
+  up; blocked and unaggroed movement do not change attack readiness.
+- Respawn correction is 50000 ms despite old template row.
+- Base movement interval is sampled once per life; attack interval is not jittered.
+- MP cost is subtracted before spell formulas; percentage consumption follows the
+  spell body.
+- Displayed rounded combat factors are reference checks, not exact outputs.
+- User-confirmed casting eligibility is rectangular, abs(dx) <= 16 and abs(dy)
+  <= 10 inclusively. Eligible targets are ranked by Euclidean distance and ID.
+- User-confirmed Acid effects refresh for the same caster/target pair and stack
+  independently for different casters. Refresh replaces the snapshot, restarts
+  tick and duration deadlines, and cancels old callbacks.
+- Acid uses saved tick damage without new crit/block/AC rolls. Existing scheduler
+  convention ticks at 1000 through 5000 ms and expires at 6000 ms; the missing
+  TickEffect implementation leaves server endpoint parity unconfirmed.
+- Spell AoE enumeration uses stable entity-ID order; full Tempest targets precede
+  partial targets. The map enumerator implementation is not supplied.

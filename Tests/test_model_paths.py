@@ -12,14 +12,14 @@ from Utils.model_paths import (
 class ModelPathTests(unittest.TestCase):
     def test_training_checkpoint_defaults_to_run_directory(self):
         checkpoint = training_checkpoint_path(
-            Path("runs") / "Env16__PPO_server__1__1234",
+            Path("runs") / "Mystic__PPO_server__1__1234",
             None,
             "PPO_server.pt",
         )
 
         self.assertEqual(
             checkpoint,
-            Path("runs/Env16__PPO_server__1__1234/PPO_server.pt"),
+            Path("runs/Mystic__PPO_server__1__1234/PPO_server.pt"),
         )
 
     def test_explicit_training_checkpoint_path_is_preserved(self):

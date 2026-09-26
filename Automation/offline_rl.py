@@ -132,7 +132,7 @@ def build_evaluation_command(
 def build_awac_evaluation_command(
     *, checkpoint_path: str, eval_episodes: int, device: str,
 ) -> list[str]:
-    """Build the live Env16 AWAC evaluation command."""
+    """Build the live Mystic AWAC evaluation command."""
 
     return [
         "python", "-m", "Inference.awac_eval",
@@ -182,7 +182,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="train",
     )
     parser.add_argument("--checkpoint-path")
-    parser.add_argument("--dataset-id", default="env16/BC-v0")
+    parser.add_argument("--dataset-id", default="mystic/BC-v0")
     parser.add_argument("--eval-episodes", type=int, default=5)
     parser.add_argument("--top-fraction", type=float, default=1.0)
     parser.add_argument("--gamma", type=float, default=0.99)

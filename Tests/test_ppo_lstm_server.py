@@ -41,7 +41,7 @@ class FakeWriter:
         self.closed = True
 
 
-class FakeEnv16:
+class FakeMystic:
     Actions = ["up", "castSpell:1"]
 
     def __init__(self):
@@ -150,14 +150,14 @@ class PPOLSTMTests(unittest.TestCase):
             recurrent_minibatches(5, 2)
 
     def test_saved_agent_loads_into_same_recurrent_architecture(self):
-        source_agent = Agent(FakeEnv16())
+        source_agent = Agent(FakeMystic())
 
         with tempfile.TemporaryDirectory() as directory:
             checkpoint_path = save_agent(
                 source_agent,
                 str(Path(directory) / "ppo_lstm.pt"),
             )
-            loaded_agent = Agent(FakeEnv16())
+            loaded_agent = Agent(FakeMystic())
             loaded_agent.load_state_dict(
                 torch.load(checkpoint_path, weights_only=True)
             )
@@ -169,14 +169,14 @@ class PPOLSTMTests(unittest.TestCase):
             self.assertTrue(torch.equal(source_parameter, loaded_parameter))
 
     def test_restore_agent_loads_existing_recurrent_checkpoint(self):
-        source_agent = Agent(FakeEnv16())
+        source_agent = Agent(FakeMystic())
 
         with tempfile.TemporaryDirectory() as directory:
             checkpoint_path = save_agent(
                 source_agent,
                 str(Path(directory) / "PPO_lstm_server.pt"),
             )
-            restored_agent = Agent(FakeEnv16())
+            restored_agent = Agent(FakeMystic())
             restore_agent(restored_agent, checkpoint_path, torch.device("cpu"))
 
         for source_parameter, restored_parameter in zip(
@@ -186,8 +186,8 @@ class PPOLSTMTests(unittest.TestCase):
             self.assertTrue(torch.equal(source_parameter, restored_parameter))
 
     @patch.object(PPO_lstm_server, "SummaryWriter", FakeWriter)
-    @patch.object(PPO_lstm_server, "Env16", FakeEnv16)
-    def test_training_uses_env16_episode_and_dashboard_metrics(self):
+    @patch.object(PPO_lstm_server, "Mystic", FakeMystic)
+    def test_training_uses_mystic_episode_and_dashboard_metrics(self):
         args = Args(
             total_timesteps=4,
             num_steps=4,
@@ -220,7 +220,7 @@ class PPOLSTMTests(unittest.TestCase):
 
     @patch.object(PPO_lstm_server, "save_agent")
     @patch.object(PPO_lstm_server, "SummaryWriter", FakeWriter)
-    @patch.object(PPO_lstm_server, "Env16", FakeEnv16)
+    @patch.object(PPO_lstm_server, "Mystic", FakeMystic)
     def test_default_model_is_saved_inside_tensorboard_run(
         self,
         save_agent_mock,
@@ -245,7 +245,7 @@ class PPOLSTMTests(unittest.TestCase):
         )
 
     @patch.object(PPO_lstm_server, "SummaryWriter", FakeWriter)
-    @patch.object(PPO_lstm_server, "Env16", FakeEnv16)
+    @patch.object(PPO_lstm_server, "Mystic", FakeMystic)
     def test_partial_run_resumes_optimizer_progress_and_hyperparameters(self):
         with tempfile.TemporaryDirectory() as directory:
             training_path = Path(directory) / "PPO_lstm_server_training.pt"

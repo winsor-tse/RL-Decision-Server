@@ -1,6 +1,6 @@
 """Record player demonstrations from the live Yugen Saga socket.
 
-The loop intentionally mirrors ``Env16.step``:
+The loop intentionally mirrors ``Mystic.step``:
 
 1. receive one ``ai_tick`` with ``socket.recv_json()``;
 2. read ``message["worldState"]``;
@@ -384,7 +384,7 @@ class PlayerRecorder:
         if self.session_id is None:
             raise RuntimeError("Start a recording session before receiving ticks.")
 
-        # This is the same receive pattern used by Env16.step().
+        # This is the same receive pattern used by Mystic.step().
         message = self.socket.recv_json()
         received_at_ns = time.time_ns()
         response = self.build_response(message)
