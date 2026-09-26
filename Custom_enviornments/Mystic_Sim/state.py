@@ -206,6 +206,7 @@ class WorldState:
     kills: int = 0
     next_event_sequence: int = 0
     next_effect_sequence: int = 0
+    terrain_collision: bool = False
 
     def enqueue(self, due_ms, kind, entity_id, generation=0):
         """Return a cancellation token; order equal-time events by insertion."""

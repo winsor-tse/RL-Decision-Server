@@ -2,6 +2,14 @@
 
 ## Current scope
 
+Map collision update: `map53_blocked_v2` is implemented and selected by the
+Pygame viewer. Its blocked-tile layer constrains player/NPC movement, pathfinding,
+spawn placement, and respawns. Select it for matching headless training with
+`ScenarioConfig(profile="map53_blocked_v2", terrain_collision=True)`. The original
+`map53_open_entities_v1` remains the headless default for reproducibility; references
+below to disabled terrain describe that original profile. Both profiles enforce
+the outer 0..99 coordinate bounds. No spell line-of-sight rule is introduced.
+
 The next priority is to train PPO on the current Mystic simulator and validate
 that the same policy contract works with live Mystic through the existing ZMQ
 bridge. Phase 6 establishes PPO training, Phase 7 makes local vector training

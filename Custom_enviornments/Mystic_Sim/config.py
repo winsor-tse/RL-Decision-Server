@@ -252,10 +252,10 @@ class ScenarioConfig:
                 raise ValueError(f"{name} must be a {cls.__name__}")
         for name in ("map_id", "width", "height"):
             integer(name, getattr(self, name), 1)
-        if (self.profile, self.map_id, self.width, self.height) != ("map53_open_entities_v1", 53, 100, 100):
-            raise ValueError("Only the 100x100 map53_open_entities_v1 profile is implemented")
-        if self.terrain_collision is not False or self.entity_collision is not True:
-            raise ValueError("Baseline requires entity collision and no terrain collision")
+        if self.profile not in ("map53_open_entities_v1", "map53_blocked_v2") or (self.map_id, self.width, self.height) != (53,100,100):
+            raise ValueError("Only the 100x100 map53 open and blocked profiles are implemented")
+        if self.terrain_collision is not (self.profile == "map53_blocked_v2") or self.entity_collision is not True:
+            raise ValueError("Terrain collision must match the profile; entity collision is required")
         if (type(self.gear_enabled) is not bool
                 or (self.gear_enabled and not isinstance(self.gear, GearConfig))
                 or (not self.gear_enabled and self.gear is not None)):

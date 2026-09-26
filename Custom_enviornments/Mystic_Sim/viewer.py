@@ -14,7 +14,7 @@ from .targeting import select_target
 class PlaySession:
     """UI state stays outside the Gym environment and never edits combat state."""
     def __init__(self, seed=42, training_rules=False):
-        config = ScenarioConfig()
+        config = ScenarioConfig(profile="map53_blocked_v2", terrain_collision=True)
         if not training_rules:
             config = replace(config, reward=replace(config.reward,
                               win_kills=2**31-1, max_episode_steps=2**31-1))
@@ -185,11 +185,11 @@ class Viewer:
         pg,w=self.pg,self.session.env.world
         self.screen.set_clip(self.view)
         pg.draw.rect(self.screen,(22,36,43),self.cell_rect(0,0,100,100))
-        # Muted marks show supplied terrain as reference; terrain collision is disabled.
+        # The supplied blocked layer is solid terrain in the viewer's profile.
         for x,y in w.map.blocked_cells:
             rect=self.cell_rect(x,y)
             if self.view.colliderect(rect):
-                pg.draw.rect(self.screen,(28,44,49),rect)
+                pg.draw.rect(self.screen,(10,20,27),rect)
         if not self.overview:
             for x in range(max(0,int(self.cam_x)), min(100,int(self.cam_x+self.view.w/self.scale)+1)+1):
                 px=self.cell_rect(x,0).x
@@ -283,7 +283,7 @@ class Viewer:
         self.text(f'MAP 53   |   {mode}   |   SEED {self.session.seed}   |   {w.time_ms/1000:.1f}s   |   {self.session.speed:g}x',20,51,self.MUTED,self.small)
         self.draw_world(seconds)
         self.draw_panel()
-        self.text('Terrain shown for reference; collision is entity-only.',20,self.screen.get_height()-25,self.MUTED,self.small)
+        self.text('Dark terrain is solid. Players and Innies stay on walkable tiles.',20,self.screen.get_height()-25,self.MUTED,self.small)
         if self.session.log:
             self.text(self.session.log[-1],self.view.x+12,self.view.bottom-28,self.TEXT)
         if self.session.paused or self.session.env.episode_done:

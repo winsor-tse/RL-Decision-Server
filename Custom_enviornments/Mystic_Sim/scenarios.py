@@ -3,14 +3,14 @@ from .state import MonsterState, PlayerState, WorldState
 from .scaled_calcs import scale_innie
 
 
-def sample_unoccupied(rng, x, y, width, height, occupancy):
+def sample_unoccupied(rng, x, y, width, height, occupancy, blocked=()):
     """Draw X then Y until free. Full rectangles fail before any random draw."""
-    if not any((cx, cy) not in occupancy for cy in range(y, y + height)
+    if not any((cx, cy) not in occupancy and (cx, cy) not in blocked for cy in range(y, y + height)
                for cx in range(x, x + width)):
         raise ValueError(f"Spawn rectangle ({x}, {y}, {width}, {height}) has no free cell")
     while True:
         cell = (int(rng.integers(x, x + width)), int(rng.integers(y, y + height)))
-        if cell not in occupancy:
+        if cell not in occupancy and cell not in blocked:
             return cell
 
 
@@ -20,20 +20,21 @@ def build_scenario(map_definition, config, rng):
             config.map_id, config.width, config.height):
         raise ValueError("Map dimensions/ID do not match scenario configuration")
     occupancy = {}
+    blocked = map_definition.blocked_cells if config.terrain_collision else frozenset()
     xmin, xmax = config.player_spawn_x
     ymin, ymax = config.player_spawn_y
-    x, y = sample_unoccupied(rng, xmin, ymin, xmax - xmin + 1, ymax - ymin + 1, occupancy)
+    x, y = sample_unoccupied(rng, xmin, ymin, xmax - xmin + 1, ymax - ymin + 1, occupancy, blocked)
     player = PlayerState(1, x, y, config.player.max_hp, config.player.max_mp,
                          config.player, next_regen_ms=config.timing.regen_ms)
     occupancy[(x, y)] = player.entity_id
-    world = WorldState(map_definition, player, occupancy=occupancy)
+    world = WorldState(map_definition, player, occupancy=occupancy, terrain_collision=config.terrain_collision)
     world.enqueue(player.next_regen_ms, "regeneration", player.entity_id)
     entity_id = 2
     for box in sorted(map_definition.spawn_boxes, key=lambda box: box.object_id):
         if box.template_id != config.innie.template_id:
             raise ValueError(f"Unsupported NPC template {box.template_id}")
         for member in range(box.quantity):
-            x, y = sample_unoccupied(rng, box.x, box.y, box.width, box.height, occupancy)
+            x, y = sample_unoccupied(rng, box.x, box.y, box.width, box.height, occupancy, blocked)
             # Exactly one movement draw after placement for each new life.
             movement_ms = int(rng.integers(config.innie.move_ms[0], config.innie.move_ms[1] + 1))
             monster = MonsterState(entity_id, x, y, innie.max_hp, innie.max_mp,

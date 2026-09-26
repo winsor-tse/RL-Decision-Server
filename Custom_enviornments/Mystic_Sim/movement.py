@@ -8,7 +8,9 @@ OFFSETS = {Direction.LEFT: (-1, 0), Direction.RIGHT: (1, 0),
 
 
 def legal_move(world, x, y):
-    return 0 <= x < world.map.width and 0 <= y < world.map.height and (x, y) not in world.occupancy
+    return (0 <= x < world.map.width and 0 <= y < world.map.height
+            and (x, y) not in world.occupancy
+            and (not world.terrain_collision or (x, y) not in world.map.blocked_cells))
 
 
 def next_step_basic(world, npc, x, y, rng):

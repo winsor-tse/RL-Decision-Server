@@ -32,17 +32,26 @@ One action executes per decision; held spells take priority over movement.
 Targets are selected automatically by the simulator. Blue is the player, amber
 is an idle Innie, red is aggro, and green rings indicate Acid. The gold ring
 marks the nearest eligible target. Dead Innies display respawn countdowns.
-Terrain marks are visual references; this scenario disables terrain collision.
+Dark terrain is solid: the viewer uses `map53_blocked_v2`, which enforces the
+map's blocked-tile layer for players, NPCs, spawn placement, and respawns. The
+outer 0..99 coordinate bounds also remain hard boundaries.
 Melee remains disabled as in the baseline. Idle time uses its nonmutating attack
 action (4) to advance the clock without adding a ninth training action.
 
 Default **free play** removes the five-kill and 256-step stopping points so you
 can explore and watch respawns; player death still ends play. To use the exact
-training episode rules:
+training episode limits with the viewer's blocked-terrain profile:
 
 ```powershell
 .\RL_venv\Scripts\python.exe -m Custom_enviornments.Mystic_Sim.viewer --training-rules --seed 42
 ```
+
+For headless training on the same solid map, construct `MysticSimEnv` with
+`ScenarioConfig(profile="map53_blocked_v2", terrain_collision=True)`. The default
+headless `map53_open_entities_v1` profile remains available unchanged for older
+experiments. The two profiles have different movement/spawn behavior; record
+the selected profile with training checkpoints. Terrain does not add spell
+line-of-sight restrictions.
 
 Rendering is 60 FPS with independent 200 ms simulation decisions. Focus loss
 pauses the viewer. Excess wall-clock lag is capped so returning to a stalled

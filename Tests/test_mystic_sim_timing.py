@@ -83,6 +83,22 @@ class TimingTests(unittest.TestCase):
         self.assertFalse(env.step(0)[4]["action_applied"])
         self.assertEqual(w.time_ms,800)
 
+    def test_hard_map_edges_block_player_and_npc(self):
+        for position,direction in (((0,50),Direction.LEFT),((99,50),Direction.RIGHT),
+                                   ((50,0),Direction.UP),((50,99),Direction.DOWN),
+                                   ((0,0),Direction.LEFT),((99,99),Direction.DOWN)):
+            for is_npc in (False,True):
+                with self.subTest(position=position,direction=direction,npc=is_npc):
+                    env,w,npc=self.scene()
+                    entity=npc if is_npc else w.player
+                    w.occupancy.pop((entity.x,entity.y))
+                    entity.x,entity.y=position
+                    w.occupancy[position]=entity.entity_id
+                    before=dict(w.occupancy)
+                    self.assertFalse(env.engine.move(entity,direction,npc=is_npc))
+                    self.assertEqual((entity.x,entity.y),position)
+                    self.assertEqual(w.occupancy,before)
+
     def test_source_pursuit_roll_order_and_obstacle_branches(self):
         env,w,npc=self.scene()
         class Draws:

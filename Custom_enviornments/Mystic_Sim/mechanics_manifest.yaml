@@ -452,6 +452,9 @@ spells:
       provenance: source
       source: TimeFrame_Other_Details.txt
 notes:
+- Viewer uses map53_blocked_v2; all map blocked cells and outer bounds prevent
+  player/NPC movement, and spawning/respawning exclude blocked cells. The original
+  map53_open_entities_v1 headless default remains available for reproducibility.
 - User-confirmed global spell cooldown is 300 ms after any successful cast,
   shared across all spell slots. It does not block movement; rejected casts do
   not start or extend it. At 200 ms decisions the next ready spell can cast at 400 ms.

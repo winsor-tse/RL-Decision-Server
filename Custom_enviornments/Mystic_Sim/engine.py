@@ -241,7 +241,7 @@ class Engine:
     def respawn(self, npc):
         box = npc.spawn_box
         now = self.world.time_ms
-        if not any((x,y) not in self.world.occupancy for y in range(box.y,box.y+box.height)
+        if not any(legal_move(self.world,x,y) for y in range(box.y,box.y+box.height)
                    for x in range(box.x,box.x+box.width)):
             boundary = (now//self.config.timing.step_ms+1)*self.config.timing.step_ms
             npc.respawn_at_ms = boundary
@@ -252,7 +252,7 @@ class Engine:
         while True:
             x = self.rng.roll(box.x,box.x+box.width-1,"respawn_x")
             y = self.rng.roll(box.y,box.y+box.height-1,"respawn_y")
-            if (x,y) not in self.world.occupancy: break
+            if legal_move(self.world,x,y): break
         npc.x,npc.y = npc.spawn_x,npc.spawn_y = x,y
         npc.hp,npc.mp = npc.max_hp,npc.max_mp
         npc.move_interval_ms = self.rng.roll(npc.stats.move_ms[0],npc.stats.move_ms[1],"respawn_move_interval")
