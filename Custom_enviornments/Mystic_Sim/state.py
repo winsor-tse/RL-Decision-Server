@@ -207,6 +207,9 @@ class WorldState:
     next_event_sequence: int = 0
     next_effect_sequence: int = 0
     terrain_collision: bool = True
+    # Simulator-only reward history; adjacency and NPC moves never increment it.
+    player_collision_kind: str | None = None
+    player_collision_streak: int = 0
 
     def enqueue(self, due_ms, kind, entity_id, generation=0):
         """Return a cancellation token; order equal-time events by insertion."""

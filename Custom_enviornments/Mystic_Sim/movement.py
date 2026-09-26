@@ -8,9 +8,18 @@ OFFSETS = {Direction.LEFT: (-1, 0), Direction.RIGHT: (1, 0),
 
 
 def legal_move(world, x, y):
-    return (0 <= x < world.map.width and 0 <= y < world.map.height
-            and (x, y) not in world.occupancy
-            and (not world.terrain_collision or (x, y) not in world.map.blocked_cells))
+    return collision_kind(world, x, y) is None
+
+
+def collision_kind(world, x, y):
+    """Classify the destination at the time of the attempted move."""
+    if not (0 <= x < world.map.width and 0 <= y < world.map.height):
+        return "map_boundary"
+    if world.terrain_collision and (x, y) in world.map.blocked_cells:
+        return "terrain"
+    if (x, y) in world.occupancy:
+        return "entity"
+    return None
 
 
 def next_step_basic(world, npc, x, y, rng):

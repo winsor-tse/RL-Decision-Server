@@ -1,5 +1,13 @@
 # Mystic simulator: Phases 0 through 5
 
+> **MAP-SPECIFIC TRAINING WARNING:** The current 26-value observation has absolute
+> coordinates and enemy information, but no relative terrain/obstacle states.
+> Collision shaping can teach PPO to memorize map53 and overfit its layout; it
+> does not establish navigation generalization. Before training a generalized
+> agent, add relative obstacle states (similar to relative enemy information),
+> covering nearby terrain, occupied cells, and map edges. Update the observation
+> contract and retrain, vary training layouts, and evaluate on held-out maps.
+
 ## Play the simulator with Pygame
 
 Double-click **`Play_Mystic_Sim.bat`** at the repository root, or run:
@@ -269,7 +277,7 @@ moving an enemy outside the observation does not earn a kill reward.
 | Dashboard component | Default training calculation |
 |---|---|
 | `health_state` | -0.001 per decision (time cost) |
-| `positioning` | -100 * (31 - Y) below 31; -100 * (Y - 85) above 85; otherwise 0 |
+| `positioning` | Collision penalty plus -100 * (31 - Y) below 31 or -100 * (Y - 85) above 85 |
 | `damage_taken` | -player damage / player maximum HP |
 | `damage_dealt` | Sum of player damage / each enemy's maximum HP |
 | `terminal` | -5 for death; 0 otherwise |
@@ -283,10 +291,25 @@ Y >= 87 truncates. The boundary step still receives its positioning penalty
 continue; rows 31 through 85 receive no Y penalty. Set `y_bounds=None` only to
 explicitly disable Y truncation. These task rules apply only to the simulator.
 
-`legacy_reward_v0` snapshots the live health thresholds, blocked-move penalty,
+**Simulator-only collision shaping (both reward profiles):** an attempted player
+move into terrain, an occupied tile, or an outer map boundary receives
+`-collision_penalty_weight * min(consecutive_blocked_moves, collision_streak_cap)`.
+Defaults are weight 5 and cap 4: -5, -10, -15, then -20 per blocked decision.
+This is a strong penalty relative to the combat profile's +1 kill reward and is
+configurable; weight 0 disables it. Successful moves and non-movement actions
+reset the streak, as does episode reset. Adjacency, standing still, failed casts,
+and NPC movement do not incur collision penalties. Classification happens when
+the player attempts movement, before scheduled NPC updates. It is added to
+`positioning`, with `collision_kind`, `collision_streak`, and `collision_penalty`
+in step diagnostics even when tracing is disabled. The streak is reward history,
+not an added observation feature; future observation design should account for it.
+
+`legacy_reward_v0` snapshots the live health thresholds,
 distance shaping, signed player HP-delta quirk, and coefficients (25 for enemy
 damage, 10 per kill, -100 for death). Enemy damage and kills use explicit events
-instead of live disappearance heuristics. Legacy alone retains healing rewards
+instead of live disappearance heuristics. The simulator collision shaping above
+replaces legacy's inferred fixed -10 blocked-move penalty without double charging.
+Legacy alone retains healing rewards
 and the `hp != 0.5` branch for comparison. Both reward profiles enable
 `legacy_y_penalty_below=31` and `legacy_y_penalty_above=85` by default, applying
 the same Y penalties alongside boundary truncation. Set either threshold to

@@ -1,5 +1,23 @@
 # Plan: Yugen Saga Mystic simulation in Python
 
+> **IMPORTANT: CURRENT TRAINING IS MAP-SPECIFIC.** The 26-value observation does
+> not include relative obstacle states. Penalizing collisions can teach an agent
+> to memorize map53 coordinates and overfit. For a generalized agent, represent
+> nearby terrain, occupied cells, and map boundaries relative to the player,
+> similar to enemy observations; update the observation contract and retrain.
+> Train on varied layouts and test on held-out maps before claiming generalization.
+
+Simulator-only collision shaping applies to both reward profiles under
+`positioning`: an actively attempted blocked player move costs -5 initially,
+then -10, -15, and at most -20 for consecutive blocked decisions. Configure this
+with `RewardConfig.collision_penalty_weight` (5) and `collision_streak_cap` (4).
+Successful movement, a non-movement decision, or reset clears the streak.
+Terrain, entity occupancy, and outer map edges count; adjacency and NPC movement
+do not. This replaces the legacy fixed -10 heuristic, and live rewards remain
+unchanged. Diagnostics report collision kind, streak, and penalty. The streak
+is currently internal reward history; consider exposing it with future relative
+obstacle observations. Existing Y penalties and truncation still apply.
+
 ## Current scope
 
 The single map profile is `map53`, used by both the viewer and headless training.

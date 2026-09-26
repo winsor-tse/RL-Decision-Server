@@ -109,7 +109,8 @@ class RewardTests(unittest.TestCase):
         prev=np.zeros(26,dtype=np.float32);prev[:7]=[50,30,0,.75,1,53,5]
         obs=prev.copy();obs[3]=.125
         parts=rewards.calculate(w,env.reward_config,prev,obs,0,[],[],'loss')
-        self.assertEqual(parts,dict(health_state=-.5,positioning=-107.,damage_taken=-12.5,
+        # Equal coordinates alone no longer imply an attempted collision.
+        self.assertEqual(parts,dict(health_state=-.5,positioning=-97.,damage_taken=-12.5,
                                     damage_dealt=0.,terminal=-100.,killed=0.))
         prev[3]=.25;obs[3]=.75
         self.assertEqual(rewards.calculate(w,env.reward_config,prev,obs,4,[],[],None)['damage_taken'],10)
@@ -225,6 +226,69 @@ class RewardTests(unittest.TestCase):
                 self.assertEqual(ra[0].tobytes(),rb[0].tobytes())
                 self.assertEqual(ra[1:],rb[1:])
                 if ra[2] or ra[3]: break
+
+    def test_collision_penalty_scales_caps_and_resets_in_both_profiles(self):
+        for profile in ('combat_reward_v1', 'legacy_reward_v0'):
+            env = self.scene(RewardConfig(profile=profile))
+            # Explicit terrain fixture, keeping the enemy five tiles away.
+            env.world.map = replace(env.world.map, blocked_cells=frozenset({(49, 50)}))
+            for streak, penalty in enumerate((-5, -10, -15, -20, -20), 1):
+                info = env.step(2)[4]
+                self.assertEqual(info['collision_kind'], 'terrain')
+                self.assertEqual(info['collision_streak'], streak)
+                self.assertEqual(info['collision_penalty'], penalty)
+                self.assertEqual(info['reward_components']['positioning'],
+                                 penalty + (3 if profile == 'legacy_reward_v0' else 0))
+                self.assertEqual(info['action_failure_reason'], 'blocked')
+            # Standing beside the wall is free, including a rejected non-move.
+            info = env.step(4)[4]
+            self.assertEqual(info['collision_penalty'], 0)
+            self.assertEqual(info['collision_streak'], 0)
+            self.assertIsNone(info['collision_kind'])
+            self.assertEqual(env.step(2)[4]['collision_penalty'], -5)
+            self.assertEqual(env.step(3)[4]['collision_streak'], 0)
+            _, info = env.reset(seed=42)
+            self.assertEqual(info['collision_streak'], 0)
+            self.assertEqual(info['collision_penalty'], 0)
+
+    def test_entity_collision_captured_before_npc_vacates_tile_without_trace(self):
+        env = self.scene()
+        env.trace_enabled = env.engine.trace_enabled = False
+        w, npc = env.world, env.world.monsters[2]
+        w.occupancy.pop((55, 50))
+        npc.x, npc.y = 51, 50
+        w.occupancy[(51, 50)] = npc.entity_id
+        env.engine.scheduler.schedule(100, 'vacate', npc.entity_id)
+        with patch.object(env.engine, 'dispatch', side_effect=lambda event:
+                          env.engine.move(npc, 1, npc=True)):
+            info = env.step(3)[4]
+        self.assertNotIn((51, 50), w.occupancy)
+        self.assertEqual(info['collision_kind'], 'entity')
+        self.assertEqual(info['collision_penalty'], -5)
+        self.assertEqual(info['reward_components']['positioning'], -5)
+        # The vacated tile is now traversable; NPC movement itself adds no penalty.
+        self.assertEqual(env.step(3)[4]['collision_penalty'], 0)
+
+    def test_collision_boundaries_configuration_and_invalid_action(self):
+        env = self.scene(RewardConfig(collision_penalty_weight=2, collision_streak_cap=2))
+        w = env.world
+        w.player.x = 0
+        w.occupancy = {(0, 50): 1, (55, 50): 2}
+        for penalty in (-2, -4, -4):
+            info = env.step(2)[4]
+            self.assertEqual(info['collision_kind'], 'map_boundary')
+            self.assertEqual(info['collision_penalty'], penalty)
+        before = deepcopy(w)
+        with self.assertRaises(ValueError): env.step(8)
+        self.assertEqual(w, before)
+        env.reward_config = replace(env.reward_config, collision_penalty_weight=0)
+        self.assertEqual(env.step(2)[4]['collision_penalty'], 0)
+        w.player.mp = 0
+        self.assertEqual(env.step(5)[4]['collision_streak'], 0)
+        for value in (-1, float('nan'), float('inf'), True):
+            with self.assertRaises(ValueError): RewardConfig(collision_penalty_weight=value)
+        for value in (0, -1, 1.5, True):
+            with self.assertRaises(ValueError): RewardConfig(collision_streak_cap=value)
 
 
 if __name__ == '__main__':

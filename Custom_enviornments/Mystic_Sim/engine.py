@@ -1,7 +1,7 @@
 """Absolute-time movement, combat, casting, and effect transactions."""
 from numbers import Integral
 
-from .movement import OFFSETS, SERVER_DIRECTIONS, legal_move, next_step_basic, outside_spawn_area
+from .movement import OFFSETS, SERVER_DIRECTIONS, legal_move, collision_kind, next_step_basic, outside_spawn_area
 from .observation import direction_from_delta, euclidean_distance
 from .scheduler import Scheduler
 from .state import Direction
@@ -309,7 +309,10 @@ class Engine:
         before = (entity.x, entity.y)
         dx, dy = OFFSETS[direction]
         destination = (entity.x + dx, entity.y + dy)
-        moved = legal_move(self.world, *destination)
+        blocked_by = collision_kind(self.world, *destination)
+        moved = blocked_by is None
+        if entity is self.world.player:
+            self.world.player_collision_kind = blocked_by
         entity.facing = direction
         if moved:
             self.world.occupancy.pop(before, None)
@@ -325,7 +328,8 @@ class Engine:
             entity.next_move_ms = self.world.time_ms + entity.move_interval_ms
             self.emit("on_move", entity.entity_id, effects_applied=False)
         self.emit("movement", entity.entity_id, before=before, after=(entity.x, entity.y),
-                  facing=int(direction), applied=moved, reason=None if moved else "blocked")
+                  facing=int(direction), applied=moved, reason=None if moved else "blocked",
+                  collision_kind=blocked_by)
         return moved
 
     def npc_movement(self, npc):
@@ -454,6 +458,7 @@ class Engine:
         self.cast_events = []
         self.selected_target_id = None
         p = self.world.player
+        self.world.player_collision_kind = None
         if action < 4 and p.alive:
             applied = self.move(p, Direction(int(action)))
             reason = None if applied else "blocked"
@@ -480,6 +485,11 @@ class Engine:
         else:
             applied = False
             reason = "player_dead" if not p.alive else "gear_disabled"
+        # SIM ONLY: count consecutive blocked player decisions, before NPC updates.
+        # A non-movement action or successful move breaks the streak; contact alone
+        # is not a collision. Invalid actions were rejected before any mutation.
+        self.world.player_collision_streak = (
+            self.world.player_collision_streak + 1 if self.world.player_collision_kind else 0)
         self.emit("action", p.entity_id, action=int(action), applied=applied, reason=reason)
         self.scheduler.advance(self.world.time_ms + self.config.timing.step_ms, self.dispatch)
         self.world.step_count += 1

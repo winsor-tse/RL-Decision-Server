@@ -3,6 +3,7 @@ from dataclasses import asdict
 from copy import deepcopy
 from .observation import nearest_monsters
 from .targeting import select_target
+from .rewards import collision_penalty
 
 
 def build_info(env, *, action=None, applied=None, reason=None, components=None,
@@ -19,6 +20,9 @@ def build_info(env, *, action=None, applied=None, reason=None, components=None,
         "action": None if action is None else int(action),
         "action_applied": applied, "action_failure_reason": reason,
         "reward_components": dict(components or {}),
+        "collision_kind": w.player_collision_kind,
+        "collision_streak": w.player_collision_streak,
+        "collision_penalty": collision_penalty(w, env.reward_config),
         "cooldowns": asdict(w.player.cooldowns),
         "active_effects": [asdict(e) for e in w.effects],
         "damage_events": [asdict(e) for e in engine.damage_events],
