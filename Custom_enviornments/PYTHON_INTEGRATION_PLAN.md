@@ -2,6 +2,15 @@
 
 ## Current scope
 
+The next priority is to train PPO on the current Mystic simulator and validate
+that the same policy contract works with live Mystic through the existing ZMQ
+bridge. Phase 6 establishes PPO training, Phase 7 makes local vector training
+fast and reliable, and Phase 8 implements/tests the live adapter, payload contract,
+and real sim-to-game gap. No live contract tests or game access are required to
+complete Phases 6 or 7. Behavior
+cloning, Minari datasets, offline learning, and dataset migrations are deferred;
+they must not block PPO training or live parity work.
+
 Build a headless Python `gymnasium.Env` for the Mystic combat loop using the C#
 fragments in `Simulation/Source-Code` as the mechanics reference. The first
 version includes only:
@@ -28,8 +37,9 @@ has eight actions:
 |  6 | `castSpell:2` | Execute`Spell2_Acid Cloud_large AoE.txt`.                  |
 |  7 | `castSpell:3` | Execute`Spell3_Tempest Inferno.txt`.                       |
 
-Before a simulator-trained policy is used with the live game, Mystic and MysticBC
-should import the same shared eight-action definition. Changing from 11 to 8
+Before a simulator-trained policy is used with the live game, the selected live
+Mystic adapter must expose the same shared eight-action definition. Preserve the
+legacy live default for existing models; MysticBC migration is deferred. Changing from 11 to 8
 actions changes the policy output layer, so existing 11-action checkpoints will
 need retraining or an explicit output-head migration. The 26-value observation
 shape can remain unchanged.
@@ -1002,58 +1012,432 @@ Exit gate:
 - seeded episode replay produces byte-equal observations, rewards, and traces;
 - all existing repository tests remain green.
 
-### Phase 6 - Integrate training and offline data
+### Phase 6 - Train PPO on the current Mystic Sim environment
 
-- Add an environment factory/CLI setting choosing `live`, `simulation`, or
-  `simulation-vector`; do not replace live imports ad hoc inside trainers.
-- Start PPO/DQN with one simulator and a short deterministic smoke run. Verify
-  reset, save, resume, inference, and evaluation before vectorization.
-- Add `SyncVectorEnv` first, then benchmark `AsyncVectorEnv`. Each instance owns
-  state, scheduler, RNG, trace buffer, and scenario objects.
-- Save environment ID, action schema version, observation schema version,
-  fidelity profile, reward profile, map hash, mechanics-manifest hash, and seed
-  in every checkpoint/run configuration.
-- Create a Minari dataset version for eight-action Mystic data. Migrate legacy BC
-  data only through the explicit movement-index remap and removal policy for
-  spell actions 5/6/7; publish the result under a new dataset ID.
-- Update evaluation to reject incompatible action/observation metadata before
-  loading weights.
+Primary deliverable: repeatable single-environment PPO training, checkpointing,
+and evaluation on the current Mystic simulator. This phase is simulation-only:
+no live adapter implementation, ZMQ contract tests, payload comparisons, or game
+sessions. Training must work without a running game, ZMQ connection, or Pygame window.
 
-Exit gate:
-
-- one- and multi-environment training complete short seeded runs;
-- save/resume produces the same next transition as uninterrupted training;
-- no state or RNG leaks between vector environments;
-- incompatible legacy checkpoints/datasets fail early with a useful message;
-- throughput is measured as engine steps/second and end-to-end learner SPS.
-
-### Phase 7 - Validate fidelity, then optimize
-
-- Record live map-53 trajectories containing actions, timestamps, positions,
-  facing, HP/MP, nearest targets, NPC moves/attacks, spell results, deaths, and
-  respawns. Keep separate training and held-out traces.
-- Replay the same action sequence from matched state/seed fixtures and compare
-  each mechanic: target choice, movement, event time, resource cost, raw/final
-  damage, status ticks, death, and respawn.
-- Report divergence at the first mismatching event rather than comparing only
-  total episode return.
-- Validate the level-150 override against live Innie HP; if map 53 actually uses
-  the JSON cap 68, add a new profile and retain the old one for reproducibility.
-- Enable the parsed blocked layer only as `map53_blocked_v2`, with new movement
-  parity fixtures and no observation/action schema change.
-- Profile after correctness. Optimize nearest-entity queries, occupancy storage,
-  event allocation, and observation encoding only when measurements justify it.
-  Consider NumPy batching, Numba/Cython, or a C++ core only after the Python
-  reference passes parity tests.
-- Evaluate simulator-trained policies in live Mystic with exploration disabled;
-  feed discrepancies back into fixtures before limited live fine-tuning.
+1. Add an explicit simulation training path and environment factory to
+   `Training/PPO_server.py` first, then `Training/PPO_lstm_server.py`.
+   Preserve existing live entry points without extending their contract; use the
+   actual `MysticSimEnv` with training episode rules, not the viewer's free-play
+   configuration. Initially use one environment per run.
+2. Consume Mystic Sim's current `Discrete(8)` and float32 26-value observation
+   directly. Verify that policy input/output dimensions, action labels, and
+   preprocessing match this simulator. Reject incompatible legacy checkpoints
+   when loading into simulation. Live action mapping and payload contract tests
+   belong exclusively to Phase 8.
+3. Exercise the complete PPO rollout/update loop: observation batching, action
+   selection, log probabilities, values, advantages, optimizer updates, and
+   TensorBoard metrics. Preserve the six reward component names. Test final
+   observations, episode resets, termination masks, and time-limit bootstrapping
+   under the chosen Gym vector/autoreset mode. For recurrent PPO, also test
+   hidden-state reset and recurrent minibatch boundaries.
+4. Use `combat_reward_v1` by default. Record the simulator reward, task, and
+   fidelity configuration with each run. Validate episode statistics and the six
+   reward components against simulator events. Live reward differences are a
+   Phase 8 comparison task, not a requirement for this training implementation.
+5. Run a short seeded training smoke test, then a bounded multi-seed learning
+   run. Verify finite losses/rewards and actual parameter updates. Report return,
+   kills, survival, damage dealt/taken, invalid-cast rate, and throughput against
+   a random-action baseline. A successful optimizer run proves trainability;
+   it does not by itself prove learning quality or live-game fidelity.
+6. Save and reload PPO models for simulator evaluation. Store environment/backend, action labels and
+   schema, observation schema/preprocessing, fidelity and reward profiles, map
+   and mechanics-manifest hashes, seed, and PPO hyperparameters in run/checkpoint
+   metadata. Check compatibility before simulator evaluation or training resume.
+7. Verify training resume restores optimizer, counters, schedules, and RNG state.
+   Exact mid-episode simulator resume additionally requires world, scheduler,
+   pending events/effects, and environment RNG snapshots. Otherwise explicitly
+   resume at a fresh episode; do not claim identical next transitions.
+8. Keep the simulator factory and rollout code ready for Phase 7 environment-count
+   settings, but finish single-environment training/checkpoint tests here. Do not
+   make Phase 6 completion depend on vector throughput or live validation.
 
 Exit gate:
 
-- per-mechanic tolerances are defined and met on held-out traces;
-- deterministic regression fixtures remain unchanged across optimization;
-- performance meets the chosen vector-training workload without weakening
-  mechanics or silently changing RNG order.
+- documented commands train and evaluate PPO on Mystic Sim without the live
+  bridge, with finite losses and confirmed parameter updates;
+- save/load and the declared resume behavior pass regression tests;
+- feed-forward and recurrent PPO paths respect action/observation contracts and
+  episode boundaries; recurrent state cannot leak across episodes;
+- a simulator-trained eight-action checkpoint reloads for simulator evaluation;
+- run metadata records the simulator reward and fidelity settings; the trainer has
+  an environment-factory boundary ready for Phase 7. No Minari or BC work is required.
+
+### Phase 7 - Vectorize Mystic Sim and increase PPO steps per second
+
+Primary deliverable: PPO collects batches from many independent Mystic worlds,
+with measured throughput improvements and correct episode handling. This is a
+required phase after single-environment PPO, not an optional optimization after
+live validation. It does not require Minari, a game connection, or Pygame.
+
+#### What vectorization means for this custom environment
+
+Keep `MysticSimEnv` as a normal single-world Gym environment. A vector wrapper
+creates N separate instances and presents their observations as one batch to
+one PPO model. Each world contains its own player, 80 Innies, scheduler, RNG,
+cooldowns, and effects. Do not put N players into one map, share one mutable
+environment across workers, or train N separate PPO models.
+
+| Value | One environment | N environments |
+|---|---|---|
+| Observation | `(26,)` float32 | `(N, 26)` float32 |
+| Action | One integer 0..7 | `(N,)` integer array |
+| Reward | Scalar | `(N,)` array |
+| Terminated / truncated | Two booleans | Two `(N,)` boolean arrays |
+| One PPO rollout with T decisions | T transitions | T * N transitions |
+
+`SyncVectorEnv` steps the worlds sequentially in one process. Use it first to
+debug batching; it can improve policy-inference efficiency but does not parallelize
+the Python physics. `AsyncVectorEnv` uses subprocesses so world steps can run on
+multiple CPU cores. Both APIs wait for the batch before returning; async here
+does not mean different workers train on independently updated policies.
+See the official [vector API](https://gymnasium.farama.org/api/vector/) and
+[AsyncVectorEnv API](https://gymnasium.farama.org/api/vector/async_vector_env/).
+
+#### 7.1 Make the info payload safe to batch
+
+The current environment already has the correct spaces, but wrapping it directly
+is not sufficient. A local four-world smoke probe against Gymnasium 1.2.1 fails
+when an integer `selected_target` from one worker is combined with `None` from
+another: Gymnasium attempts to store None in an integer array. Treat this as the
+first implementation task, not a trainer error.
+
+- Add `TrainingInfoWrapper` for training only. Return a fixed, consistently typed
+  info schema: scalar kills/time/step, boolean action success, reward components,
+  string outcome/reason (empty string when absent), and target ID with `-1` for
+  no target. Use the same types on reset and step.
+- Keep rich cast/damage/death/effect lists in the normal diagnostic path. The
+  reward is already calculated inside the environment, so PPO does not need to
+  transport all event records between processes on every step. Do not remove
+  events before reward calculation or weaken the normal debugging contract.
+- Test batches containing different outcomes: a cast target, no target, failed
+  cast, death, truncation, and continuing play. Inspect Gymnasium's per-key
+  presence masks rather than treating vector info as a list of dictionaries.
+- Start with a filtering wrapper for correctness. Then add an explicit lightweight
+  diagnostic mode to avoid constructing discarded event dictionaries at all if
+  profiling shows material overhead. `trace=False` alone currently does not
+  suppress all diagnostic serialization.
+
+#### 7.2 Build a small standalone vector smoke program
+
+Create an importable module such as `Training/mystic_vector_smoke.py` using this
+starter. This is proposed implementation code, not an existing CLI command.
+It uses the installed Gymnasium 1.2.1 API; pin/test that API when upgrading.
+The example below was exercised from a temporary script with four workers in
+both sync and Windows-spawn async modes: each completed 1,200 transitions and
+16 episodes. This validates the starter, not PPO integration or a speedup claim.
+
+```python
+import argparse
+from functools import partial
+import multiprocessing as mp
+
+import gymnasium as gym
+import numpy as np
+from gymnasium.vector import AutoresetMode
+
+from Custom_enviornments.Mystic_Sim.env import MysticSimEnv
+
+
+class TrainingInfoWrapper(gym.Wrapper):
+    @staticmethod
+    def compact(info):
+        target = info.get("selected_target")
+        return {
+            "kills": int(info["kills"]),
+            "current_step": int(info["current_step"]),
+            "simulation_time_ms": int(info["simulation_time_ms"]),
+            "selected_target": -1 if target is None else int(target),
+            "action_applied": bool(info.get("action_applied")),
+            "action_failure_reason": info.get("action_failure_reason") or "",
+            "episode_outcome": info.get("episode_outcome") or "",
+            "reward_components": dict(info["reward_components"]),
+        }
+
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        return obs, self.compact(info)
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        return obs, reward, terminated, truncated, self.compact(info)
+
+
+def make_worker():
+    # Construct inside the worker. Never capture an existing env or open socket.
+    # Direct construction preserves the simulator's own episode limits without
+    # adding a second registration-level TimeLimit wrapper.
+    return TrainingInfoWrapper(MysticSimEnv(trace=False))
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--num-envs", type=int, default=4)
+    parser.add_argument("--mode", choices=("sync", "async"), default="sync")
+    args = parser.parse_args()
+    if args.num_envs < 1:
+        parser.error("--num-envs must be positive")
+    factories = [partial(make_worker) for _ in range(args.num_envs)]
+    kwargs = {"autoreset_mode": AutoresetMode.SAME_STEP}
+    if args.mode == "async":
+        envs = gym.vector.AsyncVectorEnv(
+            factories, context="spawn", shared_memory=True, **kwargs
+        )
+    else:
+        envs = gym.vector.SyncVectorEnv(factories, **kwargs)
+    try:
+        obs, infos = envs.reset(seed=[42 + i for i in range(args.num_envs)])
+        action_rng = np.random.default_rng(123)
+        completed = 0
+        for _ in range(300):
+            actions = action_rng.integers(0, 8, size=args.num_envs, dtype=np.int64)
+            obs, rewards, terminated, truncated, infos = envs.step(actions)
+            assert obs.shape == (args.num_envs, 26)
+            assert obs.dtype == np.float32
+            assert np.isfinite(rewards).all()
+            ended = terminated | truncated
+            completed += int(ended.sum())
+            if ended.any():
+                assert infos["_final_obs"][ended].all()
+                for i in np.flatnonzero(ended):
+                    assert infos["final_obs"][i].shape == (26,)
+        print(f"{300 * args.num_envs} transitions; {completed} completed episodes")
+    finally:
+        envs.close()
+
+
+if __name__ == "__main__":
+    mp.freeze_support()
+    main()
+```
+
+After saving that module, run from the repository root:
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Training.mystic_vector_smoke --num-envs 1 --mode sync
+.\RL_venv\Scripts\python.exe -m Training.mystic_vector_smoke --num-envs 4 --mode sync
+.\RL_venv\Scripts\python.exe -m Training.mystic_vector_smoke --num-envs 4 --mode async
+```
+
+Windows workers use `spawn`: module imports must not start training, open a game
+connection, initialize CUDA, or launch a window. Put all launch logic under the
+main guard. Keep policy inference and GPU tensors in the parent process; workers
+return CPU NumPy arrays. The constructor may run a temporary environment in the
+parent to inspect spaces, so factory construction must also be safe there.
+Do not repeatedly reseed after each episode: seed each worker once, then let
+autoreset advance that worker's RNG stream. `envs.close()` must run on errors.
+
+#### 7.3 Integrate the vector batch into PPO
+
+`Training/PPO_server.py` currently asserts `num_envs == 1`, adds an observation
+batch dimension with `unsqueeze(0)`, and has scalar episode accumulators. Its
+rollout buffers already contain a `num_envs` axis. Audit the entire collection
+path instead of just deleting the assertion; apply the same audit to recurrent PPO.
+
+1. Add explicit simulation vector mode and count arguments to the Phase 6
+   factory. Allow `num_envs > 1` only for simulation; preserve the live guard.
+   Factor the smoke program's worker factory and info wrapper into reusable
+   modules instead of maintaining separate training versions.
+2. Read network dimensions from `single_observation_space` and
+   `single_action_space`. Pass `(N,26)` observations through the policy in one
+   call and send `(N,)` integer actions to `envs.step`. Do not add another batch
+   axis, use `.item()` on batched actions/dones, or pass one action to every worker.
+3. Store observations as `(T,N,26)` and actions, rewards, log probabilities,
+   values, and masks as `(T,N)`. For feed-forward PPO flatten the first two axes
+   only when creating optimizer minibatches. Maintain episode returns, lengths,
+   component sums, and win counts per worker, resetting only the worker that ends.
+4. Use `AutoresetMode.SAME_STEP` consistently, rather than relying on the current
+   default `NEXT_STEP`. In the installed version, ended workers return their new
+   episode observation; the transition's real final observation and info are
+   under `infos["final_obs"]` / `infos["final_info"]`, with `_final_obs` /
+   `_final_info` masks. Terminal metrics must come from final info, not reset info.
+   Write a helper for extracting nested per-worker info and honoring its masks.
+   Check each observation/normalization wrapper's support for this autoreset
+   mode, and apply the same preprocessing to final observations used for values.
+5. Bootstrap a true terminal transition with zero. Bootstrap a time-limit
+   truncation using the value of its **final** observation, not the reset
+   observation. For GAE, stop recursion across both termination and truncation:
+   `delta = reward + gamma * (1 - terminated) * V(next_transition_obs) - V(obs)`;
+   `advantage = delta + gamma * lambda * (1 - ended) * next_advantage`.
+   At a rollout boundary, still bootstrap continuing environments normally.
+   If using reward correction for truncation instead, do not also bootstrap it
+   a second time in GAE. Test hand-calculated terminal/truncated returns.
+6. Keep LSTM hidden/cell state separately for each worker. Compute truncated
+   final-state values with the appropriate pre-reset recurrent context; then
+   reset only ended workers before acting on their new observations. Preserve
+   temporal ordering within recurrent minibatches; do not randomly flatten
+   individual timesteps as in feed-forward PPO.
+7. Record `batch_size = T * N`. For example N=8 and T=128 yields 1024 transitions
+   per rollout. Increasing N changes PPO batch size unless T is adjusted, which
+   changes optimization frequency and memory use. Keep total transition budgets
+   explicit, ensure valid minibatch divisibility, and compare learning outcomes
+   as well as speed. Do not silently treat vector calls as individual transitions.
+
+The final-observation handling above is verified against the installed vector
+implementation; use the [Gymnasium autoreset guidance](https://farama.org/Vector-Autoreset-Mode)
+when changing versions or wrappers. Do not mix old `final_observation` examples
+with the installed API's `final_obs` keys without a compatibility layer.
+
+#### 7.4 Benchmark and select the worker count
+
+- Add a benchmark module separate from PPO: seeded random actions, warm-up,
+  fixed transition count, repeated measurements, and no rendering/sleep/live I/O.
+  A 200 ms simulated decision must execute as fast as CPU work permits, not wait
+  200 ms of wall time. Exclude process startup from steady-state SPS but report it.
+- Compare direct single-env, sync, and async at 1, 2, 4, 8, and then larger N only
+  if hardware and memory allow. Start near physical CPU core count for async,
+  leaving capacity for PPO, and measure before selecting a default. Cheap worlds
+  and small observations can make process communication costlier than the work;
+  async is not guaranteed to outperform sync, nor does N guarantee N-fold speedup.
+- Report transitions/second as `vector_steps * N / elapsed_seconds`, vector calls
+  per second separately, p50/p95 batch latency, CPU utilization, RAM, and startup
+  time. Repeat with PPO to measure end-to-end transitions/second including policy
+  inference, rollout transfers, advantage calculation, and optimization.
+- Keep shared observation memory enabled for the supported Box space. Rich info
+  still travels through process communication, so benchmark compact versus full
+  diagnostics. Start with copied outputs; only use `copy=False` after proving
+  rollout buffers own their data and cannot be overwritten by the next step.
+- Control CPU thread oversubscription: benchmark learner thread limits, and keep
+  worker numerical-library threads small where appropriate. One process per core
+  each spawning many threads can reduce throughput. Do not import Torch/CUDA into
+  workers just to run this pure Python simulator.
+- Save hardware, package versions, backend, N, T, diagnostics mode, seeds, reward
+  profile, SPS, and learning outcomes in a benchmark table. Select measured
+  settings; do not put an unverified numerical SPS target into the exit gate.
+
+#### 7.5 Correctness and checkpoint tests
+
+- Compare every worker with an independent single environment using the same
+  initial seed and predetermined action stream, including matching episode resets.
+  Repeat across sync and async; scheduling differences must not change mechanics.
+- Force one worker to die, one to hit the time limit, and another to continue in
+  the same batch. Verify final observations, masks, rewards, counters, and LSTM
+  state resets. Verify one world's reset does not reset or reseed another world.
+- Test compact info on mixed None/integer targets and heterogeneous terminal
+  states. Validate all returned observation shapes, bounds, and dtypes.
+- Capture each worker's state/RNG if promising exact checkpoint resume. Otherwise
+  label resumed runs as starting fresh episodes. Changing worker count on resume
+  changes stream assignment and is not an exact continuation.
+- Run bounded PPO training and evaluation with one and multiple workers, and
+  verify save/load, finite gradients/losses, parameter updates, and process cleanup
+  after normal exit, interruption, and worker errors.
+
+Exit gate:
+
+- synchronous and Windows-spawn asynchronous vector smoke programs pass;
+- vector PPO trains on the current simulator with correct terminal bootstrapping,
+  independent episodes, and recurrent-state isolation;
+- sync/async deterministic worker replay matches the single-env reference;
+- a benchmark table identifies the fastest stable settings on this machine,
+  with engine SPS and end-to-end PPO SPS measured separately;
+- eight-action checkpoints remain compatible with Phase 6 simulator evaluation.
+  Vectorization must not change game mechanics to achieve higher throughput.
+
+### Phase 8 - Test the live ZMQ contract, payload differences, and sim-to-game gap
+
+Primary deliverable: a live-versus-simulator comparison report, with repeatable
+regression cases for each discovered discrepancy. Matching the connected live
+version takes precedence over further optimizations to the Phase 7 vector path.
+This is the first phase that implements/tests a simulation-policy live adapter
+or claims live contract compatibility. Phases 6 and 7 establish training and SPS
+on the current simulator without requiring those live checks.
+
+Before running policy-driven live sessions:
+
+- Implement an explicit eight-action live Mystic adapter over the existing ZMQ
+  request/response path. Keep the legacy 11-action default available for existing
+  models; do not silently reinterpret output indices. Validate checkpoint action
+  labels, observation schema, and preprocessing before transmitting actions.
+- Build a payload-difference matrix from real captures and simulator outputs:
+  raw field names, nesting, types, missing/null fields, ID representation, coordinate
+  and direction conventions, HP/MP units and normalization, map ID, entity
+  ordering, nearest-five selection/padding, and distance semantics. Compare raw
+  payloads separately from the final encoded 26-value observation; equal shape
+  does not imply equal meaning.
+- Add mocked ZMQ and saved-payload tests for serialization, action labels,
+  request/response correlation, reset handshakes, missing/malformed fields,
+  duplicate/stale messages, and timeout/disconnection behavior. Unknown state
+  must remain explicit rather than becoming guessed zeros or inferred kills.
+- Run a bounded real connection smoke test after mocked tests pass. If game
+  access is unavailable, mark the live part of Phase 8 as unvalidated. Mocked
+  transport success is not evidence that the simulator matches the game.
+- Compare live task/reward behavior separately, including legacy HP-delta and
+  enemy-disappearance heuristics. Use comparable outcome metrics when live
+  telemetry cannot support simulator-style event rewards. Loading a checkpoint
+  does not restore or roll back live game state.
+
+1. Capture bounded live map-53 sessions at the existing ZMQ boundary. Store raw
+   requests/responses, request IDs, action index and label, client/server and
+   receive timestamps where available, encoded observations, and visible entity
+   state. Pair actions with their actual responses, accounting for duplicate or
+   stale ticks and variable latency. Keep capture optional and outside simulation
+   hot paths; a simple JSONL format is sufficient, without Minari.
+2. Use scripted scenarios before policy-driven sessions: each movement direction,
+   occupied cells, rectangular cast edges, nearest-target ties, all three spells,
+   insufficient MP, cooldown edges, Acid refresh, partial NPC attack-timer reset,
+   regeneration, kills, and 50-second respawns. Record which expected fields are
+   directly observed versus inferred or unavailable from the live payload.
+3. Compare two layers separately. First validate ZMQ action serialization and
+   live observation parsing against the simulator contract. Then compare combat
+   and movement transitions from matched initial snapshots and action sequences.
+   Snapshot import must explicitly initialize known timers, stats, effects, and
+   entity identity; do not fill hidden server state with guessed certainty.
+4. Require exact matches for deterministic observable rules such as action
+   mappings, resource ordering, legal movement, and observation encoding. Define
+   timestamp tolerances from server tick cadence and capture uncertainty. Where
+   server RNG state or draws are unavailable, compare controlled roll branches
+   or distributions over repeated runs; equal client seeds do not imply equal
+   live/server random sequences.
+5. Report the first divergent observable transition with timestamp, request ID,
+   action, before/after state, expected/actual values, tolerance, and evidence.
+   Classify transport/parser, mechanics, task/reward, and unobservable-state
+   mismatches separately. Retain held-out sessions so fixes are not validated
+   only on the same traces used to develop them.
+6. Turn confirmed mismatches into focused Python regression fixtures and fix the
+   simulator or live adapter at the responsible layer. Check the effective
+   level-150 Innie template, movement interval per life, 226 HP/1664 MP per
+   two seconds, fixed-before-percentage MP costs, 16-X/10-Y casting rectangle,
+   and per-caster Acid refresh against the connected version. Preserve old
+   profiles when live evidence requires a new fidelity configuration. Enable
+   terrain collision only if the compared live task uses it, under a separate
+   tested profile such as `map53_blocked_v2`.
+7. Evaluate frozen simulator-trained PPO checkpoints through the live ZMQ
+   adapter using deterministic action selection. Record both sides' task and
+   reward profiles, kills, survival, damage, spell success, and action timing.
+   Keep map, class/stats, gear, spawn/task constraints, and episode rules as close
+   as possible; report unavoidable differences. Feed failures back into parity
+   fixtures and simulator retraining before using live fine-tuning to compensate.
+8. Re-run the Phase 7 vector benchmarks after parity fixes. Optimize measured
+   bottlenecks without changing RNG consumption or event ordering. NumPy batching,
+   compiled extensions, and a C++ core remain optional further work; the required
+   sync/async vector training path is already established in Phase 7.
+
+Exit gate:
+
+- the eight-action live adapter passes contract tests and rejects incompatible
+  checkpoints before sending actions;
+- payload-difference fixtures cover raw transport data and encoded observations,
+  with every required difference either reconciled or explicitly reported;
+- real ZMQ captures produce a reproducible comparison report with defined
+  tolerances, explicit unknowns, and no unexplained failures on required cases;
+- action/observation compatibility and agreed observable mechanics pass held-out
+  live scenarios; unsupported hidden-state claims are excluded;
+- a frozen simulator-trained PPO checkpoint completes bounded live evaluation,
+  with simulator/live outcome differences measured and remaining gaps recorded;
+- every confirmed fix has a regression test, and any optimization preserves
+  deterministic simulator traces. BC/Minari availability is not an exit gate.
+
+### Deferred - Behavior cloning, Minari, and offline learning
+
+Keep existing offline tools functional, but defer new BC training, eight-action
+Minari dataset production, legacy demonstration migration, dataset publication,
+and AWAC/offline experiments until PPO training and live parity are established.
+Existing action/schema safeguards remain in place. Lightweight ZMQ fidelity
+captures are validation evidence and do not require a training dataset pipeline.
 
 ## First implementation slice
 
@@ -1073,8 +1457,13 @@ Build the first reviewable vertical slice in this order:
    allocation.
 7. Connect `combat_reward_v1`, termination/truncation, structured `info`, and the
    Gymnasium checker.
-8. Run a short single-environment PPO smoke test, then add vector environments
-   and benchmarking.
+8. Complete Phase 6 PPO training, checkpointing, resume, and evaluation solely
+   on the current Mystic Sim environment.
+9. Complete Phase 7 compact diagnostics, sync/async vector PPO, reset/GAE tests,
+   and throughput benchmarking.
+10. Complete Phase 8 live adapter/contract tests, payload-difference tests, live
+    capture, mechanics comparison, and frozen-policy sim-to-game evaluation.
+    BC/Minari remains deferred.
 
 The first mergeable milestone ends after step 3: a deterministic 100x100 map-53
 environment with 80 non-overlapping Innies, seeded reset, the exact observation,
@@ -1099,5 +1488,11 @@ integration.
 - Gymnasium validation and the repository test suite pass.
 - Checkpoints record enough schema/profile metadata to prevent incompatible
   live, legacy-11-action, or higher-fidelity models from being mixed silently.
-- At least one live map-53 trace can be replayed with a per-event comparison
-  report, even if some tolerances remain provisional.
+- PPO trains on the simulator without sockets, saves/reloads compatible models,
+  and has a tested eight-action live ZMQ evaluation path.
+- Sync/async vector PPO supports independent worlds and correct episode handling,
+  with measured environment and end-to-end training throughput.
+- Required live map-53 scenarios have held-out comparison reports with explicit
+  tolerances and unknowns; a frozen PPO policy is evaluated on the connected
+  live version. Mock transport tests alone do not satisfy live fidelity.
+- Behavior cloning and Minari migrations are deferred, not completion blockers.
