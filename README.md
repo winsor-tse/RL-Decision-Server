@@ -4,6 +4,11 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 
 ## Overview
 
+To play the headless Mystic simulation through its optional Pygame viewer,
+double-click `Play_Mystic_Sim.bat`. Install its display dependency first with
+`.\RL_venv\Scripts\python.exe -m pip install -r requirements-viewer.txt`.
+See [viewer controls and options](Custom_enviornments/Mystic_Sim/README.md#play-the-simulator-with-pygame).
+
 - `Automation/Bridge/ws_zmq_bridge.py`: translates WebSocket messages from Yugen Saga into ZMQ backend requests.
 - `Training/PPO_server.py`: active PPO training loop and checkpoint writer.
 - `Training/PPO_lstm_server.py`: recurrent PPO training loop for the same live environment.

@@ -1,5 +1,59 @@
 # Mystic simulator: Phases 0 through 5
 
+## Play the simulator with Pygame
+
+Double-click **`Play_Mystic_Sim.bat`** at the repository root, or run:
+
+```powershell
+.\RL_venv\Scripts\python.exe -m pip install -r requirements-viewer.txt
+.\RL_venv\Scripts\python.exe -m Custom_enviornments.Mystic_Sim.viewer
+```
+
+The optional display uses [pygame-ce](https://pyga.me/docs/), which imports as
+`pygame`. The headless environment does not import or require it. The viewer
+calls the existing Gym environment; movement, targeting, damage, regeneration,
+cooldowns, Acid effects, and respawns use the same simulation code as training.
+
+The window starts paused. Press **Space** to begin.
+
+| Control | Action |
+|---|---|
+| WASD / arrow keys | Move; hold to repeat every 200 simulated milliseconds |
+| 1 / 2 / 3 | Arcane Blast / Acid Cloud / Tempest Inferno; hold to repeat |
+| Space | Pause/resume |
+| R / Shift+R | Restart same seed / restart with next seed |
+| Tab | Toggle follow camera and full-map overview |
+| Mouse wheel | Zoom follow camera |
+| - / + | Change playback speed, 0.25x through 4x |
+| C / B | Toggle casting rectangle / spawn boxes |
+| Escape | Close |
+
+One action executes per decision; held spells take priority over movement.
+Targets are selected automatically by the simulator. Blue is the player, amber
+is an idle Innie, red is aggro, and green rings indicate Acid. The gold ring
+marks the nearest eligible target. Dead Innies display respawn countdowns.
+Terrain marks are visual references; this scenario disables terrain collision.
+Melee remains disabled as in the baseline. Idle time uses its nonmutating attack
+action (4) to advance the clock without adding a ninth training action.
+
+Default **free play** removes the five-kill and 256-step stopping points so you
+can explore and watch respawns; player death still ends play. To use the exact
+training episode rules:
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Custom_enviornments.Mystic_Sim.viewer --training-rules --seed 42
+```
+
+Rendering is 60 FPS with independent 200 ms simulation decisions. Focus loss
+pauses the viewer. Excess wall-clock lag is capped so returning to a stalled
+window does not fast-forward a long combat sequence.
+
+For a display-free smoke test, including a PNG render:
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Custom_enviornments.Mystic_Sim.viewer --smoke-test --screenshot viewer.png
+```
+
 This package defines contracts, immutable map/configuration data, and seeded reset.
 Importing `Custom_enviornments.Mystic_Sim` registers `YugenSaga/MysticSim-v0`.
 The environment declares eight actions and 26 float32 observation values.
