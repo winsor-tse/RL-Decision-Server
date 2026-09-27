@@ -201,6 +201,8 @@ class RewardConfig:
     # Simulator-only shaping for attempted movement into occupied/blocked cells.
     collision_penalty_weight: float = 5.0
     collision_streak_cap: int = 4
+    # Simulator-only cost per spell rejected by slot/family/global cooldown.
+    cooldown_attempt_penalty: float = 5.0
     y_bounds: tuple[int, int] | None = (30, 86)  # Inclusive playable rows; truncate at <=29 or >=87.
     legacy_y_penalty_below: int | None = 31
     legacy_y_penalty_above: int | None = 85
@@ -212,7 +214,7 @@ class RewardConfig:
         if self.profile not in ("combat_reward_v1", "legacy_reward_v0"):
             raise ValueError("Unknown reward profile")
         for name in ("enemy_damage_weight", "kill_bonus", "player_damage_weight", "death_penalty", "time_cost",
-                     "collision_penalty_weight", "win_bonus"):
+                     "collision_penalty_weight", "win_bonus", "cooldown_attempt_penalty"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be a finite nonnegative number")

@@ -291,7 +291,7 @@ moving an enemy outside the observation does not earn a kill reward.
 | Dashboard component | Default training calculation |
 |---|---|
 | `health_state` | -0.001 per decision (time cost) |
-| `positioning` | Collision penalty plus -100 * (31 - Y) below 31 or -100 * (Y - 85) above 85 |
+| `positioning` | Collision/cooldown-attempt penalties plus -100 * (31 - Y) below 31 or -100 * (Y - 85) above 85 |
 | `damage_taken` | -50 * actual player damage / player maximum HP |
 | `damage_dealt` | 25 * sum of actual player damage / each enemy's maximum HP |
 | `terminal` | +200 for reaching five kills; -200 for player death; 0 otherwise |
@@ -350,6 +350,28 @@ the player attempts movement, before scheduled NPC updates. It is added to
 `positioning`, with `collision_kind`, `collision_streak`, and `collision_penalty`
 in step diagnostics even when tracing is disabled. The streak is reward history,
 not an added observation feature; future observation design should account for it.
+
+**Simulator-only cooldown shaping (both reward profiles):** each spell attempt
+rejected with `cooldown`, `family_cooldown`, or `global_cooldown` costs **-5**.
+The cost is `RewardConfig.cooldown_attempt_penalty`; set 0 to disable. Each
+repeated attempt pays separately (no streak multiplier), at half the +10 kill
+bonus. It is added to `positioning`, preserving the six dashboard components;
+`info['cooldown_penalty']` reports the cost separately without adding it twice.
+Other reward components, including damage from an existing DoT, still apply.
+Use the engine's rejection reason at action time: a cooldown expiring during
+the subsequent 200ms does not erase the penalty. Casting exactly when ready
+has no penalty. Failed casts do not spend resources, extend cooldowns, create
+effects, or consume combat RNG; the simulation clock and scheduled events still
+advance normally. Other rejection reasons, movement, melee, and idle decisions
+do not receive this particular penalty. The engine's existing rejection order
+is preserved when more than one condition would prevent a cast.
+
+Cooldowns are in diagnostics, not the current 26-value policy observation.
+This penalty supplies feedback but does not make cooldown state observable to
+a feed-forward policy. For reliable timing, a future observation contract should
+include normalized remaining slot/family/global cooldowns (and cast affordability),
+or a policy should retain sufficient action history. That contract change and
+retraining are separate work; the current eight actions/26 observations remain.
 
 `legacy_reward_v0` snapshots the live health thresholds,
 distance shaping, signed player HP-delta quirk, and coefficient 25 for enemy

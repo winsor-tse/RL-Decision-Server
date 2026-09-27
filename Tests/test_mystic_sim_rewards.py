@@ -107,6 +107,64 @@ class RewardTests(unittest.TestCase):
         self.assertEqual(parts['damage_taken'],0)
         self.assertEqual(parts['damage_dealt'],0)
 
+    def test_cooldown_rejections_penalized_each_attempt_without_cast_mutation(self):
+        for profile in ('combat_reward_v1','legacy_reward_v0'):
+            for slot in (1,2,3):
+                for reason in ('cooldown','family_cooldown','global_cooldown'):
+                    env=self.scene(RewardConfig(profile=profile))
+                    p=env.world.player
+                    spell=env.config.spells[slot-1]
+                    if reason=='family_cooldown' and not spell.family:
+                        continue
+                    if reason=='cooldown': p.cooldowns.slots[slot]=1000
+                    elif reason=='family_cooldown': p.cooldowns.families[spell.family]=1000
+                    else: p.cooldowns.global_ready_at_ms=1000
+                    before=deepcopy(p)
+                    rng=deepcopy(env.np_random.bit_generator.state)
+                    for _ in range(3):
+                        info=env.step(slot+4)[4]
+                        self.assertEqual(info['action_failure_reason'],reason)
+                        self.assertEqual(info['cooldown_penalty'],-5)
+                        self.assertEqual(info['reward_components']['positioning'],
+                                         -2 if profile=='legacy_reward_v0' else -5)
+                        self.assertEqual(info['cast_events'],[])
+                        self.assertEqual(p,before)
+                        self.assertEqual(env.np_random.bit_generator.state,rng)
+                    self.assertEqual(env.step(4)[4]['cooldown_penalty'],0)
+                    self.assertEqual(env.reset(seed=42)[1]['cooldown_penalty'],0)
+
+    def test_cooldown_penalty_uses_attempt_time_and_exact_ready_boundary(self):
+        env=self.scene()
+        env.world.player.cooldowns.slots[1]=200
+        info=env.step(5)[4]  # Rejected at 0, although ready when the step ends.
+        self.assertEqual(info['simulation_time_ms'],200)
+        self.assertEqual(info['cooldown_penalty'],-5)
+        info=env.step(5)[4]  # Exactly ready at action time.
+        self.assertTrue(info['action_applied'])
+        self.assertEqual(info['cooldown_penalty'],0)
+        info=env.step(6)[4]  # Other spell still inside the 300ms global cooldown.
+        self.assertEqual(info['action_failure_reason'],'global_cooldown')
+        self.assertEqual(info['cooldown_penalty'],-5)
+
+    def test_cooldown_penalty_configuration_and_other_failures(self):
+        for cost in (0,2.5,10):
+            env=self.scene(RewardConfig(cooldown_attempt_penalty=cost))
+            env.world.player.cooldowns.slots[1]=1000
+            self.assertEqual(env.step(5)[4]['cooldown_penalty'],-cost)
+        for cost in (-1,True,float('inf'),float('nan')):
+            with self.assertRaises(ValueError): RewardConfig(cooldown_attempt_penalty=cost)
+        config=RewardConfig()
+        for reason in ('no_target','insufficient_mp','insufficient_hp','magic_immune',
+                       'out_of_range','player_dead',None):
+            self.assertEqual(rewards.cooldown_penalty(config,5,reason),0)
+        for action in (0,1,2,3,4,None):
+            self.assertEqual(rewards.cooldown_penalty(config,action,'cooldown'),0)
+        env=self.scene()
+        env.world.player.mp=0
+        info=env.step(5)[4]
+        self.assertEqual(info['action_failure_reason'],'insufficient_mp')
+        self.assertEqual(info['cooldown_penalty'],0)
+
     def test_overkill_kill_bonus_and_no_reward_for_disappearance(self):
         env = self.scene()
         p,npc = env.world.player,env.world.monsters[2]

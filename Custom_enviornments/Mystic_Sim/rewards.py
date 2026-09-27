@@ -12,6 +12,13 @@ def collision_penalty(world, config):
     return -config.collision_penalty_weight * min(world.player_collision_streak, config.collision_streak_cap)
 
 
+def cooldown_penalty(config, action, failure_reason):
+    # SIM ONLY: use the rejection at action time, not deadlines after advance().
+    if action in (5, 6, 7) and failure_reason in ("cooldown", "family_cooldown", "global_cooldown"):
+        return -config.cooldown_attempt_penalty
+    return 0.0
+
+
 def episode_status(world, config):
     if not world.player.alive:
         return True, False, "loss", "player_death"
@@ -24,7 +31,8 @@ def episode_status(world, config):
     return False, False, None, None
 
 
-def calculate(world, config, previous_obs, obs, action, damage_events, death_events, outcome):
+def calculate(world, config, previous_obs, obs, action, damage_events, death_events, outcome,
+              *, failure_reason=None):
     parts = empty_components()
     player = world.player
     taken = sum(e.damage / player.max_hp for e in damage_events if e.target_id == player.entity_id)
@@ -60,6 +68,8 @@ def calculate(world, config, previous_obs, obs, action, damage_events, death_eve
     parts["terminal"] = (config.win_bonus if outcome == "win" else
                          -config.death_penalty if outcome == "loss" else 0.0)
     parts["positioning"] += collision_penalty(world, config)
+    # Preserve dashboard components; unsuccessful action costs live in positioning.
+    parts["positioning"] += cooldown_penalty(config, action, failure_reason)
     if config.legacy_y_penalty_below is not None and obs[1] < config.legacy_y_penalty_below:
         parts["positioning"] -= 100 * (config.legacy_y_penalty_below - float(obs[1]))
     if config.legacy_y_penalty_above is not None and obs[1] > config.legacy_y_penalty_above:

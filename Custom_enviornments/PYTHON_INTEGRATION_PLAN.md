@@ -20,6 +20,17 @@ obstacle observations. Existing Y penalties and truncation still apply.
 
 ## Current scope
 
+Simulator-only cooldown shaping is enabled in both reward profiles. Each spell
+attempt rejected for slot, family, or global cooldown costs -5 through
+`RewardConfig.cooldown_attempt_penalty` (0 disables). Add it to `positioning`
+and expose `info.cooldown_penalty`; do not double count the diagnostic. Use the
+engine's action-time rejection reason, not the deadlines after the 200ms step.
+Other failures and non-spell actions receive no cooldown penalty. Repeated
+attempts each pay, while the existing cast/resource/RNG rules remain unchanged.
+The current 26-value observation does not expose cooldowns. Future policy input
+design should provide normalized remaining cooldowns/affordability or sufficient
+action history to support reliable timing; reward alone does not reveal state.
+
 The default simulator/viewer training profile, `combat_reward_v1`, now uses
 `enemy_damage_weight=25` per enemy maximum-HP bar actually removed and
 `player_damage_weight=50` per player maximum-HP bar lost. Thus 10% outgoing
