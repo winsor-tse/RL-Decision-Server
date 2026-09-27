@@ -24,12 +24,19 @@ cooldowns, Acid effects, and respawns use the same simulation code as training.
 
 The window starts paused. Press **Space** to begin.
 
+**R performs a full environment reset**, restoring the player and every enemy
+to their original spawn positions for the current seed. HP/MP, cooldowns,
+effects, aggro, deaths/respawn timers, rewards, collision history, time, and
+steps reset as well. Pending viewer input and animations are cleared. Restart
+pauses the viewer so you can inspect the restored world; press Space to resume.
+**Shift+R** performs the same full reset with a new seed and new sampled spawns.
+
 | Control | Action |
 |---|---|
 | WASD / arrow keys | Move; hold to repeat every 200 simulated milliseconds |
 | 1 / 2 / 3 | Arcane Blast / Acid Cloud / Tempest Inferno; hold to repeat |
 | Space | Pause/resume |
-| R / Shift+R | Restart same seed / restart with next seed |
+| R / Shift+R | Full environment reset with same spawns / reset with next seed |
 | Tab | Toggle follow camera and full-map overview |
 | Mouse wheel | Zoom follow camera |
 | - / + | Change playback speed, 0.25x through 4x |
@@ -47,8 +54,8 @@ Melee remains disabled as in the baseline. Idle time uses its nonmutating attack
 action (4) to advance the clock without adding a ninth training action.
 
 The viewer defaults to **training rules**, using the current environment's
-five-kill goal and 256-step limit. The panel shows **Steps: current / max**.
-The environment truncates on decision 256 (not 257), stops advancing, and shows
+five-kill goal and 1024-step limit. The panel shows **Steps: current / max**.
+The environment truncates on decision 1024 (not 1025), stops advancing, and shows
 **TRUNCATED** with **STEP LIMIT** and the final counter. Other episode endings
 show their own reason. Press R to reset the counter and start again. Idle
 decisions count; paused/render-only frames do not.
@@ -161,7 +168,7 @@ Action 4 reports `gear_disabled` by default. To enable facing-tile melee, pass
 as `config`; these example gear values are explicit inputs, not baseline stats.
 Actions 5, 6, and 7 cast Arcane Blast, Acid Cloud, and Tempest Inferno.
 All valid actions still advance time. Invalid actions reject without advancing.
-Episodes truncate after 256 steps and require reset before another step. Step
+Episodes truncate after 1024 steps and require reset before another step. Step
 info reports `combat_implemented=True` and `reward_implemented=True`, with
 structured `damage_events`, `death_events`, `respawn_events`, and `cast_events`
 for that step. Spell support is reported as `spells_implemented=True`.
@@ -272,7 +279,7 @@ converted. The supplied full-state golden vector is reproduced exactly.
 
 `rewards.py` and `diagnostics.py` keep `env.py` focused on the Gym five-tuple.
 The eight-action space and 26-value float32 observation contract are unchanged.
-Default episodes terminate on death or five kills and truncate at 256 steps.
+Default episodes terminate on death or five kills and truncate at 1024 steps.
 Death takes precedence over a simultaneous kill goal; termination takes
 precedence over a simultaneous time limit. `episode_end_reason` distinguishes
 `player_death`, `kill_goal`, `step_limit`, and `y_boundary` truncation.
@@ -287,11 +294,24 @@ moving an enemy outside the observation does not earn a kill reward.
 | `positioning` | Collision penalty plus -100 * (31 - Y) below 31 or -100 * (Y - 85) above 85 |
 | `damage_taken` | -player damage / player maximum HP |
 | `damage_dealt` | Sum of player damage / each enemy's maximum HP |
-| `terminal` | -5 for death; 0 otherwise |
-| `killed` | +1 per confirmed player kill |
+| `terminal` | +200 for reaching five kills; -200 for player death; 0 otherwise |
+| `killed` | +10 per confirmed player kill, including kills 1–4 |
 
 The returned reward is exactly the sum of these six components. Weights, kill
 goal, and time limit are configurable through frozen `RewardConfig` fields.
+Both simulator profiles use `kill_bonus=10`, `win_bonus=200`, and
+`death_penalty=200`. Each new kill pays immediately, once, from explicit death
+events; later decisions do not repay earlier kills. Multiple kills in one step
+each count. Kills 1–4 give +40 total progress; the fifth gives +10 plus the +200
+win bonus, for +250 in kill/terminal rewards across a win. Four kills followed
+by death give +40 - 200 = -160 in kill/terminal rewards. Other components still
+contribute to total return. These defaults prioritize survival and completion;
+the three weights remain independently configurable (not automatically linked).
+This
+terminal component is awarded once, in addition to that step's damage, kill,
+and positioning rewards. Death takes priority if the kill goal is reached on
+the same step. Truncation is not a loss and receives no terminal bonus/penalty.
+These are simulator-only rules; the legacy profile shares this terminal override.
 The simulator defaults to inclusive `y_bounds=(30, 86)`: reaching Y <= 29 or
 Y >= 87 truncates. The boundary step still receives its positioning penalty
 (-200 at 29 or 87), without a death penalty. Rows 30 and 86 receive -100 and
@@ -302,7 +322,7 @@ explicitly disable Y truncation. These task rules apply only to the simulator.
 move into terrain, an occupied tile, or an outer map boundary receives
 `-collision_penalty_weight * min(consecutive_blocked_moves, collision_streak_cap)`.
 Defaults are weight 5 and cap 4: -5, -10, -15, then -20 per blocked decision.
-This is a strong penalty relative to the combat profile's +1 kill reward and is
+This is a strong penalty relative to the combat profile's +10 kill reward and is
 configurable; weight 0 disables it. Successful moves and non-movement actions
 reset the streak, as does episode reset. Adjacency, standing still, failed casts,
 and NPC movement do not incur collision penalties. Classification happens when
@@ -312,8 +332,9 @@ in step diagnostics even when tracing is disabled. The streak is reward history,
 not an added observation feature; future observation design should account for it.
 
 `legacy_reward_v0` snapshots the live health thresholds,
-distance shaping, signed player HP-delta quirk, and coefficients (25 for enemy
-damage, 10 per kill, -100 for death). Enemy damage and kills use explicit events
+distance shaping, signed player HP-delta quirk, and coefficient 25 for enemy
+damage. It shares the simulator's configurable kill and terminal rewards above.
+Enemy damage and kills use explicit events
 instead of live disappearance heuristics. The simulator collision shaping above
 replaces legacy's inferred fixed -10 blocked-move penalty without double charging.
 Legacy alone retains healing rewards

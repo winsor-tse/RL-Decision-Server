@@ -60,7 +60,7 @@ class RewardTests(unittest.TestCase):
         result = self.transition(env,lambda: env.engine.apply_damage(p,npc,1000000))
         parts = result[4]['reward_components']
         self.assertAlmostEqual(parts['damage_dealt'],100/npc.max_hp)
-        self.assertEqual(parts['killed'],1)
+        self.assertEqual(parts['killed'],10)
         next_result = env.step(4)
         self.assertEqual(next_result[4]['reward_components']['killed'],0)
         env = self.scene()
@@ -75,7 +75,7 @@ class RewardTests(unittest.TestCase):
         for loss in (False,True):
             env = self.scene()
             w = env.world
-            w.step_count = 255
+            w.step_count = 1023
             w.kills = 4
             def finish():
                 env.engine.apply_damage(w.player,w.monsters[2],w.monsters[2].hp)
@@ -83,14 +83,99 @@ class RewardTests(unittest.TestCase):
             result = self.transition(env,finish)
             self.assertEqual(result[2:4],(True,False))
             self.assertEqual(result[4]['episode_outcome'],'loss' if loss else 'win')
-            self.assertEqual(result[4]['reward_components']['terminal'],-5 if loss else 0)
+            self.assertEqual(result[4]['reward_components']['terminal'],-200 if loss else 200)
             with self.assertRaises(gym.error.ResetNeeded): env.step(4)
         env = self.scene()
-        env.world.step_count = 255
+        env.world.step_count = 1023
         result=env.step(4)
         self.assertEqual(result[2:4],(False,True))
         self.assertEqual(result[4]['episode_end_reason'],'step_limit')
         self.assertEqual(result[4]['reward_components']['terminal'],0)
+
+    def test_large_terminal_rewards_in_both_profiles_and_custom_weights(self):
+        for profile in ('combat_reward_v1','legacy_reward_v0'):
+            for win_bonus, death_penalty in ((200,200),(250,175)):
+                for loss in (False,True):
+                    with self.subTest(profile=profile,bonus=win_bonus,loss=loss):
+                        env=self.scene(RewardConfig(profile=profile,win_bonus=win_bonus,
+                                                    death_penalty=death_penalty))
+                        w=env.world
+                        w.kills=4
+                        # Win/death takes priority even on the final allowed step.
+                        w.step_count=env.reward_config.max_episode_steps-1
+                        def finish():
+                            env.engine.apply_damage(w.player,w.monsters[2],w.monsters[2].hp)
+                            if loss:
+                                env.engine.apply_damage(w.monsters[2],w.player,w.player.hp)
+                        _,reward,terminated,truncated,info=self.transition(env,finish)
+                        self.assertEqual((terminated,truncated),(True,False))
+                        self.assertEqual(info['episode_outcome'],'loss' if loss else 'win')
+                        self.assertEqual(info['reward_components']['terminal'],
+                                         -death_penalty if loss else win_bonus)
+                        if loss:
+                            self.assertLess(reward,0)
+                        else:
+                            self.assertGreater(reward,0)
+                        self.assertEqual(reward,sum(info['reward_components'].values()))
+                        with self.assertRaises(gym.error.ResetNeeded): env.step(4)
+                        _,info=env.reset(seed=42)
+                        self.assertEqual(info['reward_components']['terminal'],0)
+            env=self.scene(RewardConfig(profile=profile))
+            self.assertEqual(env.step(4)[4]['reward_components']['terminal'],0)
+            env.world.step_count=env.reward_config.max_episode_steps-1
+            self.assertEqual(env.step(4)[4]['reward_components']['terminal'],0)
+        for name in ('win_bonus','death_penalty'):
+            for value in (-1,True,float('nan'),float('inf')):
+                with self.assertRaises(ValueError): RewardConfig(**{name:value})
+
+    def kill_progress_scene(self, profile, **weights):
+        env=self.scene(RewardConfig(profile=profile, **weights))
+        w=env.world
+        template=w.monsters[2]
+        w.monsters={i:replace(template,entity_id=i,x=53+i) for i in range(2,7)}
+        w.occupancy={(w.player.x,w.player.y):w.player.entity_id,
+                     **{(npc.x,npc.y):npc.entity_id for npc in w.monsters.values()}}
+        return env
+
+    def test_incremental_kills_one_through_five_and_terminal_scale(self):
+        for profile in ('combat_reward_v1','legacy_reward_v0'):
+            env=self.kill_progress_scene(profile)
+            w=env.world
+            progress=0
+            for count,npc in enumerate(w.monsters.values(),1):
+                result=self.transition(env,lambda: env.engine.apply_damage(w.player,npc,npc.hp))
+                parts=result[4]['reward_components']
+                progress+=parts['killed']
+                self.assertEqual(parts['killed'],10)
+                self.assertEqual(w.kills,count)
+                self.assertEqual(parts['terminal'],200 if count==5 else 0)
+                self.assertEqual(result[2:4],(count==5,False))
+                if count<5:
+                    # Existing kill totals never pay again on subsequent decisions.
+                    self.assertEqual(env.step(4)[4]['reward_components']['killed'],0)
+            self.assertEqual(progress,50)
+            self.assertEqual(progress+parts['terminal'],250)
+
+    def test_death_outweighs_four_kills_and_kill_weight_applies_to_both_profiles(self):
+        for profile in ('combat_reward_v1','legacy_reward_v0'):
+            env=self.kill_progress_scene(profile)
+            w=env.world
+            cumulative=0
+            for npc in list(w.monsters.values())[:4]:
+                cumulative+=self.transition(env,lambda: env.engine.apply_damage(w.player,npc,npc.hp))[1]
+            npc=w.monsters[6]
+            result=self.transition(env,lambda: env.engine.apply_damage(npc,w.player,w.player.hp))
+            self.assertEqual(result[4]['reward_components']['terminal'],-200)
+            self.assertEqual(result[4]['reward_components']['killed'],0)
+            self.assertLess(cumulative+result[1],0)
+            env=self.kill_progress_scene(profile,kill_bonus=7)
+            w=env.world
+            def kill_two():
+                for npc in list(w.monsters.values())[:2]:
+                    env.engine.apply_damage(w.player,npc,npc.hp)
+            result=self.transition(env,kill_two)
+            self.assertEqual(result[4]['reward_components']['killed'],14)
+            self.assertEqual(result[4]['reward_components']['terminal'],0)
 
     def test_y_rules_can_be_disabled_or_overridden(self):
         env=self.scene(RewardConfig(y_bounds=None))
@@ -111,7 +196,7 @@ class RewardTests(unittest.TestCase):
         parts=rewards.calculate(w,env.reward_config,prev,obs,0,[],[],'loss')
         # Equal coordinates alone no longer imply an attempted collision.
         self.assertEqual(parts,dict(health_state=-.5,positioning=-97.,damage_taken=-12.5,
-                                    damage_dealt=0.,terminal=-100.,killed=0.))
+                                    damage_dealt=0.,terminal=-200.,killed=0.))
         prev[3]=.25;obs[3]=.75
         self.assertEqual(rewards.calculate(w,env.reward_config,prev,obs,4,[],[],None)['damage_taken'],10)
         obs[3]=.5

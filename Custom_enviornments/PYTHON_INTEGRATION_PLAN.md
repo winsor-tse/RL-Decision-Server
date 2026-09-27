@@ -20,6 +20,18 @@ obstacle observations. Existing Y penalties and truncation still apply.
 
 ## Current scope
 
+Both Mystic Sim reward profiles award +10 immediately for each confirmed kill,
+including kills 1–4 (`RewardConfig.kill_bonus`). Count new death events only;
+never repeatedly reward the cumulative kill count. Multiple kills each pay.
+Terminal defaults are +200 on reaching five kills and -200 on player death
+(`RewardConfig.win_bonus` and `death_penalty`), twenty default kill bonuses.
+Thus a win gives +250 in kill/terminal rewards; four kills then death give -160,
+before other components. Weights are independently configurable.
+Award the terminal reward once, alongside the final step's normal components;
+death takes priority over a simultaneous fifth kill. Step-limit and Y-boundary
+truncation are not losses and add no terminal reward. Existing Y penalties still
+apply. Live Mystic rewards are unchanged.
+
 The single map profile is `map53`, used by both the viewer and headless training.
 Terrain and entity collision are always enabled for movement, pathfinding,
 spawning, and respawning, alongside the outer 0..99 coordinate bounds. No spell
@@ -681,7 +693,7 @@ health_state, positioning, damage_taken, damage_dealt, terminal, killed
 
 Use explicit simulator events for damage and death rather than inferring kills
 from disappeared IDs. Start with player death as loss, five Innie kills as win,
-and 256 steps as truncation.
+and 1024 steps as truncation.
 
 The scenario map ID is 53. `Example_Full_State.txt` is on map3471 and is used
 only to lock parser compatibility; it is not a simulator reset state. Keep map
@@ -725,7 +737,7 @@ configuration:
 | Basic attack/gear | Disabled by default; toggleable configuration |
 | Cooldowns | Absolute ready times using the supplied spell/family durations |
 | Event tie-break | Absolute due time, then enqueue sequence |
-| Episode end | Player death or five kills; truncate at 256 steps |
+| Episode end | Player death or five kills; truncate at 1024 steps |
 
 Treat all interval endpoints as inclusive. If a spawn rectangle is full, fail
 reset with a diagnostic rather than loop indefinitely. A respawn with no free
@@ -1032,7 +1044,7 @@ are detached snapshots, with the selected target captured at action time.
   a `combat_reward_v1` profile for training. The latter should reward normalized
   enemy damage and kills, penalize normalized player damage and death, use a
   small time cost, and avoid hard-coding the current `player_hp_pct != 0.5` bug.
-- Terminate on player death or the fifth Innie kill. Truncate at 256 steps. Keep
+- Terminate on player death or the fifth Innie kill. Truncate at 1024 steps. Keep
   Y-boundary rules configurable; the simulator task truncates at Y <= 29 or
   Y >= 87 and applies penalties below 31 and above 85.
 - Return diagnostics including profile, seed, simulation time, step, selected
@@ -1518,7 +1530,7 @@ integration.
   state-transition tests.
 - Terrain and occupancy collision are enforced in map53.
 - Gear is disabled cleanly and can later be enabled through configuration.
-- Five kills wins, player death loses, and 256 actions truncate.
+- Five kills wins, player death loses, and 1024 actions truncate.
 - Gymnasium validation and the repository test suite pass.
 - Checkpoints record enough schema/profile metadata to prevent incompatible
   live, legacy-11-action, or higher-fidelity models from being mixed silently.

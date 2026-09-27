@@ -339,7 +339,7 @@ class TimingTests(unittest.TestCase):
         for invalid in [-1,8,True,1.5,'0']:
             with self.assertRaises(ValueError): env.step(invalid)
         self.assertEqual(env.world.time_ms,0)
-        for _ in range(256): result=env.step(4)
+        for _ in range(1024): result=env.step(4)
         self.assertEqual(result[2:4],(False,True))
         self.assertEqual(result[1],sum(result[4]['reward_components'].values()))
         with self.assertRaises(gym.error.ResetNeeded): env.step(0)

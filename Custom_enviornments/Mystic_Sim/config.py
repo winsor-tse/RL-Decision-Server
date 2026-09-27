@@ -187,11 +187,14 @@ class TimingConfig:
 class RewardConfig:
     profile: str = "combat_reward_v1"
     win_kills: int = 5
-    max_episode_steps: int = 256
+    max_episode_steps: int = 1024
     enemy_damage_weight: float = 1.0
-    kill_bonus: float = 1.0
+    kill_bonus: float = 10.0
     player_damage_weight: float = 1.0
-    death_penalty: float = 5.0
+    # Simulator-only terminal bonuses, shared by both reward profiles.
+    # Terminal magnitude is 20 default kill bonuses, outweighing partial progress.
+    win_bonus: float = 200.0
+    death_penalty: float = 200.0
     time_cost: float = 0.001
     # Simulator-only shaping for attempted movement into occupied/blocked cells.
     collision_penalty_weight: float = 5.0
@@ -207,7 +210,7 @@ class RewardConfig:
         if self.profile not in ("combat_reward_v1", "legacy_reward_v0"):
             raise ValueError("Unknown reward profile")
         for name in ("enemy_damage_weight", "kill_bonus", "player_damage_weight", "death_penalty", "time_cost",
-                     "collision_penalty_weight"):
+                     "collision_penalty_weight", "win_bonus"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be a finite nonnegative number")

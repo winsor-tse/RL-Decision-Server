@@ -25,11 +25,15 @@ class PlaySession:
         self.reset()
 
     def reset(self, new_seed=False):
+        """Full Gym reset; the same seed restores player and all enemy spawns."""
         if new_seed:
             self.seed += 1
         _, self.info = self.env.reset(seed=self.seed)
+        # Keep the restored spawn visible until the user explicitly resumes.
+        self.paused = True
         self.total_reward = 0.0
-        self.log = deque(["Ready. Space to play; 1 / 2 / 3 to cast."], maxlen=5)
+        spawn_message = "new seed spawns created" if new_seed else "original spawns restored"
+        self.log = deque([f"Environment reset: {spawn_message}. Space to play."], maxlen=5)
 
     def step(self, action=None):
         if self.paused or self.env.episode_done:
@@ -91,6 +95,14 @@ class Viewer:
     def text(self, value, x, y, color=None, font=None):
         self.screen.blit((font or self.font).render(str(value), True, color or self.TEXT), (x,y))
 
+    def restart(self, *, new_seed=False):
+        """Reset the environment and discard input/render state from the old episode."""
+        self.session.reset(new_seed=new_seed)
+        self.pending = None
+        self.accumulator = 0
+        self.flashes.clear()
+        self.floating.clear()
+
     def events(self):
         p = self.pg
         for e in p.event.get():
@@ -112,11 +124,7 @@ class Viewer:
                     self.pending = None
                     self.accumulator = 0
                 elif e.key == p.K_r:
-                    self.session.reset(new_seed=bool(e.mod & p.KMOD_SHIFT))
-                    self.pending = None
-                    self.accumulator = 0
-                    self.flashes.clear()
-                    self.floating.clear()
+                    self.restart(new_seed=bool(e.mod & p.KMOD_SHIFT))
                 elif e.key == p.K_TAB:
                     self.overview = not self.overview
                 elif e.key == p.K_b:
@@ -276,7 +284,7 @@ class Viewer:
                   self.RED if w.step_count >= limit else self.TEXT,self.small)
         self.text('CONTROLS',x,542,self.BLUE)
         for i,line in enumerate(('WASD / arrows   Move','1 / 2 / 3   Cast (hold to repeat)',
-                                 'Space   Pause       R   Restart','Shift+R   New seed    Tab   Map',
+                                 'Space   Pause   R   Reset env','Shift+R   New seed    Tab   Map',
                                  'Wheel   Zoom      - / +   Speed','C   Cast area     B   Spawn boxes')):
             self.text(line,x,570+i*23,self.MUTED,self.small)
         self.text('Melee disabled in baseline',x,718,self.MUTED,self.small)
@@ -313,7 +321,7 @@ def main(argv=None):
     parser.add_argument('--seed',type=int,default=42)
     modes=parser.add_mutually_exclusive_group()
     modes.add_argument('--training-rules',dest='training_rules',action='store_true',
-                       help='Use environment episode limits (default: five kills / 256 decisions)')
+                       help='Use environment episode limits (default: five kills / 1024 decisions)')
     modes.add_argument('--free-play',dest='training_rules',action='store_false',
                        help='Override kill and step limits for exploration; death and Y boundaries still end play')
     parser.set_defaults(training_rules=True)

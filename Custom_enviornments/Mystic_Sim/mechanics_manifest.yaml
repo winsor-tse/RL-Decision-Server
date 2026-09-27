@@ -263,8 +263,20 @@ parameters:
     value: 5
     provenance: simulator_rule
     source: PYTHON_INTEGRATION_PLAN.md
+  win_bonus:
+    value: 200
+    provenance: simulator_rule
+    source: PYTHON_INTEGRATION_PLAN.md
+  death_penalty:
+    value: 200
+    provenance: simulator_rule
+    source: PYTHON_INTEGRATION_PLAN.md
+  kill_bonus:
+    value: 10
+    provenance: simulator_rule
+    source: PYTHON_INTEGRATION_PLAN.md
   max_episode_steps:
-    value: 256
+    value: 1024
     provenance: simulator_rule
     source: PYTHON_INTEGRATION_PLAN.md
   full_box_retry_ms:

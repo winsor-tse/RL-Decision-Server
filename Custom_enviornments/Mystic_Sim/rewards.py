@@ -37,8 +37,6 @@ def calculate(world, config, previous_obs, obs, action, damage_events, death_eve
         parts["health_state"] = -config.time_cost
         parts["damage_taken"] = -config.player_damage_weight * taken
         parts["damage_dealt"] = config.enemy_damage_weight * dealt
-        parts["killed"] = config.kill_bonus * killed
-        parts["terminal"] = -config.death_penalty if outcome == "loss" else 0.0
     else:
         # Snapshot of live Mystic/Env_conditions reward coefficients and branches.
         # Enemy damage and kills use engine events instead of disappearance guesses.
@@ -52,8 +50,13 @@ def calculate(world, config, previous_obs, obs, action, damage_events, death_eve
         if hp_lost > 0 or hp != .5:
             parts["damage_taken"] = -20 * hp_lost
         parts["damage_dealt"] = 25 * dealt
-        parts["killed"] = 10.0 * killed
-        parts["terminal"] = -100.0 if outcome == "loss" else 0.0
+    # SIM ONLY: dense progress reward for each confirmed kill, including kills
+    # 1-4 before the goal. Use this step's death events, never cumulative kills.
+    parts["killed"] = config.kill_bonus * killed
+    # SIM ONLY: explicit episode outcomes award the win/loss bonus once. A time
+    # limit or Y-boundary truncation is not a death and receives neither bonus.
+    parts["terminal"] = (config.win_bonus if outcome == "win" else
+                         -config.death_penalty if outcome == "loss" else 0.0)
     parts["positioning"] += collision_penalty(world, config)
     if config.legacy_y_penalty_below is not None and obs[1] < config.legacy_y_penalty_below:
         parts["positioning"] -= 100 * (config.legacy_y_penalty_below - float(obs[1]))
