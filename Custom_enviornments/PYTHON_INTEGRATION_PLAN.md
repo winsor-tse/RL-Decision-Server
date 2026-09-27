@@ -20,6 +20,19 @@ obstacle observations. Existing Y penalties and truncation still apply.
 
 ## Current scope
 
+The default simulator/viewer training profile, `combat_reward_v1`, now uses
+`enemy_damage_weight=25` per enemy maximum-HP bar actually removed and
+`player_damage_weight=50` per player maximum-HP bar lost. Thus 10% outgoing
+damage gives +2.5 and 10% incoming damage gives -5. Use actual damage events
+after mitigation and overkill clamping; sum AoE targets and pay DoT on ticks.
+Healing cannot mask damage or pay positive reward. No approach/proximity bonus
+exists in this profile. The optional legacy profile retains historical distance
+and HP-delta shaping for comparison, not the recommended training behavior.
+With five full kills and no other costs, damage + kills + win total +375;
+four full kills then one full player HP bar lost and death total -110 before
+other shaping. Collision/Y penalties stay unchanged. Validate reward component
+totals during PPO evaluation; these scales do not guarantee policy quality.
+
 Both Mystic Sim reward profiles award +10 immediately for each confirmed kill,
 including kills 1–4 (`RewardConfig.kill_bonus`). Count new death events only;
 never repeatedly reward the cumulative kill count. Multiple kills each pay.

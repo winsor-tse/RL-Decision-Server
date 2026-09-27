@@ -34,6 +34,8 @@ def calculate(world, config, previous_obs, obs, action, damage_events, death_eve
                   if e.killer_id == player.entity_id and e.entity_id in world.monsters})
     if config.profile == "combat_reward_v1":
         # Attribute damage before regeneration; HP costs are not enemy damage.
+        # Damage drives dense combat feedback. Approaching/standing near enemies
+        # earns nothing in this profile; positioning only carries task penalties.
         parts["health_state"] = -config.time_cost
         parts["damage_taken"] = -config.player_damage_weight * taken
         parts["damage_dealt"] = config.enemy_damage_weight * dealt

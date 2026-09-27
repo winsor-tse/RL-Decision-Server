@@ -188,9 +188,11 @@ class RewardConfig:
     profile: str = "combat_reward_v1"
     win_kills: int = 5
     max_episode_steps: int = 1024
-    enemy_damage_weight: float = 1.0
+    # Training weights are reward per full HP bar actually removed.
+    # 10% enemy HP -> +2.5; 10% player HP -> -5, before kills/terminal rewards.
+    enemy_damage_weight: float = 25.0
     kill_bonus: float = 10.0
-    player_damage_weight: float = 1.0
+    player_damage_weight: float = 50.0
     # Simulator-only terminal bonuses, shared by both reward profiles.
     # Terminal magnitude is 20 default kill bonuses, outweighing partial progress.
     win_bonus: float = 200.0

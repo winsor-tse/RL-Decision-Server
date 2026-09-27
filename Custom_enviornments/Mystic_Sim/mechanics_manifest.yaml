@@ -275,6 +275,14 @@ parameters:
     value: 10
     provenance: simulator_rule
     source: PYTHON_INTEGRATION_PLAN.md
+  combat_enemy_damage_weight:
+    value: 25
+    provenance: simulator_rule
+    source: PYTHON_INTEGRATION_PLAN.md
+  combat_player_damage_weight:
+    value: 50
+    provenance: simulator_rule
+    source: PYTHON_INTEGRATION_PLAN.md
   max_episode_steps:
     value: 1024
     provenance: simulator_rule

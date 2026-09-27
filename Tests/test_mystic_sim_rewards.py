@@ -46,12 +46,66 @@ class RewardTests(unittest.TestCase):
         obs, reward, term, trunc, info = self.transition(env, damage_then_heal)
         self.assertEqual(obs[3], 1)
         parts = info['reward_components']
-        self.assertAlmostEqual(parts['damage_taken'], -100/p.max_hp)
-        self.assertAlmostEqual(parts['damage_dealt'], 1000/npc.max_hp)
+        self.assertAlmostEqual(parts['damage_taken'], -50*100/p.max_hp)
+        self.assertAlmostEqual(parts['damage_dealt'], 25*1000/npc.max_hp)
         self.assertEqual(parts['health_state'], -.001)
         self.assertEqual(reward, sum(parts.values()))
         self.assertEqual((term,trunc),(False,False))
         self.assertEqual(set(parts), set(rewards.COMPONENTS))
+
+    def test_training_damage_scale_and_hp_normalization(self):
+        for hp in (1000,10000):
+            env=self.scene()
+            p,npc=env.world.player,env.world.monsters[2]
+            p.stats=replace(p.stats,max_hp=hp)
+            npc.stats=replace(npc.stats,max_hp=hp*2)
+            p.hp,npc.hp=hp,hp*2
+            def trade():
+                env.engine.apply_damage(p,npc,npc.max_hp//10)
+                env.engine.apply_damage(npc,p,p.max_hp//10)
+            result=self.transition(env,trade)
+            parts=result[4]['reward_components']
+            self.assertAlmostEqual(parts['damage_dealt'],2.5)
+            self.assertAlmostEqual(parts['damage_taken'],-5)
+            self.assertEqual(parts['killed'],0)
+            self.assertEqual(parts['terminal'],0)
+            self.assertAlmostEqual(result[1],-2.501)
+            env.reward_config=replace(env.reward_config,enemy_damage_weight=40,player_damage_weight=80)
+            parts=self.transition(env,trade)[4]['reward_components']
+            self.assertAlmostEqual(parts['damage_dealt'],4)
+            self.assertAlmostEqual(parts['damage_taken'],-8)
+
+    def test_aoe_and_dot_damage_add_without_repeat_or_overkill_credit(self):
+        env=self.kill_progress_scene('combat_reward_v1')
+        p=env.world.player
+        a,b=list(env.world.monsters.values())[:2]
+        a.stats=replace(a.stats,max_hp=1000);a.hp=1000
+        b.stats=replace(b.stats,max_hp=2000);b.hp=2000
+        def aoe():
+            env.engine.apply_damage(p,a,100,damage_type='spell')
+            env.engine.apply_damage(p,b,400,damage_type='spell')
+        self.assertAlmostEqual(self.transition(env,aoe)[4]['reward_components']['damage_dealt'],7.5)
+        def dot():
+            env.engine.apply_damage(p,a,100,damage_type='dot')
+        self.assertAlmostEqual(self.transition(env,dot)[4]['reward_components']['damage_dealt'],2.5)
+        self.assertEqual(env.step(4)[4]['reward_components']['damage_dealt'],0)
+        parts=self.transition(env,lambda: env.engine.apply_damage(p,a,999999))[4]['reward_components']
+        self.assertEqual(parts['damage_dealt'],20)
+        self.assertEqual(parts['killed'],10)
+
+    def test_training_no_positive_proximity_or_healing_reward(self):
+        env=self.scene()
+        w=env.world
+        w.map=replace(w.map,blocked_cells=frozenset())
+        for action in (3,2,4,4):
+            parts=env.step(action)[4]['reward_components']
+            self.assertEqual(parts['positioning'],0)
+            self.assertEqual(parts['damage_dealt'],0)
+            self.assertEqual(sum(parts.values()),-.001)
+        w.player.hp-=100
+        parts=self.transition(env,env.engine.regenerate)[4]['reward_components']
+        self.assertEqual(parts['damage_taken'],0)
+        self.assertEqual(parts['damage_dealt'],0)
 
     def test_overkill_kill_bonus_and_no_reward_for_disappearance(self):
         env = self.scene()
@@ -59,7 +113,7 @@ class RewardTests(unittest.TestCase):
         npc.hp = 100
         result = self.transition(env,lambda: env.engine.apply_damage(p,npc,1000000))
         parts = result[4]['reward_components']
-        self.assertAlmostEqual(parts['damage_dealt'],100/npc.max_hp)
+        self.assertAlmostEqual(parts['damage_dealt'],25*100/npc.max_hp)
         self.assertEqual(parts['killed'],10)
         next_result = env.step(4)
         self.assertEqual(next_result[4]['reward_components']['killed'],0)

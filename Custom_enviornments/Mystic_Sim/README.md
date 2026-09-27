@@ -292,13 +292,33 @@ moving an enemy outside the observation does not earn a kill reward.
 |---|---|
 | `health_state` | -0.001 per decision (time cost) |
 | `positioning` | Collision penalty plus -100 * (31 - Y) below 31 or -100 * (Y - 85) above 85 |
-| `damage_taken` | -player damage / player maximum HP |
-| `damage_dealt` | Sum of player damage / each enemy's maximum HP |
+| `damage_taken` | -50 * actual player damage / player maximum HP |
+| `damage_dealt` | 25 * sum of actual player damage / each enemy's maximum HP |
 | `terminal` | +200 for reaching five kills; -200 for player death; 0 otherwise |
 | `killed` | +10 per confirmed player kill, including kills 1–4 |
 
 The returned reward is exactly the sum of these six components. Weights, kill
 goal, and time limit are configurable through frozen `RewardConfig` fields.
+The default training profile (`combat_reward_v1`, also used by the viewer) uses
+`enemy_damage_weight=25` and `player_damage_weight=50`, up from 1 each. Removing
+10% of one enemy's HP earns +2.5; losing 10% of player HP costs -5. Full enemy
+HP earns +25 across its lifetime, plus +10 for the kill. Five full kills and
+a win give +375 before damage taken, time, collision, and Y penalties. Four
+full kills followed by losing a full player HP bar give -110 before other
+shaping (+100 damage +40 kills -50 damage taken -200 death).
+
+These are proportional rewards for actual HP removed after mitigation, capped
+by the target's remaining HP; raw damage and overkill do not inflate them. AoE
+adds each target's contribution and DoT pays on actual ticks. Regeneration
+cannot hide damage taken or earn a healing reward in the training profile.
+Neither moving closer nor waiting at a preferred range earns a reward there.
+Legacy alone retains the old distance shaping (up to +3 every step even without
+damage), fixed +25 per enemy HP bar, and signed HP-delta/healing behavior for
+comparison; select the default combat profile for damage-focused training.
+Existing collision and Y penalties are unchanged; the -100 per tile Y shaping
+can still dominate damage on boundary steps. These coefficients are a starting
+balance to evaluate with PPO, not a guarantee of learned combat behavior.
+
 Both simulator profiles use `kill_bonus=10`, `win_bonus=200`, and
 `death_penalty=200`. Each new kill pays immediately, once, from explicit death
 events; later decisions do not repay earlier kills. Multiple kills in one step
