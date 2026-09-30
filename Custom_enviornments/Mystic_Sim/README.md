@@ -1,4 +1,4 @@
-# Mystic simulator: Phases 0 through 5
+# Mystic simulator: Phases 0 through 6
 
 > **MAP-SPECIFIC TRAINING WARNING:** The current 26-value observation has absolute
 > coordinates and enemy information, but no relative terrain/obstacle states.
@@ -7,6 +7,22 @@
 > agent, add relative obstacle states (similar to relative enemy information),
 > covering nearby terrain, occupied cells, and map edges. Update the observation
 > contract and retrain, vary training layouts, and evaluate on held-out maps.
+
+## Train PPO on the simulator
+
+The separate [Mystic Sim trainer](../../Training/Mystic_Sim/README.md) supports
+CPU/CUDA, one or multiple independent environments, TensorBoard, ten checkpoints
+per completed run, checkpoint evaluation, and Pygame gameplay GIFs. It uses the
+current training rewards/episode limits without a live server or game connection.
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.train --device cuda --num-envs 4
+.\RL_venv\Scripts\python.exe -m tensorboard.main --logdir runs/mystic_sim
+```
+
+Use `--device cpu` for CPU training, `--num-envs 1` for the single-world baseline,
+and `--no-record-gameplay` to skip optional recording. Initial multi-world support
+is synchronous; Phase 7 will address parallel CPU simulation and SPS optimization.
 
 ## Play the simulator with Pygame
 

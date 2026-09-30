@@ -1090,22 +1090,32 @@ and evaluation on the current Mystic simulator. This phase is simulation-only:
 no live adapter implementation, ZMQ contract tests, payload comparisons, or game
 sessions. Training must work without a running game, ZMQ connection, or Pygame window.
 
-1. Add an explicit simulation training path and environment factory to
-   `Training/PPO_server.py` first, then `Training/PPO_lstm_server.py`.
-   Preserve existing live entry points without extending their contract; use the
-   actual `MysticSimEnv` with training episode rules, not the viewer's free-play
-   configuration. Initially use one environment per run.
+Implementation: `Training/Mystic_Sim/train.py` is a standalone feed-forward PPO
+trainer, with `core.py` for batching/contracts and `evaluate.py` for checkpoint
+evaluation/Pygame GIFs. See `Training/Mystic_Sim/README.md` for commands and
+`Training/Mystic_Sim/VALIDATION.md` for measured checks. This follows the updated
+user scope: a simulator trainer, not a server or an extension of live automation.
+
+1. Use a separate simulation entry point and environment factory. Reference the
+   PPO algorithm in `Training/PPO_server.py` without importing its live environment
+   or modifying either live training script. Use actual `MysticSimEnv` training
+   rules, never free play. Default to one environment; support `--num-envs` with
+   independent synchronous worlds and batched policy inference, and
+   `--device auto|cpu|cuda`. Subprocess optimization remains Phase 7 work.
 2. Consume Mystic Sim's current `Discrete(8)` and float32 26-value observation
    directly. Verify that policy input/output dimensions, action labels, and
-   preprocessing match this simulator. Reject incompatible legacy checkpoints
+   preprocessing match this simulator. Divide observations by fixed Box upper
+   bounds inside the checkpointed model; do not normalize/clip rewards. Reject incompatible legacy checkpoints
    when loading into simulation. Live action mapping and payload contract tests
    belong exclusively to Phase 8.
 3. Exercise the complete PPO rollout/update loop: observation batching, action
    selection, log probabilities, values, advantages, optimizer updates, and
    TensorBoard metrics. Preserve the six reward component names. Test final
    observations, episode resets, termination masks, and time-limit bootstrapping
-   under the chosen Gym vector/autoreset mode. For recurrent PPO, also test
-   hidden-state reset and recurrent minibatch boundaries.
+   with explicit reset handling. Bootstrap truncated transitions from final
+   pre-reset observations; bootstrap deaths/wins with zero and stop GAE across
+   either episode boundary. Feed-forward PPO is the current deliverable;
+   recurrent PPO and its hidden-state/reset tests are deferred.
 4. Use `combat_reward_v1` by default. Record the simulator reward, task, and
    fidelity configuration with each run. Validate episode statistics and the six
    reward components against simulator events. Live reward differences are a
@@ -1115,7 +1125,12 @@ sessions. Training must work without a running game, ZMQ connection, or Pygame w
    kills, survival, damage dealt/taken, invalid-cast rate, and throughput against
    a random-action baseline. A successful optimizer run proves trainability;
    it does not by itself prove learning quality or live-game fidelity.
-6. Save and reload PPO models for simulator evaluation. Store environment/backend, action labels and
+6. Save exactly ten checkpoints per completed run at approximately even PPO
+   update boundaries (at least ten updates required). Evaluate each on fixed
+   seeds and, by default, render one episode with the Pygame viewer into a GIF
+   using a hidden SDL display. Record failures explicitly while preserving saved
+   models. Support disabling recording, independent held-out evaluation, and a
+   random-policy baseline. Store environment/backend, action labels and
    schema, observation schema/preprocessing, fidelity and reward profiles, map
    and mechanics-manifest hashes, seed, and PPO hyperparameters in run/checkpoint
    metadata. Check compatibility before simulator evaluation or training resume.
@@ -1123,17 +1138,20 @@ sessions. Training must work without a running game, ZMQ connection, or Pygame w
    Exact mid-episode simulator resume additionally requires world, scheduler,
    pending events/effects, and environment RNG snapshots. Otherwise explicitly
    resume at a fresh episode; do not claim identical next transitions.
-8. Keep the simulator factory and rollout code ready for Phase 7 environment-count
-   settings, but finish single-environment training/checkpoint tests here. Do not
-   make Phase 6 completion depend on vector throughput or live validation.
+8. Keep the factory and explicit synchronous batch adapter replaceable for Phase 7.
+   Test one and multiple environments here, but do not make Phase 6 completion
+   depend on optimized throughput or live validation. Record training-only SPS
+   separately from wall SPS including evaluation/recording.
 
 Exit gate:
 
 - documented commands train and evaluate PPO on Mystic Sim without the live
   bridge, with finite losses and confirmed parameter updates;
 - save/load and the declared resume behavior pass regression tests;
-- feed-forward and recurrent PPO paths respect action/observation contracts and
-  episode boundaries; recurrent state cannot leak across episodes;
+- the feed-forward PPO path respects action/observation contracts and episode
+  boundaries with one or multiple environments; recurrent PPO is deferred;
+- a completed run saves ten distinct checkpoints, TensorBoard metrics, fixed-seed
+  evaluation reports, and ten gameplay GIFs when optional recording is available;
 - a simulator-trained eight-action checkpoint reloads for simulator evaluation;
 - run metadata records the simulator reward and fidelity settings; the trainer has
   an environment-factory boundary ready for Phase 7. No Minari or BC work is required.
@@ -1144,6 +1162,11 @@ Primary deliverable: PPO collects batches from many independent Mystic worlds,
 with measured throughput improvements and correct episode handling. This is a
 required phase after single-environment PPO, not an optional optimization after
 live validation. It does not require Minari, a game connection, or Pygame.
+
+Phase 6 already supports a simple synchronous `SimBatch` that keeps rich infos
+as a list and explicitly resets completed worlds. Phase 7 replaces/optimizes
+that adapter; it should preserve the tested pre-reset bootstrap and episode
+semantics, not introduce a second trainer or change reward definitions.
 
 #### What vectorization means for this custom environment
 
@@ -1304,13 +1327,15 @@ autoreset advance that worker's RNG stream. `envs.close()` must run on errors.
 
 #### 7.3 Integrate the vector batch into PPO
 
-`Training/PPO_server.py` currently asserts `num_envs == 1`, adds an observation
-batch dimension with `unsqueeze(0)`, and has scalar episode accumulators. Its
-rollout buffers already contain a `num_envs` axis. Audit the entire collection
-path instead of just deleting the assertion; apply the same audit to recurrent PPO.
+`Training/Mystic_Sim/train.py` already collects `(T,N,26)` observations and keeps
+per-world episode metrics through its explicit synchronous batch adapter. Build
+optimized vector backends behind that factory. `Training/PPO_server.py` remains
+a separate live entry point with its one-environment guard; do not modify it for
+simulator vectorization. Audit final-observation handling when replacing the
+adapter; apply recurrent-state tests if recurrent PPO is introduced later.
 
-1. Add explicit simulation vector mode and count arguments to the Phase 6
-   factory. Allow `num_envs > 1` only for simulation; preserve the live guard.
+1. Add vector backend selection to the Phase 6 factory, preserving its existing
+   `--num-envs` support and the separate live guard.
    Factor the smoke program's worker factory and info wrapper into reusable
    modules instead of maintaining separate training versions.
 2. Read network dimensions from `single_observation_space` and
