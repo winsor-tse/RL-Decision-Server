@@ -14,7 +14,7 @@ import tyro
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
-from Custom_enviornments.Test_Env.Env_16 import Env16
+from Custom_enviornments.Test_Env.Mystic import Mystic
 from Training.ppo_metrics import log_step_metrics
 from Utils.model_paths import training_checkpoint_path
 from Utils.ppo_checkpoint import (
@@ -232,7 +232,7 @@ def train(args: Args) -> None:
         )
         restore_saved_hyperparameters(args, resume_checkpoint)
     if args.num_envs != 1:
-        raise ValueError("Env16 supports exactly one live environment")
+        raise ValueError("Mystic supports exactly one live environment")
     if args.metrics_frequency <= 0:
         raise ValueError("metrics_frequency must be greater than zero")
     if args.num_steps <= 0:
@@ -248,7 +248,7 @@ def train(args: Args) -> None:
     args.minibatch_size = args.batch_size // args.num_minibatches
     args.num_iterations = args.total_timesteps // args.batch_size
     if resume_checkpoint is None:
-        run_name = f"Env16__{args.exp_name}__{args.seed}__{int(time.time())}"
+        run_name = f"Mystic__{args.exp_name}__{args.seed}__{int(time.time())}"
         run_directory = Path("runs") / run_name
         args.model_path = str(
             training_checkpoint_path(
@@ -288,13 +288,13 @@ def train(args: Args) -> None:
     )
     print(f"Using device: {device}", flush=True)
     print(
-        "Initializing Env16; waiting for the first game ai_tick...",
+        "Initializing Mystic; waiting for the first game ai_tick...",
         flush=True,
     )
 
     env = None
     try:
-        env = Env16()
+        env = Mystic()
         agent = Agent(env).to(device)
         if args.restore_model_path:
             restored_checkpoint = restore_agent(
@@ -753,7 +753,7 @@ def train(args: Args) -> None:
                     },
                     recurrent_state=next_lstm_state,
                     metadata={
-                        "environment": "Env16",
+                        "environment": "Mystic",
                         "observation_shape": list(env.single_observation_space.shape),
                         "action_names": list(env.Actions),
                         "architecture": "lstm_actor_critic",

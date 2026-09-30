@@ -4,19 +4,24 @@ A bridge between a reinforcement learning agent and the Yugen Saga game. The pro
 
 ## Overview
 
+To play the headless Mystic simulation through its optional Pygame viewer,
+double-click `Play_Mystic_Sim.bat`. Install its display dependency first with
+`.\RL_venv\Scripts\python.exe -m pip install -r requirements-viewer.txt`.
+See [viewer controls and options](Custom_enviornments/Mystic_Sim/README.md#play-the-simulator-with-pygame).
+
 - `Automation/Bridge/ws_zmq_bridge.py`: translates WebSocket messages from Yugen Saga into ZMQ backend requests.
 - `Training/PPO_server.py`: active PPO training loop and checkpoint writer.
 - `Training/PPO_lstm_server.py`: recurrent PPO training loop for the same live environment.
 - `Training/DQN_server.py`: legacy DQN training loop.
-- `Inference/ppo_lstm_eval.py`: evaluates recurrent PPO checkpoints on `Env16`.
+- `Inference/ppo_lstm_eval.py`: evaluates recurrent PPO checkpoints on `Mystic`.
 - `Inference/ppo_eval.py`: evaluates PPO checkpoints deterministically or by policy sampling.
 - `Inference/dqn_eval.py`: evaluates DQN checkpoints with optional epsilon exploration.
-- `Inference/any_percent_bc_eval.py`: evaluates BC checkpoints on Minari data or `Env16`.
-- `Inference/awac_eval.py`: evaluates categorical AWAC checkpoints on live `Env16`.
-- `Offline/awac.py`: trains discrete AWAC from local BC-Minari demonstrations, with optional live `Env16` fine-tuning and TensorBoard logging.
+- `Inference/any_percent_bc_eval.py`: evaluates BC checkpoints on Minari data or `Mystic`.
+- `Inference/awac_eval.py`: evaluates categorical AWAC checkpoints on live `Mystic`.
+- `Offline/awac.py`: trains discrete AWAC from local BC-Minari demonstrations, with optional live `Mystic` fine-tuning and TensorBoard logging.
 - `Offline/record_player.py`: records full world-state payloads and global player input to SQLite.
 - `Offline/record_minari.py`: records mapped human actions as a Minari behavior-cloning dataset.
-- `Custom_enviornments/Test_Env/Env_16_BC.py`: no-op, valid-action-only recording environment.
+- `Custom_enviornments/Test_Env/Mystic_BC.py`: no-op, valid-action-only recording environment.
 - `Automation/automation_config.yaml`: selects the training and inference entry points.
 - `Automation/offline_rl.py`: routes BC training, dataset analysis, and live evaluation.
 - `RunRL.ps1`: starts TensorBoard, the bridge, and the configured RL algorithm together.
@@ -75,7 +80,7 @@ The training dashboard captures the learning signals produced during a demo run,
 |   |-- Config.yaml
 |   |-- Load_env_config.py
 |   `-- Test_Env/
-|       |-- Env_16.py
+|       |-- Mystic.py
 |       `-- Env_conditions.py
 |-- Tests/
 |   |-- test_automation.py
@@ -96,7 +101,7 @@ Environment code is split by responsibility:
 - `Custom_enviornments/Config.yaml`: shared state-space and runtime constants used by all envs.
 - `Custom_enviornments/Load_env_config.py`: the only config parser used by environments.
 - `Custom_enviornments/BaseEnv.py`: bare Gymnasium/ZMQ base environment.
-- `Custom_enviornments/Test_Env/Env_16.py`: current class-specific discrete-action environment.
+- `Custom_enviornments/Test_Env/Mystic.py`: current class-specific discrete-action environment.
 - `Custom_enviornments/Test_Env/Env_conditions.py`: example class-specific observation parsing, rewards, termination, and truncation.
 
 Each new game/class environment should have its own folder, action-space file, and `Env_conditions.py`. Shared state-space config stays in `Config.yaml`; class-specific reward and end-condition logic stays beside that class env.
@@ -136,7 +141,7 @@ index `8` (`OBS_PLAYER_SIZE + 2`). Player and enemy HP metrics range from
 
 ## Current Env
 
-`Custom_enviornments/Test_Env/Env_16.py` is the active environment used by all
+`Custom_enviornments/Test_Env/Mystic.py` is the active environment used by all
 three training servers and both evaluators.
 
 It exposes 15 discrete actions:
@@ -169,7 +174,7 @@ rl_algorithm: "ppo_lstm" # use "ppo" for feed-forward PPO or "dqn" for DQN
 
 # Optional: initialize PPO/PPO-LSTM from an existing checkpoint.
 restore_model_path: null
-# restore_model_path: runs/Env16__PPO_lstm_server__1__<timestamp>/PPO_lstm_server.pt
+# restore_model_path: runs/Mystic__PPO_lstm_server__1__<timestamp>/PPO_lstm_server.pt
 
 dqn_command:
   - python
@@ -239,7 +244,7 @@ it later:
 .\RunRL.ps1 -TotalTimesteps 100000 -StopAfterTimesteps 20000
 
 .\RunRL.ps1 `
-  -ResumeCheckpointPath "runs\Env16__PPO_lstm_server__1__1234\PPO_lstm_server_training.pt"
+  -ResumeCheckpointPath "runs\Mystic__PPO_lstm_server__1__1234\PPO_lstm_server_training.pt"
 ```
 
 The resume checkpoint restores the original hyperparameters, model, optimizer,
@@ -275,7 +280,7 @@ debugging.
 Enter a recording name at the prompt (or press Enter for the generated name).
 Recording starts immediately and continues until `Ctrl+C`. There is no command
 shell or background server: the main loop directly performs the same sequence
-as `Env16.step`:
+as `Mystic.step`:
 
 ```text
 socket.recv_json()
@@ -312,10 +317,10 @@ To skip the name prompt, configure or override the recorder command with
 ### AWAC training
 
 Train AWAC on every episode of the local BC-Minari dataset (the same
-`env16/BC-v0` ID used by behavior cloning):
+`mystic/BC-v0` ID used by behavior cloning):
 
 ```powershell
-.\RunOfflineRL.ps1 -Algorithm AWAC -DatasetId "env16/BC-v0"
+.\RunOfflineRL.ps1 -Algorithm AWAC -DatasetId "mystic/BC-v0"
 .\RL_venv\Scripts\python.exe -m tensorboard.main --logdir runs
 ```
 
@@ -331,7 +336,7 @@ stored in the checkpoint.
 For live fine-tuning, add `-OnlineIterations 100000` to the training command
 and connect the game. The launcher supervises the WebSocket bridge and starts
 TensorBoard when enabled in the automation config. After offline training,
-AWAC creates one `Env16` using the recorded BC action order
+AWAC creates one `Mystic` using the recorded BC action order
 (`up, left, right, down, ...`) and logs online episode returns and lengths.
 Only terminations stop critic bootstrapping; time-limit truncations reset the
 game episode while retaining the next-state value target.
@@ -349,14 +354,14 @@ bridge:
 ### Minari behavior-cloning recorder
 
 `Offline.record_minari` records the same live player interaction directly as a
-Minari dataset using `Env16BC`. Start it together with the WebSocket bridge:
+Minari dataset using `MysticBC`. Start it together with the WebSocket bridge:
 
 ```powershell
-.\RunRecorder.ps1 -Command "python -m Offline.record_minari --dataset-id env16/BC-v0 --max-steps 500"
+.\RunRecorder.ps1 -Command "python -m Offline.record_minari --dataset-id mystic/BC-v0 --max-steps 500"
 ```
 
 The dataset ID must include a Minari version suffix. Dataset IDs cannot be
-overwritten, so use `env16/BC-v1`, `env16/BC-v2`, and so on for later runs.
+overwritten, so use `mystic/BC-v1`, `mystic/BC-v2`, and so on for later runs.
 Minari saves under `~/.minari/datasets` by default; pass `--datasets-path PATH`
 to select another root.
 
@@ -386,13 +391,13 @@ truncation flags, plus dataset-save confirmation:
 
 ```text
 key=W state=[...] terminated=False truncated=False
-dataset_saved=True reason=truncated id=env16/BC-v0 episodes=1 transitions=256 path=...
+dataset_saved=True reason=truncated id=mystic/BC-v0 episodes=1 transitions=256 path=...
 ```
 
 Inspect a completed dataset and its episode fields with:
 
 ```powershell
-python -c "import minari; d=minari.load_dataset('env16/BC-v0'); e=next(d.iterate_episodes()); print(d.total_episodes, d.total_steps); print(e.observations.shape, e.actions.shape, e.rewards.shape, e.terminations.shape, e.truncations.shape, e.infos.keys())"
+python -c "import minari; d=minari.load_dataset('mystic/BC-v0'); e=next(d.iterate_episodes()); print(d.total_episodes, d.total_steps); print(e.observations.shape, e.actions.shape, e.rewards.shape, e.terminations.shape, e.truncations.shape, e.infos.keys())"
 ```
 
 This Minari dataset uses Minari's HDF5 storage. It is separate from the raw
@@ -409,9 +414,9 @@ now use the same automation entry point:
 | --- | --- | --- |
 | `Train` | No | Trains from Minari and writes one final `BC_model.pt`. |
 | `Dataset` | No | Reports MSE/accuracy and writes `predicted_actions.csv`. |
-| `Live` | Yes | Runs the BC model against the live `Env16` game stream. |
+| `Live` | Yes | Runs the BC model against the live `Mystic` game stream. |
 
-Live evaluation translates BC action indices into the different `Env16`
+Live evaluation translates BC action indices into the different `Mystic`
 movement ordering before sending actions to the game.
 
 Evaluate the checkpoint against recorded transitions:
@@ -419,7 +424,7 @@ Evaluate the checkpoint against recorded transitions:
 ```powershell
 .\RunOfflineRL.ps1 -Mode Dataset `
   -CheckpointPath "runs\bc-BC-v0-example\BC_model.pt" `
-  -DatasetId "env16/BC-v0"
+  -DatasetId "mystic/BC-v0"
 ```
 
 Run five live episodes:
@@ -427,7 +432,7 @@ Run five live episodes:
 ```powershell
 .\RunOfflineRL.ps1 -Mode Live `
   -CheckpointPath "runs\bc-BC-v0-example\BC_model.pt" `
-  -DatasetId "env16/BC-v0" `
+  -DatasetId "mystic/BC-v0" `
   -EvalEpisodes 5
 ```
 
@@ -442,7 +447,7 @@ Train the BC model from every episode in the local Minari dataset:
 
 ```powershell
 .\RunOfflineRL.ps1 -Mode Train `
-  -DatasetId "env16/BC-v0" `
+  -DatasetId "mystic/BC-v0" `
   -TopFraction 1.0 `
   -CheckpointsPath "runs"
 ```
@@ -451,7 +456,7 @@ For a shorter first run:
 
 ```powershell
 .\RunOfflineRL.ps1 -Mode Train `
-  -DatasetId "env16/BC-v0" `
+  -DatasetId "mystic/BC-v0" `
   -UpdateSteps 10000 `
   -BatchSize 256 `
   -TopFraction 1.0 `
@@ -466,7 +471,7 @@ training does not start the game bridge. Use `-Mode Live` afterward for live
 evaluation. See the complete parameter and command reference in
 [`PS1_COMMANDS.md`](PS1_COMMANDS.md).
 
-Both PPO trainers use one live `Env16` instance directly because the external
+Both PPO trainers use one live `Mystic` instance directly because the external
 simulator owns a single ZMQ request stream. They do not use `SyncVectorEnv` or
 `RecordEpisodeStatistics`; each trainer handles episode resets and batching.
 Their shared TensorBoard environment dashboard is implemented in
@@ -519,10 +524,10 @@ is saved.
 
 ## Recurrent PPO (LSTM) Training
 
-The recurrent trainer collects one sequential `Env16` rollout and divides it
+The recurrent trainer collects one sequential `Mystic` rollout and divides it
 into contiguous sequences for optimization. Each sequence starts with the
 hidden and cell state recorded at that point in the rollout, so LSTM context is
-preserved even though `Env16` supports only one live environment. Episode
+preserved even though `Mystic` supports only one live environment. Episode
 boundaries reset the recurrent state through the rollout's done mask.
 
 | Parameter | Default |
@@ -713,17 +718,17 @@ logging instead of per-step printing.
 Recurrent PPO training saves each model under its matching TensorBoard run:
 
 ```text
-runs/Env16__PPO_lstm_server__<seed>__<timestamp>/PPO_lstm_server.pt
+runs/Mystic__PPO_lstm_server__<seed>__<timestamp>/PPO_lstm_server.pt
 ```
 
 The evaluator automatically selects the newest matching run checkpoint, so the
-direct `Env16` command is:
+direct `Mystic` command is:
 
 ```bash
 python -m Inference.ppo_lstm_eval
 ```
 
-It resets the LSTM hidden and cell state at every `Env16` episode boundary. To
+It resets the LSTM hidden and cell state at every `Mystic` episode boundary. To
 sample actions or change the run length:
 
 ```bash
@@ -735,7 +740,7 @@ python -m Inference.ppo_lstm_eval --no-cuda
 Feed-forward PPO uses the equivalent run-local path:
 
 ```text
-runs/Env16__PPO_server__<seed>__<timestamp>/PPO_server.pt
+runs/Mystic__PPO_server__<seed>__<timestamp>/PPO_server.pt
 ```
 
 Evaluate the newest checkpoint deterministically with:
@@ -772,7 +777,7 @@ python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_serve
 python -m Inference.dqn_eval --model-path runs/DQN_server__<timestamp>/DQN_server.pt --cuda false
 ```
 
-All three evaluators use the direct external `Env16` flow and report episode
+All three evaluators use the direct external `Mystic` flow and report episode
 returns, outcomes, wins, win rate, and elapsed time. The bridge and game must
 be running and producing `ai_tick` messages.
 
@@ -817,7 +822,7 @@ configured evaluator with:
 You can still override the configured evaluator for one run:
 
 ```powershell
-.\RunInference.ps1 -Command "python -m Inference.ppo_lstm_eval --model-path runs/Env16__PPO_lstm_server__1__<timestamp>/PPO_lstm_server.pt"
+.\RunInference.ps1 -Command "python -m Inference.ppo_lstm_eval --model-path runs/Mystic__PPO_lstm_server__1__<timestamp>/PPO_lstm_server.pt"
 ```
 
 ## Notes

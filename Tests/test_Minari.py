@@ -7,10 +7,10 @@ from unittest import mock
 
 import minari
 
-from Custom_enviornments.Test_Env.Env_16_BC import (
+from Custom_enviornments.Test_Env.Mystic_BC import (
     BC_ACTIONS_11,
     KEY_TO_ACTION_INDEX,
-    Env16BC,
+    MysticBC,
     action_from_input,
 )
 from Offline.record_minari import record_minari_dataset
@@ -99,7 +99,7 @@ class FakeSocket:
         self.responses.append(response)
 
 
-class Env16BCMappingTests(unittest.TestCase):
+class MysticBCMappingTests(unittest.TestCase):
     def test_all_requested_keys_map_to_their_bc_indices(self):
         expected_labels = {
             "W": "up",
@@ -168,11 +168,11 @@ class Env16BCMappingTests(unittest.TestCase):
         self.assertEqual(action_from_input(snapshot), (5, "1"))
 
 
-class Env16BCCollectionTests(unittest.TestCase):
+class MysticBCCollectionTests(unittest.TestCase):
     def make_env(self, messages, snapshots):
         socket = FakeSocket(messages)
         capture = FakeInputCapture(snapshots)
-        env = Env16BC(socket=socket, input_capture=capture)
+        env = MysticBC(socket=socket, input_capture=capture)
         return env, socket, capture
 
     def test_invalid_ticks_get_no_op_but_do_not_advance_the_environment(self):
@@ -217,15 +217,15 @@ class Env16BCCollectionTests(unittest.TestCase):
                     collector.reset(options={"minari_autoseed": False})
                     collector.step(env.next_action())
                     dataset = collector.create_dataset(
-                        "env16/BC-v0",
+                        "mystic/BC-v0",
                         algorithm_name="human",
                         author="test",
-                        description="Env16BC integration test",
+                        description="MysticBC integration test",
                     )
 
                     self.assertEqual(dataset.total_episodes, 1)
                     self.assertEqual(dataset.total_steps, 1)
-                    self.assertEqual(dataset.env_spec.id, "YugenSaga/Env16BC-v0")
+                    self.assertEqual(dataset.env_spec.id, "YugenSaga/MysticBC-v0")
                     episode = next(dataset.iterate_episodes())
                     self.assertEqual(episode.observations.shape, (2, 26))
                     self.assertEqual(episode.actions.tolist(), [0])
@@ -302,7 +302,7 @@ class Env16BCCollectionTests(unittest.TestCase):
                 output = io.StringIO()
                 with redirect_stdout(output):
                     dataset = record_minari_dataset(
-                        dataset_id="env16/boundary-save-v0",
+                        dataset_id="mystic/boundary-save-v0",
                         max_steps=2,
                         author="test",
                         raw_env=env,
@@ -331,7 +331,7 @@ class Env16BCCollectionTests(unittest.TestCase):
                 output = io.StringIO()
                 with redirect_stdout(output):
                     dataset = record_minari_dataset(
-                        dataset_id="env16/interrupt-save-v0",
+                        dataset_id="mystic/interrupt-save-v0",
                         max_steps=5,
                         author="test",
                         raw_env=env,
@@ -343,7 +343,7 @@ class Env16BCCollectionTests(unittest.TestCase):
                 episode = next(dataset.iterate_episodes())
                 self.assertTrue(episode.truncations[-1])
                 self.assertIn("dataset_saved=True reason=interrupt", output.getvalue())
-                reloaded = minari.load_dataset("env16/interrupt-save-v0")
+                reloaded = minari.load_dataset("mystic/interrupt-save-v0")
                 self.assertEqual(reloaded.total_steps, 1)
 
     def test_recording_entrypoint_creates_a_versioned_dataset(self):
@@ -360,7 +360,7 @@ class Env16BCCollectionTests(unittest.TestCase):
                 output = io.StringIO()
                 with redirect_stdout(output):
                     dataset = record_minari_dataset(
-                        dataset_id="env16/entrypoint-v0",
+                        dataset_id="mystic/entrypoint-v0",
                         max_steps=1,
                         author="test",
                         raw_env=env,

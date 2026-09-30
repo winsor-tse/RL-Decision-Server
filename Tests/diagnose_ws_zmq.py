@@ -62,7 +62,7 @@ def request_id(label: str) -> str:
 
 
 def ai_tick_payload(label: str) -> dict[str, Any]:
-    """Return a small world state that is valid for the current Env16 parser."""
+    """Return a small world state that is valid for the current Mystic parser."""
     return {
         "type": "ai_tick",
         "requestId": request_id(label),

@@ -6,7 +6,7 @@ import torch
 import tyro
 from torch.distributions.categorical import Categorical
 
-from Custom_enviornments.Test_Env.Env_16 import Env16
+from Custom_enviornments.Test_Env.Mystic import Mystic
 from Training.PPO_lstm_server import Agent
 from Utils.model_paths import inference_checkpoint_path
 
@@ -59,7 +59,7 @@ def evaluate(
     device: torch.device = torch.device("cpu"),
     deterministic: bool = True,
 ) -> tuple[list[float], int]:
-    """Evaluate recurrent PPO directly against the live Env16 stream."""
+    """Evaluate recurrent PPO directly against the live Mystic stream."""
     if eval_episodes <= 0:
         raise ValueError("eval_episodes must be greater than zero")
 
@@ -126,7 +126,7 @@ def main() -> None:
         "PPO_lstm_server.pt",
     )
 
-    env = Env16()
+    env = Mystic()
     try:
         print(f"Loading recurrent PPO model from {model_path}...")
         model = Agent(env).to(device)

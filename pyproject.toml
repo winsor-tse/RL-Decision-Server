@@ -19,6 +19,9 @@ dependencies = [
     "websockets>=16,<17",
 ]
 
+[project.optional-dependencies]
+viewer = ["pygame-ce>=2.5.7,<3"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 namespaces = true

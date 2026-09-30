@@ -31,7 +31,7 @@ class AutomationConfigTests(unittest.TestCase):
         ):
             result = offline_main([
                 '--algorithm', 'awac', '--update-steps', '12',
-                '--dataset-id', 'env16/BC-v2', '--device', 'cpu',
+                '--dataset-id', 'mystic/BC-v2', '--device', 'cpu',
                 '--batch-size', '8', '--buffer-size', '100',
                 '--hidden-dim', '32', '--learning-rate', '0.001',
                 '--tau', '0.01', '--awac-lambda', '2', '--gamma', '0.95',
@@ -45,7 +45,7 @@ class AutomationConfigTests(unittest.TestCase):
         self.assertEqual(command[:3], ['python', '-m', 'Offline.awac'])
         for flag, value in {
             '--offline-iterations': '12', '--online-iterations': '0',
-            '--dataset-id': 'env16/BC-v2', '--device': 'cpu',
+            '--dataset-id': 'mystic/BC-v2', '--device': 'cpu',
             '--batch-size': '8', '--buffer-size': '100',
             '--hidden-dim': '32', '--learning-rate': '0.001',
             '--tau': '0.01', '--awac-lambda': '2.0', '--gamma': '0.95',
@@ -135,7 +135,7 @@ class AutomationConfigTests(unittest.TestCase):
 
     def test_offline_training_command_contains_dataset_and_output(self):
         command = build_training_command(
-            dataset_id="env16/BC-v2",
+            dataset_id="mystic/BC-v2",
             update_steps=10_000,
             buffer_size=50_000,
             batch_size=128,
@@ -150,7 +150,7 @@ class AutomationConfigTests(unittest.TestCase):
             command[:3],
             ["python", "-m", "Offline.any_percent_bc"],
         )
-        self.assertIn("env16/BC-v2", command)
+        self.assertIn("mystic/BC-v2", command)
         self.assertIn("10000", command)
         self.assertIn("--normalize-state", command)
         self.assertIn("runs", command)
@@ -195,7 +195,7 @@ class AutomationConfigTests(unittest.TestCase):
         command = build_evaluation_command(
             mode="dataset",
             checkpoint_path="runs/bc/BC_model.pt",
-            dataset_id="env16/BC-v2",
+            dataset_id="mystic/BC-v2",
             eval_episodes=3,
             top_fraction=0.5,
             gamma=0.95,
@@ -209,7 +209,7 @@ class AutomationConfigTests(unittest.TestCase):
             ["python", "-m", "Inference.any_percent_bc_eval"],
         )
         self.assertIn("runs/bc/BC_model.pt", command)
-        self.assertIn("env16/BC-v2", command)
+        self.assertIn("mystic/BC-v2", command)
         self.assertIn("--no-normalize-state", command)
         self.assertEqual(command[-2:], ["--output-csv", "reports/predictions.csv"])
 

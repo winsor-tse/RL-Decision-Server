@@ -14,6 +14,7 @@ RL_venv/
 *.egg-info/
 build/
 dist/
+Simulation/Source-Code
 
 # Generated training output
 runs/
