@@ -26,12 +26,16 @@ class PPOConfig:
     num_minibatches: int = 4
     update_epochs: int = 4
     learning_rate: float = 2.5e-4
-    gamma: float = .99
+    gamma: float = .999
     gae_lambda: float = .95
     clip_coef: float = .2
+    # Critic values/targets use scaled reward units; policy clipping is independent.
+    reward_scale: float = .01
+    value_clip_coef: float | None = None
     ent_coef: float = .01
     vf_coef: float = .5
-    max_grad_norm: float = .5
+    actor_max_grad_norm: float = .5
+    critic_max_grad_norm: float = .5
     target_kl: float = .03
     anneal_lr: bool = True
     eval_episodes: int = 3
@@ -56,9 +60,13 @@ class PPOConfig:
             raise ValueError('Batch size must divide evenly into minibatches of at least two samples')
         if self.updates < 10:
             raise ValueError('Use at least ten PPO updates to produce ten distinct checkpoints')
-        for name in ('learning_rate', 'max_grad_norm', 'clip_coef'):
+        for name in ('learning_rate', 'actor_max_grad_norm', 'critic_max_grad_norm', 'clip_coef', 'reward_scale'):
             if not math.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
                 raise ValueError(f'{name} must be finite and positive')
+        if self.value_clip_coef is not None and (
+                isinstance(self.value_clip_coef, bool) or not math.isfinite(self.value_clip_coef)
+                or self.value_clip_coef <= 0):
+            raise ValueError('value_clip_coef must be None or finite and positive')
         for name in ('ent_coef', 'vf_coef', 'target_kl'):
             if not math.isfinite(getattr(self, name)) or getattr(self, name) < 0:
                 raise ValueError(f'{name} must be finite and nonnegative')
@@ -169,6 +177,7 @@ def metadata(env):
     source = Path(inspect.getfile(MysticSimEnv)).parent
     return {
         'backend': 'mystic_sim_python', 'architecture': 'ppo_mlp_128x128_v1',
+        'training_schema': 'scaled_returns_separate_gradient_clips_v2',
         'contract': contract_metadata(),
         'observation_dtype': 'float32', 'preprocessing': 'divide_by_box_high_v1',
         'observation_scale': env.observation_space.high.tolist(),
@@ -184,8 +193,8 @@ def metadata(env):
 
 def load_checkpoint(path, expected_metadata):
     payload = torch.load(path, map_location='cpu', weights_only=True)
-    if not isinstance(payload, dict) or payload.get('format') != 'mystic_sim_ppo_v1':
-        raise ValueError('Expected a Mystic Sim PPO checkpoint; live/legacy weights are incompatible')
+    if not isinstance(payload, dict) or payload.get('format') != 'mystic_sim_ppo_v2':
+        raise ValueError('Expected a Mystic Sim PPO v2 checkpoint; start a new run for scaled critic training')
     if payload.get('metadata') != expected_metadata:
         raise ValueError('Checkpoint simulator configuration, map, mechanics, or policy contract is incompatible')
     required = {'agent', 'optimizer', 'ppo_config', 'update', 'global_step', 'rng', 'episodes', 'wins'}

@@ -1,5 +1,30 @@
 # Phase 6 validation — 2026-09-30
 
+## Critic repair follow-up — 2026-10-05
+
+The original results below describe v1. New runs use v2 checkpoints, training-only
+reward scale 0.01, gamma 0.999, disabled value clipping by default, separate
+actor/critic gradient limits of 0.5, and simulator cooldown penalty -1.
+
+- All 114 simulator/trainer tests passed, including numeric optional value-loss
+  clipping, actor gradient isolation from a large critic gradient, raw versus
+  scaled reward logging, configuration persistence on resume, and v1 rejection.
+- A CPU four-world, 16,384-transition probe completed ten checkpoints. Final
+  rollout explained variance was 0.791 (post-update 0.792), critic prediction
+  standard deviation 0.211 versus target standard deviation 0.228, and second
+  hidden-layer saturation fraction 0.0. Value loss was 0.00551 in scaled units;
+  actor/critic pre-clip norms were 0.405/0.0524. Unlike the old constant critic,
+  this probe produced state-dependent predictions. It is not a controlled
+  attribution of improvement to any one of the simultaneously requested changes.
+- Final greedy evaluation on three seeds averaged 0.67 kills and -282.82 return;
+  the run still had zero training wins. This short probe does not establish
+  combat mastery or performance across training seeds.
+- A CUDA four-world, 160-transition smoke run completed ten checkpoints and ten
+  gameplay GIFs. Local output directories are `runs/mystic_sim/critic_repair_seed1`
+  and `runs/mystic_sim/critic_repair_cuda_smoke`.
+
+## Original v1 validation
+
 Environment: Windows, PyTorch 2.9.0+cu130, Gymnasium 1.2.1, local CUDA available.
 The tested environment uses default map53/combat rewards and 1,024-step episodes.
 

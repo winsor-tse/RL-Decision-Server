@@ -17,7 +17,7 @@ from Custom_enviornments.Mystic_Sim.config import ScenarioConfig
 from Training.Mystic_Sim.core import (Agent, PPOConfig, SimBatch, advantages,
     checkpoint_updates, load_checkpoint, make_env, metadata)
 from Training.Mystic_Sim.evaluate import evaluate
-from Training.Mystic_Sim.train import train
+from Training.Mystic_Sim.train import train, critic_loss, clip_gradients
 from Utils.ppo_checkpoint import capture_rng_state
 
 
@@ -68,6 +68,38 @@ class MysticPPOTests(unittest.TestCase):
                        PPOConfig(num_minibatches=7),PPOConfig(gamma=2)):
             with self.assertRaises(ValueError): config.validate()
 
+    def test_scaled_training_defaults_and_validation(self):
+        config=PPOConfig()
+        self.assertEqual(config.reward_scale,.01)
+        self.assertEqual(config.gamma,.999)
+        self.assertIsNone(config.value_clip_coef)
+        for name in ('reward_scale','actor_max_grad_norm','critic_max_grad_norm','value_clip_coef'):
+            for value in (0,-1,float('nan'),float('inf')):
+                with self.assertRaises(ValueError): replace(config,**{name:value}).validate()
+        replace(config,value_clip_coef=.3).validate()
+
+    def test_value_clip_is_optional_and_in_value_units(self):
+        value=torch.tensor([2.],requires_grad=True)
+        old=torch.tensor([0.]);target=torch.tensor([10.])
+        loss=critic_loss(value,old,target)
+        self.assertEqual(float(loss.detach()),32.)
+        loss.backward()
+        self.assertEqual(float(value.grad),-8.)
+        self.assertAlmostEqual(float(critic_loss(value,old,target,.2).detach()),48.02,places=4)
+        self.assertEqual(float(critic_loss(value,old,target,3.).detach()),32.)
+
+    def test_huge_critic_gradient_does_not_shrink_actor(self):
+        from types import SimpleNamespace
+        agent=SimpleNamespace(actor=torch.nn.Linear(1,1,bias=False),
+                              critic=torch.nn.Linear(1,1,bias=False))
+        agent.actor.weight.grad=torch.tensor([[.2]])
+        agent.critic.weight.grad=torch.tensor([[1000.]])
+        actor,critic=clip_gradients(agent,PPOConfig())
+        self.assertAlmostEqual(float(actor),.2)
+        self.assertEqual(float(critic),1000.)
+        self.assertAlmostEqual(float(agent.actor.weight.grad),.2)
+        self.assertAlmostEqual(float(agent.critic.weight.grad),.5,places=5)
+
     def test_cpu_training_ten_checkpoints_resume_metadata_and_tensorboard(self):
         with tempfile.TemporaryDirectory() as directory:
             directory=Path(directory)
@@ -102,6 +134,9 @@ class MysticPPOTests(unittest.TestCase):
                 last=load_checkpoint(directory/'checkpoints/checkpoint_10.pt',expected)
                 self.assertEqual(last['global_step'],80)
                 self.assertEqual(last['ppo_config'],saved['ppo_config'])
+                self.assertEqual(last['ppo_config']['reward_scale'],.01)
+                self.assertEqual(last['ppo_config']['gamma'],.999)
+                self.assertIsNone(last['ppo_config']['value_clip_coef'])
                 self.assertGreater(next(iter(last['optimizer']['state'].values()))['step'],
                                    next(iter(saved['optimizer']['state'].values()))['step'])
                 progress=json.loads((directory/'progress.json').read_text())
@@ -110,8 +145,19 @@ class MysticPPOTests(unittest.TestCase):
                 self.assertTrue(all(np.isfinite(list(progress['losses'].values()))))
                 events=EventAccumulator(str(directory/'tensorboard')).Reload()
                 for tag in ('losses/value_loss','charts/SPS_training','rewards/killed',
-                            'rewards/damage_dealt','evaluation/return_vs_random','charts/parameter_delta'):
+                            'rewards/damage_dealt','evaluation/return_vs_random','charts/parameter_delta',
+                            'losses/actor_grad_norm','losses/critic_grad_norm','losses/critic_hidden_saturation'):
                     self.assertIn(tag,events.Tags()['scalars'])
+                raw=events.Scalars('charts/mean_step_reward')
+                scaled=events.Scalars('charts/mean_scaled_step_reward')
+                for r,s in zip(raw,scaled):
+                    self.assertEqual(r.step,s.step)
+                    self.assertAlmostEqual(s.value,r.value*.01,places=5)
+                self.assertEqual(saved['format'],'mystic_sim_ppo_v2')
+                old_path=directory/'old_version.pt'
+                torch.save({**saved,'format':'mystic_sim_ppo_v1'},old_path)
+                with self.assertRaisesRegex(ValueError,'start a new run'):
+                    load_checkpoint(old_path,expected)
                 self.assertAlmostEqual(events.Scalars('charts/learning_rate')[-1].value,
                                        config.learning_rate/10,places=8)
                 incompatible=deepcopy(expected)

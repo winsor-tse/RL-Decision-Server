@@ -276,7 +276,7 @@ parameters:
     provenance: simulator_rule
     source: PYTHON_INTEGRATION_PLAN.md
   cooldown_attempt_penalty:
-    value: 5
+    value: 1
     provenance: simulator_rule
     source: PYTHON_INTEGRATION_PLAN.md
   combat_enemy_damage_weight:

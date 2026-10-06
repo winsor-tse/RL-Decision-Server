@@ -22,6 +22,21 @@ from .core import (Agent, PPOConfig, SimBatch, accumulate, advantages, checkpoin
 from .evaluate import evaluate
 
 
+def critic_loss(value, old_value, returns, clip_coef=None):
+    error = (value-returns).square()
+    if clip_coef is not None:
+        clipped = old_value + (value-old_value).clamp(-clip_coef, clip_coef)
+        error = torch.maximum(error, (clipped-returns).square())
+    return .5 * error.mean()
+
+
+def clip_gradients(agent, config):
+    # Independent limits prevent large critic gradients from scaling actor gradients.
+    actor = nn.utils.clip_grad_norm_(agent.actor.parameters(), config.actor_max_grad_norm, error_if_nonfinite=True)
+    critic = nn.utils.clip_grad_norm_(agent.critic.parameters(), config.critic_max_grad_norm, error_if_nonfinite=True)
+    return actor, critic
+
+
 def optimize(agent, optimizer, config, observations, actions, old_logprobs, values, adv, returns):
     observations = observations.flatten(0, 1)
     actions, old_logprobs, values, adv, returns = [x.flatten() for x in (actions, old_logprobs, values, adv, returns)]
@@ -39,25 +54,33 @@ def optimize(agent, optimizer, config, observations, actions, old_logprobs, valu
             advantage = adv[ix]
             advantage = (advantage-advantage.mean()) / (advantage.std(unbiased=False)+1e-8)
             policy_loss = torch.maximum(-advantage*ratio, -advantage*ratio.clamp(1-config.clip_coef, 1+config.clip_coef)).mean()
-            clipped_value = values[ix] + (value-values[ix]).clamp(-config.clip_coef, config.clip_coef)
-            value_loss = .5*torch.maximum((value-returns[ix]).square(), (clipped_value-returns[ix]).square()).mean()
+            value_loss = critic_loss(value, values[ix], returns[ix], config.value_clip_coef)
             entropy = entropy.mean()
             loss = policy_loss + config.vf_coef*value_loss - config.ent_coef*entropy
             if not torch.isfinite(loss): raise FloatingPointError('Nonfinite PPO loss')
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            grad_norm = nn.utils.clip_grad_norm_(agent.parameters(), config.max_grad_norm, error_if_nonfinite=True)
+            actor_grad_norm, critic_grad_norm = clip_gradients(agent, config)
             optimizer.step()
             with torch.no_grad():
                 kl = ((ratio-1)-logratio).mean()
                 clipfrac = ((ratio-1).abs() > config.clip_coef).float().mean()
-                rows.append([float(x) for x in (policy_loss, value_loss, entropy, kl, clipfrac, grad_norm)])
+                rows.append([float(x) for x in (policy_loss, value_loss, entropy, kl, clipfrac,
+                                                actor_grad_norm, critic_grad_norm)])
                 epoch_kl.append(float(kl))
         if config.target_kl and np.mean(epoch_kl) > config.target_kl:
             break
-    result = dict(zip(('policy_loss','value_loss','entropy','approx_kl','clipfrac','grad_norm'), np.mean(rows, axis=0).tolist()))
+    result = dict(zip(('policy_loss','value_loss','entropy','approx_kl','clipfrac',
+                       'actor_grad_norm','critic_grad_norm'), np.mean(rows, axis=0).tolist()))
     variance = returns.var(unbiased=False)
     result['explained_variance'] = float(1-(returns-values).var(unbiased=False)/variance) if variance > 0 else 0.
+    with torch.no_grad():
+        predictions = agent.value(observations)
+        hidden = agent.critic[:4](agent.normalized(observations))
+        result['critic_value_std'] = float(predictions.std(unbiased=False))
+        result['critic_target_std'] = float(returns.std(unbiased=False))
+        result['critic_hidden_saturation'] = float((hidden.abs() > .99).float().mean())
+        result['post_update_explained_variance'] = float(1-(returns-predictions).var(unbiased=False)/variance) if variance > 0 else 0.
     return result
 
 
@@ -191,7 +214,10 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                         log_episode(writer,row,global_step,episodes,wins)
                         running[i] = episode_metrics()
             with torch.no_grad():
-                adv, returns = advantages(rewards,values,next_values,terminated,truncated,config.gamma,config.gae_lambda)
+                # Only learning targets use scaled rewards. Environment, episode,
+                # evaluation and reward-component metrics remain in original units.
+                adv, returns = advantages(rewards * config.reward_scale,values,next_values,
+                                          terminated,truncated,config.gamma,config.gae_lambda)
             if not torch.isfinite(returns).all(): raise FloatingPointError('Nonfinite PPO targets')
             losses = optimize(agent,optimizer,config,obs_buffer,actions,logprobs,values,adv,returns)
             parameter_delta = float((nn.utils.parameters_to_vector(agent.parameters()).detach()-before).norm())
@@ -203,6 +229,7 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
             writer.add_scalar('charts/SPS_training',(global_step-invocation_start_step)/training_seconds,global_step)
             writer.add_scalar('charts/SPS_wall',(global_step-invocation_start_step)/(time.perf_counter()-start_time),global_step)
             writer.add_scalar('charts/mean_step_reward',float(rewards.mean()),global_step)
+            writer.add_scalar('charts/mean_scaled_step_reward',float(rewards.mean())*config.reward_scale,global_step)
             for key,value in component_sums.items(): writer.add_scalar(f'rewards/{key}',value/config.batch_size,global_step)
             for i,label in enumerate(ACTIONS): writer.add_scalar(f'actions/{label.replace(":","_")}',action_counts[i]/config.batch_size,global_step)
             writer.add_scalar('environment/invalid_cast_rate',invalid_count/max(1,cast_count),global_step)
@@ -213,7 +240,7 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
             if update in schedule:
                 index = schedule[update]
                 checkpoint = run_dir/'checkpoints'/f'checkpoint_{index:02d}.pt'
-                atomic_torch_save({'format':'mystic_sim_ppo_v1','metadata':contract,
+                atomic_torch_save({'format':'mystic_sim_ppo_v2','metadata':contract,
                     'ppo_config':asdict(config),'agent':agent.state_dict(),'optimizer':optimizer.state_dict(),
                     'update':update,'global_step':global_step,'rng':capture_rng_state(),
                     'episodes':episodes,'wins':wins},checkpoint)
@@ -250,7 +277,8 @@ def main(argv=None):
     defaults = PPOConfig()
     for field in fields(defaults):
         default = getattr(defaults,field.name)
-        options = {'action':argparse.BooleanOptionalAction} if isinstance(default,bool) else {'type':type(default)}
+        options = {'action':argparse.BooleanOptionalAction} if isinstance(default,bool) else {
+            'type':float if field.name == 'value_clip_coef' else type(default)}
         parser.add_argument('--'+field.name.replace('_','-'),default=default,**options)
     parser.add_argument('--device',choices=('auto','cpu','cuda'),default='auto')
     parser.add_argument('--run-dir',type=Path)

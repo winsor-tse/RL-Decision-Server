@@ -124,9 +124,9 @@ class RewardTests(unittest.TestCase):
                     for _ in range(3):
                         info=env.step(slot+4)[4]
                         self.assertEqual(info['action_failure_reason'],reason)
-                        self.assertEqual(info['cooldown_penalty'],-5)
+                        self.assertEqual(info['cooldown_penalty'],-1)
                         self.assertEqual(info['reward_components']['positioning'],
-                                         -2 if profile=='legacy_reward_v0' else -5)
+                                         2 if profile=='legacy_reward_v0' else -1)
                         self.assertEqual(info['cast_events'],[])
                         self.assertEqual(p,before)
                         self.assertEqual(env.np_random.bit_generator.state,rng)
@@ -138,13 +138,13 @@ class RewardTests(unittest.TestCase):
         env.world.player.cooldowns.slots[1]=200
         info=env.step(5)[4]  # Rejected at 0, although ready when the step ends.
         self.assertEqual(info['simulation_time_ms'],200)
-        self.assertEqual(info['cooldown_penalty'],-5)
+        self.assertEqual(info['cooldown_penalty'],-1)
         info=env.step(5)[4]  # Exactly ready at action time.
         self.assertTrue(info['action_applied'])
         self.assertEqual(info['cooldown_penalty'],0)
         info=env.step(6)[4]  # Other spell still inside the 300ms global cooldown.
         self.assertEqual(info['action_failure_reason'],'global_cooldown')
-        self.assertEqual(info['cooldown_penalty'],-5)
+        self.assertEqual(info['cooldown_penalty'],-1)
 
     def test_cooldown_penalty_configuration_and_other_failures(self):
         for cost in (0,2.5,10):

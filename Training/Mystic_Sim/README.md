@@ -36,12 +36,32 @@ Initial seeds are `seed + environment_index`; subsequent episode resets continue
 each world's independent RNG stream.
 
 Defaults follow the reference PPO server: separate two-layer 128-unit Tanh
-actor/critic networks, Adam, clipped policy/value losses, GAE, normalized
-advantages, entropy bonus, gradient clipping, and annealed learning rate.
+actor/critic networks, Adam, clipped policy loss, GAE, normalized
+advantages, entropy bonus, and annealed learning rate. Critic repair defaults
+are reward scale 0.01, gamma 0.999, no value clipping, and independent actor/critic
+gradient clipping at 0.5 each.
 An optional KL threshold stops update epochs early. `--help` lists settings.
 The policy divides each observation feature by its declared Box upper bound;
-this fixed transform is checkpointed. Rewards are **not** normalized, clipped,
-or changed by training. No action mask hides illegal casts from the policy.
+this fixed transform is checkpointed. Raw rewards remain unchanged in the
+environment, evaluation, episode returns and dashboard components. PPO multiplies
+rewards by `--reward-scale 0.01` only before calculating advantages and value
+targets. Critic predictions/bootstrap values therefore use scaled units; they
+are not multiplied a second time. No action mask hides illegal casts.
+
+Value clipping is disabled by default. Set `--value-clip-coef 0.2` to test a
+separate clip in **scaled value units**, independently of `--clip-coef 0.2`, which
+controls the dimensionless policy ratio. `--actor-max-grad-norm 0.5` and
+`--critic-max-grad-norm 0.5` replace the old joint `--max-grad-norm` setting.
+The simulator cooldown-attempt penalty is now -1 (previously -5); damage, kill,
+win/loss, collision and Y rewards are otherwise unchanged. Nothing rewards a
+spell-button press without damage. The 26-value observation and feed-forward
+architecture remain unchanged; LSTM work is deferred.
+
+**Start a fresh run after these changes.** Checkpoints now use
+`mystic_sim_ppo_v2` and record the scale, gamma, optional value clip, and separate
+gradient limits. v1 checkpoints have unscaled critics and incompatible simulator
+metadata and cannot resume/evaluate through this version. Existing artifacts
+remain intact; use their original code revision for historical evaluation.
 
 ## Ten checkpoints, evaluation, and gameplay
 
@@ -101,6 +121,13 @@ damage dealt/taken, action frequencies, invalid casts, collisions, cooldown
 rejections, and evaluation versus random. The six reward component names remain
 `health_state`, `positioning`, `damage_taken`, `damage_dealt`, `terminal`, `killed`.
 Training SPS excludes checkpoint evaluation/recording; wall SPS includes them.
+`charts/mean_step_reward` stays raw; `charts/mean_scaled_step_reward` shows the
+learning scale. `losses/actor_grad_norm` and `losses/critic_grad_norm` report norms
+before independent clipping. Critic diagnostics include `critic_value_std`,
+`critic_target_std`, `critic_hidden_saturation` (fraction of second-layer Tanh
+activations with magnitude above 0.99), and `post_update_explained_variance`.
+Value loss and standard deviations are in scaled learning units, so compare
+against old raw-unit losses carefully.
 
 ## Resume or evaluate
 

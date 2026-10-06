@@ -21,7 +21,7 @@ obstacle observations. Existing Y penalties and truncation still apply.
 ## Current scope
 
 Simulator-only cooldown shaping is enabled in both reward profiles. Each spell
-attempt rejected for slot, family, or global cooldown costs -5 through
+attempt rejected for slot, family, or global cooldown costs -1 through
 `RewardConfig.cooldown_attempt_penalty` (0 disables). Add it to `positioning`
 and expose `info.cooldown_penalty`; do not double count the diagnostic. Use the
 engine's action-time rejection reason, not the deadlines after the 200ms step.
@@ -1105,7 +1105,12 @@ user scope: a simulator trainer, not a server or an extension of live automation
 2. Consume Mystic Sim's current `Discrete(8)` and float32 26-value observation
    directly. Verify that policy input/output dimensions, action labels, and
    preprocessing match this simulator. Divide observations by fixed Box upper
-   bounds inside the checkpointed model; do not normalize/clip rewards. Reject incompatible legacy checkpoints
+   bounds inside the checkpointed model. Scale rewards by 0.01 only when building
+   PPO learning targets; preserve raw environment/evaluation/TensorBoard rewards.
+   Gamma defaults to 0.999. Value clipping is independent of policy clipping and
+   disabled by default; actor and critic each have a separate gradient limit of
+   0.5. Log their gradient norms and critic variance/saturation separately.
+   Reject incompatible legacy checkpoints
    when loading into simulation. Live action mapping and payload contract tests
    belong exclusively to Phase 8.
 3. Exercise the complete PPO rollout/update loop: observation batching, action

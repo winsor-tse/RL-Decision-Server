@@ -368,9 +368,9 @@ in step diagnostics even when tracing is disabled. The streak is reward history,
 not an added observation feature; future observation design should account for it.
 
 **Simulator-only cooldown shaping (both reward profiles):** each spell attempt
-rejected with `cooldown`, `family_cooldown`, or `global_cooldown` costs **-5**.
+rejected with `cooldown`, `family_cooldown`, or `global_cooldown` costs **-1**.
 The cost is `RewardConfig.cooldown_attempt_penalty`; set 0 to disable. Each
-repeated attempt pays separately (no streak multiplier), at half the +10 kill
+repeated attempt pays separately (no streak multiplier), at one tenth of the +10 kill
 bonus. It is added to `positioning`, preserving the six dashboard components;
 `info['cooldown_penalty']` reports the cost separately without adding it twice.
 Other reward components, including damage from an existing DoT, still apply.

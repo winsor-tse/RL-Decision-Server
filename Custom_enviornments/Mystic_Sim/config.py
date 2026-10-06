@@ -202,7 +202,7 @@ class RewardConfig:
     collision_penalty_weight: float = 5.0
     collision_streak_cap: int = 4
     # Simulator-only cost per spell rejected by slot/family/global cooldown.
-    cooldown_attempt_penalty: float = 5.0
+    cooldown_attempt_penalty: float = 1.0
     y_bounds: tuple[int, int] | None = (30, 86)  # Inclusive playable rows; truncate at <=29 or >=87.
     legacy_y_penalty_below: int | None = 31
     legacy_y_penalty_above: int | None = 85
