@@ -9,29 +9,14 @@ from Custom_enviornments.Test_Env import Env_conditions
 LOGGER = logging.getLogger(__name__)
 
 
-ACTIONS_11 = [
-    "up",
-    "down",
-    "left",
-    "right",
-    #"direction:up",
-    #"direction:down",
-    #"direction:left",
-    #"direction:right",
-    "attack",
-    "castSpell:1",
-    "castSpell:2",
-    "castSpell:3",
-    #"castSpell:4",
-    "castSpell:5",
-    "castSpell:6",
-    "castSpell:7",
-]
+from Custom_enviornments.Mystic_Sim.actions import LEGACY_LIVE_ACTIONS
+
+ACTIONS_11 = list(LEGACY_LIVE_ACTIONS)
 
 
 # This action space is specific to Test_Env.
 # A different game class should define its own env file and action list.
-class Env16(BaseEnv):
+class Mystic(BaseEnv):
     """Yugen Saga environment with the current 11-action discrete action space."""
 
     def __init__(self, *, actions=None, config=None, socket=None):
@@ -72,7 +57,7 @@ class Env16(BaseEnv):
     def step(self, action):
         action_idx = self._normalize_action(action)
         if action_idx < 0 or action_idx >= len(self.Actions):
-            raise ValueError(f"Action index {action_idx} is outside Env_16.")
+            raise ValueError(f"Action index {action_idx} is outside Mystic.")
 
         message = self.socket.recv_json()
         world_state = message.get("worldState", {})
@@ -94,7 +79,7 @@ class Env16(BaseEnv):
         *,
         parsed_next_state=None,
     ):
-        """Apply Env16 reward and episode rules to one received world state."""
+        """Apply Mystic reward and episode rules to one received world state."""
         self.current_step += 1
         real_next_state = parsed_next_state
         if real_next_state is None:

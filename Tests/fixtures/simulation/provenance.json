@@ -1,0 +1,10 @@
+{
+  "example_full_state.json": {
+    "source": "Simulation/Source-Code/Example_Full_State.txt",
+    "sha256": "a5ba593943e9d73e3a56ecd6cdae27af73c86f32d9cd48ed0911816886b965b3"
+  },
+  "map53.json": {
+    "source": "Simulation/Source-Code/map53.json",
+    "sha256": "2a0474d2522f47475689b637be4bbcbedd87987b111d525c9b99368aebd010b0"
+  }
+}

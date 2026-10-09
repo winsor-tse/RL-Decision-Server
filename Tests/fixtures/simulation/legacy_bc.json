@@ -1,0 +1,41 @@
+{
+  "dataset_id": "mystic/BC-v0",
+  "actions": [
+    "up",
+    "left",
+    "right",
+    "down",
+    "attack",
+    "castSpell:1",
+    "castSpell:2",
+    "castSpell:3",
+    "castSpell:5",
+    "castSpell:6",
+    "castSpell:7"
+  ],
+  "episodes": [
+    {
+      "actions": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "observations": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ]
+    }
+  ]
+}

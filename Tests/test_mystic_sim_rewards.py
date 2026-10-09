@@ -1,0 +1,492 @@
+"""Reward contracts, Gym episode boundaries, and diagnostic isolation."""
+from copy import deepcopy
+from dataclasses import replace
+import unittest
+from unittest.mock import patch
+
+import gymnasium as gym
+from gymnasium.utils.env_checker import check_env
+import numpy as np
+
+from Custom_enviornments.Mystic_Sim.config import ScenarioConfig, RewardConfig
+from Custom_enviornments.Mystic_Sim.env import MysticSimEnv
+from Custom_enviornments.Mystic_Sim.engine import Engine
+from Custom_enviornments.Mystic_Sim.observation import encode_observation
+from Custom_enviornments.Mystic_Sim import rewards
+
+
+class RewardTests(unittest.TestCase):
+    def scene(self, reward=None):
+        env = MysticSimEnv(config=ScenarioConfig(reward=reward or RewardConfig()), trace=True)
+        self.addCleanup(env.close)
+        env.reset(seed=42)
+        w = env.world
+        w.player.x, w.player.y = 50, 50
+        w.monsters = {2: w.monsters[2]}
+        w.monsters[2].x, w.monsters[2].y = 55, 50
+        w.events.clear()
+        w.occupancy = {(50,50):1, (55,50):2}
+        env.engine = Engine(w, env.config, env.np_random, trace=True)
+        env.engine.queue_npc = lambda *args, **kwargs: None
+        return env
+
+    def transition(self, env, callback):
+        original = env.engine.dispatch
+        env.engine.scheduler.schedule(env.world.time_ms+100, 'test_event', 1)
+        with patch.object(env.engine, 'dispatch', side_effect=lambda e: callback() if e.kind == 'test_event' else original(e)):
+            return env.step(4)
+
+    def test_combat_event_damage_not_masked_by_regeneration(self):
+        env = self.scene()
+        p, npc = env.world.player, env.world.monsters[2]
+        def damage_then_heal():
+            env.engine.apply_damage(npc, p, 100)
+            env.engine.regenerate()
+            env.engine.apply_damage(p, npc, 1000, damage_type='dot')
+        obs, reward, term, trunc, info = self.transition(env, damage_then_heal)
+        self.assertEqual(obs[3], 1)
+        parts = info['reward_components']
+        self.assertAlmostEqual(parts['damage_taken'], -50*100/p.max_hp)
+        self.assertAlmostEqual(parts['damage_dealt'], 25*1000/npc.max_hp)
+        self.assertEqual(parts['health_state'], -.001)
+        self.assertEqual(reward, sum(parts.values()))
+        self.assertEqual((term,trunc),(False,False))
+        self.assertEqual(set(parts), set(rewards.COMPONENTS))
+
+    def test_training_damage_scale_and_hp_normalization(self):
+        for hp in (1000,10000):
+            env=self.scene()
+            p,npc=env.world.player,env.world.monsters[2]
+            p.stats=replace(p.stats,max_hp=hp)
+            npc.stats=replace(npc.stats,max_hp=hp*2)
+            p.hp,npc.hp=hp,hp*2
+            def trade():
+                env.engine.apply_damage(p,npc,npc.max_hp//10)
+                env.engine.apply_damage(npc,p,p.max_hp//10)
+            result=self.transition(env,trade)
+            parts=result[4]['reward_components']
+            self.assertAlmostEqual(parts['damage_dealt'],2.5)
+            self.assertAlmostEqual(parts['damage_taken'],-5)
+            self.assertEqual(parts['killed'],0)
+            self.assertEqual(parts['terminal'],0)
+            self.assertAlmostEqual(result[1],-2.501)
+            env.reward_config=replace(env.reward_config,enemy_damage_weight=40,player_damage_weight=80)
+            parts=self.transition(env,trade)[4]['reward_components']
+            self.assertAlmostEqual(parts['damage_dealt'],4)
+            self.assertAlmostEqual(parts['damage_taken'],-8)
+
+    def test_aoe_and_dot_damage_add_without_repeat_or_overkill_credit(self):
+        env=self.kill_progress_scene('combat_reward_v1')
+        p=env.world.player
+        a,b=list(env.world.monsters.values())[:2]
+        a.stats=replace(a.stats,max_hp=1000);a.hp=1000
+        b.stats=replace(b.stats,max_hp=2000);b.hp=2000
+        def aoe():
+            env.engine.apply_damage(p,a,100,damage_type='spell')
+            env.engine.apply_damage(p,b,400,damage_type='spell')
+        self.assertAlmostEqual(self.transition(env,aoe)[4]['reward_components']['damage_dealt'],7.5)
+        def dot():
+            env.engine.apply_damage(p,a,100,damage_type='dot')
+        self.assertAlmostEqual(self.transition(env,dot)[4]['reward_components']['damage_dealt'],2.5)
+        self.assertEqual(env.step(4)[4]['reward_components']['damage_dealt'],0)
+        parts=self.transition(env,lambda: env.engine.apply_damage(p,a,999999))[4]['reward_components']
+        self.assertEqual(parts['damage_dealt'],20)
+        self.assertEqual(parts['killed'],10)
+
+    def test_training_no_positive_proximity_or_healing_reward(self):
+        env=self.scene()
+        w=env.world
+        w.map=replace(w.map,blocked_cells=frozenset())
+        for action in (3,2,4,4):
+            parts=env.step(action)[4]['reward_components']
+            self.assertEqual(parts['positioning'],0)
+            self.assertEqual(parts['damage_dealt'],0)
+            self.assertEqual(sum(parts.values()),-.001)
+        w.player.hp-=100
+        parts=self.transition(env,env.engine.regenerate)[4]['reward_components']
+        self.assertEqual(parts['damage_taken'],0)
+        self.assertEqual(parts['damage_dealt'],0)
+
+    def test_cooldown_rejections_penalized_each_attempt_without_cast_mutation(self):
+        for profile in ('combat_reward_v1','legacy_reward_v0'):
+            for slot in (1,2,3):
+                for reason in ('cooldown','family_cooldown','global_cooldown'):
+                    env=self.scene(RewardConfig(profile=profile))
+                    p=env.world.player
+                    spell=env.config.spells[slot-1]
+                    if reason=='family_cooldown' and not spell.family:
+                        continue
+                    if reason=='cooldown': p.cooldowns.slots[slot]=1000
+                    elif reason=='family_cooldown': p.cooldowns.families[spell.family]=1000
+                    else: p.cooldowns.global_ready_at_ms=1000
+                    before=deepcopy(p)
+                    rng=deepcopy(env.np_random.bit_generator.state)
+                    for _ in range(3):
+                        info=env.step(slot+4)[4]
+                        self.assertEqual(info['action_failure_reason'],reason)
+                        self.assertEqual(info['cooldown_penalty'],-1)
+                        self.assertEqual(info['reward_components']['positioning'],
+                                         2 if profile=='legacy_reward_v0' else -1)
+                        self.assertEqual(info['cast_events'],[])
+                        self.assertEqual(p,before)
+                        self.assertEqual(env.np_random.bit_generator.state,rng)
+                    self.assertEqual(env.step(4)[4]['cooldown_penalty'],0)
+                    self.assertEqual(env.reset(seed=42)[1]['cooldown_penalty'],0)
+
+    def test_cooldown_penalty_uses_attempt_time_and_exact_ready_boundary(self):
+        env=self.scene()
+        env.world.player.cooldowns.slots[1]=200
+        info=env.step(5)[4]  # Rejected at 0, although ready when the step ends.
+        self.assertEqual(info['simulation_time_ms'],200)
+        self.assertEqual(info['cooldown_penalty'],-1)
+        info=env.step(5)[4]  # Exactly ready at action time.
+        self.assertTrue(info['action_applied'])
+        self.assertEqual(info['cooldown_penalty'],0)
+        info=env.step(6)[4]  # Other spell still inside the 300ms global cooldown.
+        self.assertEqual(info['action_failure_reason'],'global_cooldown')
+        self.assertEqual(info['cooldown_penalty'],-1)
+
+    def test_cooldown_penalty_configuration_and_other_failures(self):
+        for cost in (0,2.5,10):
+            env=self.scene(RewardConfig(cooldown_attempt_penalty=cost))
+            env.world.player.cooldowns.slots[1]=1000
+            self.assertEqual(env.step(5)[4]['cooldown_penalty'],-cost)
+        for cost in (-1,True,float('inf'),float('nan')):
+            with self.assertRaises(ValueError): RewardConfig(cooldown_attempt_penalty=cost)
+        config=RewardConfig()
+        for reason in ('no_target','insufficient_mp','insufficient_hp','magic_immune',
+                       'out_of_range','player_dead',None):
+            self.assertEqual(rewards.cooldown_penalty(config,5,reason),0)
+        for action in (0,1,2,3,4,None):
+            self.assertEqual(rewards.cooldown_penalty(config,action,'cooldown'),0)
+        env=self.scene()
+        env.world.player.mp=0
+        info=env.step(5)[4]
+        self.assertEqual(info['action_failure_reason'],'insufficient_mp')
+        self.assertEqual(info['cooldown_penalty'],0)
+
+    def test_overkill_kill_bonus_and_no_reward_for_disappearance(self):
+        env = self.scene()
+        p,npc = env.world.player,env.world.monsters[2]
+        npc.hp = 100
+        result = self.transition(env,lambda: env.engine.apply_damage(p,npc,1000000))
+        parts = result[4]['reward_components']
+        self.assertAlmostEqual(parts['damage_dealt'],25*100/npc.max_hp)
+        self.assertEqual(parts['killed'],10)
+        next_result = env.step(4)
+        self.assertEqual(next_result[4]['reward_components']['killed'],0)
+        env = self.scene()
+        def disappear():
+            env.world.monsters.clear()
+            env.world.occupancy.pop((55,50))
+        result = self.transition(env, disappear)
+        self.assertEqual(result[4]['reward_components']['damage_dealt'],0)
+        self.assertEqual(result[4]['reward_components']['killed'],0)
+
+    def test_terminal_win_death_and_time_limit_priority(self):
+        for loss in (False,True):
+            env = self.scene()
+            w = env.world
+            w.step_count = 1023
+            w.kills = 4
+            def finish():
+                env.engine.apply_damage(w.player,w.monsters[2],w.monsters[2].hp)
+                if loss: env.engine.apply_damage(w.monsters[2],w.player,w.player.hp)
+            result = self.transition(env,finish)
+            self.assertEqual(result[2:4],(True,False))
+            self.assertEqual(result[4]['episode_outcome'],'loss' if loss else 'win')
+            self.assertEqual(result[4]['reward_components']['terminal'],-200 if loss else 200)
+            with self.assertRaises(gym.error.ResetNeeded): env.step(4)
+        env = self.scene()
+        env.world.step_count = 1023
+        result=env.step(4)
+        self.assertEqual(result[2:4],(False,True))
+        self.assertEqual(result[4]['episode_end_reason'],'step_limit')
+        self.assertEqual(result[4]['reward_components']['terminal'],0)
+
+    def test_large_terminal_rewards_in_both_profiles_and_custom_weights(self):
+        for profile in ('combat_reward_v1','legacy_reward_v0'):
+            for win_bonus, death_penalty in ((200,200),(250,175)):
+                for loss in (False,True):
+                    with self.subTest(profile=profile,bonus=win_bonus,loss=loss):
+                        env=self.scene(RewardConfig(profile=profile,win_bonus=win_bonus,
+                                                    death_penalty=death_penalty))
+                        w=env.world
+                        w.kills=4
+                        # Win/death takes priority even on the final allowed step.
+                        w.step_count=env.reward_config.max_episode_steps-1
+                        def finish():
+                            env.engine.apply_damage(w.player,w.monsters[2],w.monsters[2].hp)
+                            if loss:
+                                env.engine.apply_damage(w.monsters[2],w.player,w.player.hp)
+                        _,reward,terminated,truncated,info=self.transition(env,finish)
+                        self.assertEqual((terminated,truncated),(True,False))
+                        self.assertEqual(info['episode_outcome'],'loss' if loss else 'win')
+                        self.assertEqual(info['reward_components']['terminal'],
+                                         -death_penalty if loss else win_bonus)
+                        if loss:
+                            self.assertLess(reward,0)
+                        else:
+                            self.assertGreater(reward,0)
+                        self.assertEqual(reward,sum(info['reward_components'].values()))
+                        with self.assertRaises(gym.error.ResetNeeded): env.step(4)
+                        _,info=env.reset(seed=42)
+                        self.assertEqual(info['reward_components']['terminal'],0)
+            env=self.scene(RewardConfig(profile=profile))
+            self.assertEqual(env.step(4)[4]['reward_components']['terminal'],0)
+            env.world.step_count=env.reward_config.max_episode_steps-1
+            self.assertEqual(env.step(4)[4]['reward_components']['terminal'],0)
+        for name in ('win_bonus','death_penalty'):
+            for value in (-1,True,float('nan'),float('inf')):
+                with self.assertRaises(ValueError): RewardConfig(**{name:value})
+
+    def kill_progress_scene(self, profile, **weights):
+        env=self.scene(RewardConfig(profile=profile, **weights))
+        w=env.world
+        template=w.monsters[2]
+        w.monsters={i:replace(template,entity_id=i,x=53+i) for i in range(2,7)}
+        w.occupancy={(w.player.x,w.player.y):w.player.entity_id,
+                     **{(npc.x,npc.y):npc.entity_id for npc in w.monsters.values()}}
+        return env
+
+    def test_incremental_kills_one_through_five_and_terminal_scale(self):
+        for profile in ('combat_reward_v1','legacy_reward_v0'):
+            env=self.kill_progress_scene(profile)
+            w=env.world
+            progress=0
+            for count,npc in enumerate(w.monsters.values(),1):
+                result=self.transition(env,lambda: env.engine.apply_damage(w.player,npc,npc.hp))
+                parts=result[4]['reward_components']
+                progress+=parts['killed']
+                self.assertEqual(parts['killed'],10)
+                self.assertEqual(w.kills,count)
+                self.assertEqual(parts['terminal'],200 if count==5 else 0)
+                self.assertEqual(result[2:4],(count==5,False))
+                if count<5:
+                    # Existing kill totals never pay again on subsequent decisions.
+                    self.assertEqual(env.step(4)[4]['reward_components']['killed'],0)
+            self.assertEqual(progress,50)
+            self.assertEqual(progress+parts['terminal'],250)
+
+    def test_death_outweighs_four_kills_and_kill_weight_applies_to_both_profiles(self):
+        for profile in ('combat_reward_v1','legacy_reward_v0'):
+            env=self.kill_progress_scene(profile)
+            w=env.world
+            cumulative=0
+            for npc in list(w.monsters.values())[:4]:
+                cumulative+=self.transition(env,lambda: env.engine.apply_damage(w.player,npc,npc.hp))[1]
+            npc=w.monsters[6]
+            result=self.transition(env,lambda: env.engine.apply_damage(npc,w.player,w.player.hp))
+            self.assertEqual(result[4]['reward_components']['terminal'],-200)
+            self.assertEqual(result[4]['reward_components']['killed'],0)
+            self.assertLess(cumulative+result[1],0)
+            env=self.kill_progress_scene(profile,kill_bonus=7)
+            w=env.world
+            def kill_two():
+                for npc in list(w.monsters.values())[:2]:
+                    env.engine.apply_damage(w.player,npc,npc.hp)
+            result=self.transition(env,kill_two)
+            self.assertEqual(result[4]['reward_components']['killed'],14)
+            self.assertEqual(result[4]['reward_components']['terminal'],0)
+
+    def test_y_rules_can_be_disabled_or_overridden(self):
+        env=self.scene(RewardConfig(y_bounds=None))
+        env.world.player.y=0
+        self.assertEqual(env.step(4)[2:4],(False,False))
+        for y, outside in ((24,True),(25,False),(60,False),(61,True)):
+            env=self.scene(RewardConfig(y_bounds=(25,60)))
+            env.world.player.y=y
+            result=env.step(4)
+            self.assertEqual(result[2:4],(False,outside))
+            if outside: self.assertEqual(result[4]['episode_end_reason'],'y_boundary')
+
+    def test_legacy_numeric_snapshot_and_healing_quirk(self):
+        env=self.scene(RewardConfig(profile='legacy_reward_v0',legacy_y_penalty_below=31))
+        w=env.world
+        prev=np.zeros(26,dtype=np.float32);prev[:7]=[50,30,0,.75,1,53,5]
+        obs=prev.copy();obs[3]=.125
+        parts=rewards.calculate(w,env.reward_config,prev,obs,0,[],[],'loss')
+        # Equal coordinates alone no longer imply an attempted collision.
+        self.assertEqual(parts,dict(health_state=-.5,positioning=-97.,damage_taken=-12.5,
+                                    damage_dealt=0.,terminal=-200.,killed=0.))
+        prev[3]=.25;obs[3]=.75
+        self.assertEqual(rewards.calculate(w,env.reward_config,prev,obs,4,[],[],None)['damage_taken'],10)
+        obs[3]=.5
+        self.assertEqual(rewards.calculate(w,env.reward_config,prev,obs,4,[],[],None)['damage_taken'],0)
+        combat=RewardConfig()
+        obs[3]=.75
+        self.assertEqual(rewards.calculate(w,combat,prev,obs,4,[],[],None)['damage_taken'],0)
+
+    def test_legacy_enemy_events_and_optional_y_penalty(self):
+        env=self.scene(RewardConfig(profile='legacy_reward_v0'))
+        p,npc=env.world.player,env.world.monsters[2]
+        result=self.transition(env,lambda: env.engine.apply_damage(p,npc,npc.hp))
+        self.assertEqual(result[4]['reward_components']['damage_dealt'],25)
+        self.assertEqual(result[4]['reward_components']['killed'],10)
+        env=self.scene(RewardConfig(profile='legacy_reward_v0'))
+        obs=encode_observation(env.world);obs[1]=0
+        parts=rewards.calculate(env.world,env.reward_config,obs,obs,4,[],[],None)
+        self.assertEqual(parts['positioning'],-3097)  # +3 shaping, -3100 Y penalty.
+
+    def test_y_penalty_enabled_for_both_profiles(self):
+        for profile in ('combat_reward_v1','legacy_reward_v0'):
+            env=self.scene(RewardConfig(profile=profile))
+            obs=encode_observation(env.world)
+            for y,penalty in ((31,0),(30,-100),(29,-200)):
+                obs[1]=y
+                parts=rewards.calculate(env.world,env.reward_config,obs,obs,4,[],[],None)
+                self.assertEqual(parts['positioning'],penalty+(3 if profile=='legacy_reward_v0' else 0))
+            config=replace(env.reward_config,legacy_y_penalty_below=None)
+            self.assertEqual(rewards.calculate(env.world,config,obs,obs,4,[],[],None)['positioning'],
+                             3 if profile=='legacy_reward_v0' else 0)
+
+    def test_sim_y_penalty_and_truncation_boundaries(self):
+        for profile in ('combat_reward_v1','legacy_reward_v0'):
+            for y,penalty,truncated in ((28,-300,True),(29,-200,True),(30,-100,False),
+                                        (31,0,False),(85,0,False),(86,-100,False),
+                                        (87,-200,True),(88,-300,True)):
+                with self.subTest(profile=profile,y=y):
+                    env=self.scene(RewardConfig(profile=profile))
+                    env.world.player.y=y
+                    env.world.monsters[2].y=y  # Keep legacy distance shaping constant at +3.
+                    obs,reward,term,trunc,info=env.step(4)
+                    self.assertEqual((term,trunc),(False,truncated))
+                    self.assertEqual(info['reward_components']['positioning'],
+                                     penalty+(3 if profile=='legacy_reward_v0' else 0))
+                    self.assertEqual(reward,sum(info['reward_components'].values()))
+                    if truncated:
+                        self.assertEqual(info['episode_end_reason'],'y_boundary')
+                        self.assertEqual(info['reward_components']['terminal'],0)
+                        with self.assertRaises(gym.error.ResetNeeded): env.step(4)
+
+    def test_reset_profiles_are_local_and_validation_is_atomic(self):
+        a,b=self.scene(),self.scene()
+        obs,info=a.reset(seed=7,options={'profile':a.config.profile,'reward_profile':'legacy_reward_v0'})
+        self.assertEqual(info['reward_profile'],'legacy_reward_v0')
+        self.assertEqual(a.config.reward.profile,'combat_reward_v1')
+        self.assertEqual(b.reward_config.profile,'combat_reward_v1')
+        before=deepcopy(a.world)
+        for options in ({'reward_profile':'invalid'},{'profile':'invalid'},{'unknown':1}):
+            with self.assertRaises(ValueError): a.reset(seed=99,options=options)
+            self.assertEqual(a.world,before)
+        _,info=a.reset(seed=7)
+        self.assertEqual(info['reward_profile'],'combat_reward_v1')
+        self.assertEqual(set(info['reward_components']),set(rewards.COMPONENTS))
+
+    def test_diagnostics_complete_and_detached(self):
+        env=self.scene()
+        obs,reward,term,trunc,info=env.step(6)
+        for key in ('profile','reward_profile','seed','simulation_time_ms','current_step','selected_target',
+                    'action_applied','action_failure_reason','reward_components','kills','cooldowns',
+                    'active_effects','damage_events','death_events','respawn_events'):
+            self.assertIn(key,info)
+        self.assertEqual(info['selected_target'],2)
+        self.assertEqual(info['seed'],42)
+        info['cooldowns']['slots'].clear()
+        info['active_effects'][0]['tick_damage']=-1
+        info['trace'][0]['kind']='tampered'
+        self.assertEqual(env.world.player.cooldowns.slots[2],5000)
+        self.assertGreater(env.world.effects[0].tick_damage,0)
+        self.assertNotEqual(env.engine.trace[0]['kind'],'tampered')
+        self.assertTrue(info['reward_implemented'])
+
+    def test_gym_checker_bounds_and_invalid_action_no_mutation(self):
+        for profile in ('combat_reward_v1','legacy_reward_v0'):
+            env=MysticSimEnv(config=ScenarioConfig(reward=RewardConfig(profile=profile)))
+            self.addCleanup(env.close)
+            check_env(env,skip_render_check=True)
+            obs,info=env.reset(seed=8)
+            self.assertEqual(env.action_space.n,8)
+            self.assertEqual(obs.shape,(26,))
+            self.assertEqual(obs.dtype,np.float32)
+            before=deepcopy(env.world)
+            for action in (-1,8,True,1.5):
+                with self.assertRaises(ValueError):env.step(action)
+                self.assertEqual(env.world,before)
+            for i in range(80):
+                obs,reward,term,trunc,info=env.step(i%8)
+                self.assertTrue(env.observation_space.contains(obs))
+                self.assertTrue(np.isfinite(reward))
+                self.assertEqual(reward,sum(info['reward_components'].values()))
+                if term or trunc: break
+
+    def test_seeded_profiles_replay_byte_equal(self):
+        for profile in ('combat_reward_v1','legacy_reward_v0'):
+            a,b=MysticSimEnv(trace=True),MysticSimEnv(trace=True)
+            self.addCleanup(a.close);self.addCleanup(b.close)
+            ra=a.reset(seed=123,options={'reward_profile':profile})
+            rb=b.reset(seed=123,options={'reward_profile':profile})
+            self.assertEqual(ra[0].tobytes(),rb[0].tobytes())
+            self.assertEqual(ra[1],rb[1])
+            for i in range(100):
+                ra,rb=a.step(i%8),b.step(i%8)
+                self.assertEqual(ra[0].tobytes(),rb[0].tobytes())
+                self.assertEqual(ra[1:],rb[1:])
+                if ra[2] or ra[3]: break
+
+    def test_collision_penalty_scales_caps_and_resets_in_both_profiles(self):
+        for profile in ('combat_reward_v1', 'legacy_reward_v0'):
+            env = self.scene(RewardConfig(profile=profile))
+            # Explicit terrain fixture, keeping the enemy five tiles away.
+            env.world.map = replace(env.world.map, blocked_cells=frozenset({(49, 50)}))
+            for streak, penalty in enumerate((-5, -10, -15, -20, -20), 1):
+                info = env.step(2)[4]
+                self.assertEqual(info['collision_kind'], 'terrain')
+                self.assertEqual(info['collision_streak'], streak)
+                self.assertEqual(info['collision_penalty'], penalty)
+                self.assertEqual(info['reward_components']['positioning'],
+                                 penalty + (3 if profile == 'legacy_reward_v0' else 0))
+                self.assertEqual(info['action_failure_reason'], 'blocked')
+            # Standing beside the wall is free, including a rejected non-move.
+            info = env.step(4)[4]
+            self.assertEqual(info['collision_penalty'], 0)
+            self.assertEqual(info['collision_streak'], 0)
+            self.assertIsNone(info['collision_kind'])
+            self.assertEqual(env.step(2)[4]['collision_penalty'], -5)
+            self.assertEqual(env.step(3)[4]['collision_streak'], 0)
+            _, info = env.reset(seed=42)
+            self.assertEqual(info['collision_streak'], 0)
+            self.assertEqual(info['collision_penalty'], 0)
+
+    def test_entity_collision_captured_before_npc_vacates_tile_without_trace(self):
+        env = self.scene()
+        env.trace_enabled = env.engine.trace_enabled = False
+        w, npc = env.world, env.world.monsters[2]
+        w.occupancy.pop((55, 50))
+        npc.x, npc.y = 51, 50
+        w.occupancy[(51, 50)] = npc.entity_id
+        env.engine.scheduler.schedule(100, 'vacate', npc.entity_id)
+        with patch.object(env.engine, 'dispatch', side_effect=lambda event:
+                          env.engine.move(npc, 1, npc=True)):
+            info = env.step(3)[4]
+        self.assertNotIn((51, 50), w.occupancy)
+        self.assertEqual(info['collision_kind'], 'entity')
+        self.assertEqual(info['collision_penalty'], -5)
+        self.assertEqual(info['reward_components']['positioning'], -5)
+        # The vacated tile is now traversable; NPC movement itself adds no penalty.
+        self.assertEqual(env.step(3)[4]['collision_penalty'], 0)
+
+    def test_collision_boundaries_configuration_and_invalid_action(self):
+        env = self.scene(RewardConfig(collision_penalty_weight=2, collision_streak_cap=2))
+        w = env.world
+        w.player.x = 0
+        w.occupancy = {(0, 50): 1, (55, 50): 2}
+        for penalty in (-2, -4, -4):
+            info = env.step(2)[4]
+            self.assertEqual(info['collision_kind'], 'map_boundary')
+            self.assertEqual(info['collision_penalty'], penalty)
+        before = deepcopy(w)
+        with self.assertRaises(ValueError): env.step(8)
+        self.assertEqual(w, before)
+        env.reward_config = replace(env.reward_config, collision_penalty_weight=0)
+        self.assertEqual(env.step(2)[4]['collision_penalty'], 0)
+        w.player.mp = 0
+        self.assertEqual(env.step(5)[4]['collision_streak'], 0)
+        for value in (-1, float('nan'), float('inf'), True):
+            with self.assertRaises(ValueError): RewardConfig(collision_penalty_weight=value)
+        for value in (0, -1, 1.5, True):
+            with self.assertRaises(ValueError): RewardConfig(collision_streak_cap=value)
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -1,0 +1,156 @@
+{
+  "player": {
+    "strength": 5.04037117343002,
+    "intelligence": 9.41128701383232,
+    "melee_chance": 0.2957534239158879,
+    "spell_chance": 0.42442833664341884,
+    "melee_multiplier": 2.005472647968617,
+    "magic_multiplier": 2.0104676355479043
+  },
+  "scaling": [
+    {
+      "level": 135,
+      "hp": 214680,
+      "raw_damage": 2900,
+      "recursive_damage": 782.768169642998,
+      "dps": 37900
+    },
+    {
+      "level": 149,
+      "hp": 270310,
+      "raw_damage": 3503,
+      "recursive_damage": 870.9951639279118,
+      "dps": 42660
+    },
+    {
+      "level": 150,
+      "hp": 274599,
+      "raw_damage": 3549,
+      "recursive_damage": 877.2783678441566,
+      "dps": 43000
+    },
+    {
+      "level": 151,
+      "hp": 278911,
+      "raw_damage": 3594,
+      "recursive_damage": 883.5590752863013,
+      "dps": 43340
+    }
+  ],
+  "factors": [
+    {
+      "value": 0,
+      "factor": 0.7049905561580865
+    },
+    {
+      "value": 100,
+      "factor": 5.04037117343002
+    },
+    {
+      "value": 578,
+      "factor": 9.41128701383232
+    },
+    {
+      "value": 2501,
+      "factor": 13.427661846092859
+    }
+  ],
+  "mitigation": [
+    {
+      "ac": -1000,
+      "blocked": false,
+      "damage": 3549,
+      "expected": 4184
+    },
+    {
+      "ac": -1000,
+      "blocked": true,
+      "damage": 3549,
+      "expected": 2510
+    },
+    {
+      "ac": -900,
+      "blocked": false,
+      "damage": 3549,
+      "expected": 4116
+    },
+    {
+      "ac": -900,
+      "blocked": true,
+      "damage": 3549,
+      "expected": 2470
+    },
+    {
+      "ac": -1,
+      "blocked": false,
+      "damage": 3549,
+      "expected": 3550
+    },
+    {
+      "ac": -1,
+      "blocked": true,
+      "damage": 3549,
+      "expected": 2130
+    },
+    {
+      "ac": 0,
+      "blocked": false,
+      "damage": 3549,
+      "expected": 3549
+    },
+    {
+      "ac": 0,
+      "blocked": true,
+      "damage": 3549,
+      "expected": 2129
+    },
+    {
+      "ac": 2250,
+      "blocked": false,
+      "damage": 3549,
+      "expected": 3129
+    },
+    {
+      "ac": 2250,
+      "blocked": true,
+      "damage": 3549,
+      "expected": 1877
+    }
+  ],
+  "player_mitigation": [
+    {
+      "blocked": false,
+      "expected": 1828
+    },
+    {
+      "blocked": true,
+      "expected": 1097
+    }
+  ],
+  "aoe": [
+    {
+      "count": 1,
+      "expected": 10000
+    },
+    {
+      "count": 2,
+      "expected": 8416
+    },
+    {
+      "count": 3,
+      "expected": 6912
+    },
+    {
+      "count": 4,
+      "expected": 6125
+    },
+    {
+      "count": 12,
+      "expected": 4541
+    },
+    {
+      "count": 13,
+      "expected": 4473
+    }
+  ]
+}

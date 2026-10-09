@@ -43,9 +43,9 @@ class AWACTests(unittest.TestCase):
                 checkpoints_path=directory, offline_iterations=2,
                 batch_size=2, buffer_size=2, hidden_dim=8, device='cpu',
             )
-            with mock.patch.object(awac.minari, 'load_dataset', return_value=self.dataset()) as load, mock.patch.object(awac, 'Env16') as env:
+            with mock.patch.object(awac.minari, 'load_dataset', return_value=self.dataset()) as load, mock.patch.object(awac, 'Mystic') as env:
                 awac.train(config)
-            load.assert_called_once_with('env16/BC-v0', download=False)
+            load.assert_called_once_with('mystic/BC-v0', download=False)
             env.assert_not_called()
             checkpoint = torch.load(Path(config.checkpoints_path, awac.AWAC_MODEL_FILENAME), weights_only=True)
             self.assertEqual(checkpoint['actions'], awac.BC_ACTIONS_11)
@@ -70,7 +70,7 @@ class AWACTests(unittest.TestCase):
             env = mock.Mock()
             env.reset.return_value = (np.zeros(26), {})
             env.step.return_value = (np.ones(26), 1.0, False, True, {})
-            with mock.patch.object(awac.minari, 'load_dataset', return_value=self.dataset()), mock.patch.object(awac, 'Env16', return_value=env) as factory:
+            with mock.patch.object(awac.minari, 'load_dataset', return_value=self.dataset()), mock.patch.object(awac, 'Mystic', return_value=env) as factory:
                 awac.train(config)
             factory.assert_called_once_with(actions=awac.BC_ACTIONS_11)
             self.assertEqual(env.step.call_count, 2)
