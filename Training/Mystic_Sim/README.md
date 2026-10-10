@@ -1,11 +1,27 @@
 # Standalone Mystic Sim PPO
 
-Curriculum Phase 0/1 foundations are documented in
-[CURRICULUM_PLAN.md](CURRICULUM_PLAN.md): immutable encounter settings, seeded
-encounter factories, and the unchanged full-scenario evaluation baseline.
-Automatic curriculum progression is not yet enabled in the trainer.
+Curriculum Phases 0–3 are documented in
+[CURRICULUM_PLAN.md](CURRICULUM_PLAN.md). Use the
+[manual run config](configs/curriculum_manual.json) to train one selected encounter,
+save it, and explicitly continue to another encounter with weights and optimizer
+retained. Automatic stage progression is deferred to Phase 7 or later.
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.curriculum_run --config Training/Mystic_Sim/configs/curriculum_manual.json --validate-only
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.curriculum_run --config Training/Mystic_Sim/configs/curriculum_manual.json
+```
 
 ## Recurrent PPO (LSTM)
+
+To continue the completed one-Innie run into three Innies using checkpoint 8:
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.curriculum_run --config Training/Mystic_Sim/configs/three_innies_from_one.json
+```
+
+This config inherits shared PPO settings and preserves both LSTMs and the optimizer.
+Add `--validate-only` to check without training, or `--list-stages` to see available
+encounters. See the curriculum plan for a fresh comparison and later-stage commands.
 
 Use `--recurrent` for the simulator adaptation of `Training/PPO_lstm_server.py`.
 New recurrent runs default to `--actor-head linear`: the actor's 128-unit LSTM

@@ -107,7 +107,8 @@ class MysticPPOTests(unittest.TestCase):
                              update_epochs=1,eval_episodes=1,seed=19)
             real_evaluate=evaluate
             def quick_evaluation(*args,**kwargs):
-                return real_evaluate(*args,**kwargs,factory=short_env)
+                kwargs['factory'] = short_env
+                return real_evaluate(*args,**kwargs)
             with patch('Training.Mystic_Sim.train.evaluate',side_effect=quick_evaluation):
                 train(config,run_dir=directory,device='cpu',record_gameplay=False,stop_after_checkpoint=1)
                 first=directory/'checkpoints/checkpoint_01.pt'

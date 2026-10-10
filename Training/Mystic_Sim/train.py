@@ -23,6 +23,8 @@ from .core import (Agent, PPOConfig, SimBatch, accumulate, advantages, checkpoin
 from .evaluate import evaluate
 from .recurrent import RecurrentAgent, optimize_recurrent
 from .core import saved_config
+from .curriculum import (encounter_factory, encounter_from_dict, load_stage_checkpoint,
+                         stage_schedule, learning_rate)
 
 
 def critic_loss(value, old_value, returns, clip_coef=None):
@@ -97,7 +99,10 @@ def log_episode(writer, row, step, episodes, wins):
 
 
 def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=True,
-          record_stride=5, stop_after_checkpoint=None):
+          record_stride=5, stop_after_checkpoint=None, encounter=None, continue_from=None,
+          schedule_timesteps=None):
+    if resume and continue_from:
+        raise ValueError('Choose resume or continue_from, not both')
     if device not in ('auto','cpu','cuda'): raise ValueError('device must be auto, cpu, or cuda')
     if record_stride < 1: raise ValueError('record_stride must be positive')
     if stop_after_checkpoint is not None and not 1 <= stop_after_checkpoint <= 10:
@@ -106,8 +111,14 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
     if resolved_device == 'cuda' and not torch.cuda.is_available():
         raise ValueError('CUDA requested but unavailable; use --device cpu or install a CUDA-enabled PyTorch')
     if resume:
-        config = saved_config(torch.load(resume, map_location='cpu', weights_only=True))
-    probe = make_env()
+        raw = torch.load(resume, map_location='cpu', weights_only=True)
+        config = saved_config(raw)
+        saved_encounter = encounter_from_dict(raw['metadata']['scenario'].get('encounter'))
+        if encounter is not None and encounter != saved_encounter:
+            raise ValueError('Resume cannot change encounter; use stage continuation in a new run')
+        encounter = saved_encounter
+    factory = make_env if encounter is None else encounter_factory(encounter)
+    probe = factory()
     try:
         contract = metadata(probe, recurrent=config.recurrent, actor_head=config.actor_head)
         observation_high = np.asarray(contract['observation_scale'], dtype=np.float32)
@@ -117,6 +128,11 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
     if payload:
         config = saved_config(payload)
     config.validate()
+    source_payload = load_stage_checkpoint(continue_from, contract, config) if continue_from else None
+    curriculum = stage_schedule(config, resume_payload=payload, source_payload=source_payload,
+                                schedule_timesteps=schedule_timesteps)
+    if continue_from:
+        curriculum['source_checkpoint'] = str(Path(continue_from).resolve())
     schedule = checkpoint_updates(config.updates)
     completed = payload['update'] if payload else 0
     if payload and (completed not in schedule or payload['global_step'] != completed*config.batch_size):
@@ -143,16 +159,20 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
              else Agent(observation_high)).to(resolved_device)
     optimizer = torch.optim.Adam(agent.parameters(), lr=config.learning_rate, eps=1e-5)
     episodes, wins = (payload['episodes'],payload['wins']) if payload else (0,0)
-    if payload:
-        agent.load_state_dict(payload['agent'])
-        optimizer.load_state_dict(payload['optimizer'])
-        restore_rng_state(payload['rng'])
+    restored = payload if payload is not None else source_payload
+    if restored:
+        # Preserve actor, critic, both LSTMs and Adam moments. Episode memory is
+        # initialized below for fresh worlds; no learned parameter is wiped.
+        agent.load_state_dict(restored['agent'])
+        optimizer.load_state_dict(restored['optimizer'])
+        restore_rng_state(restored['rng'])
     run_metadata = {'metadata': contract, 'ppo_config': asdict(config), 'device': resolved_device,
                     'requested_timesteps': config.total_timesteps,
                     'actual_timesteps': config.updates*config.batch_size,
                     'checkpoint_steps': {str(i): u*config.batch_size for u,i in schedule.items()},
                     'resume_from': str(Path(resume).resolve()) if resume else None,
                     'record_gameplay': record_gameplay, 'record_stride': record_stride,
+                    'curriculum': curriculum,
                     'torch': str(torch.__version__), 'batch_backend': 'synchronous_independent_worlds'}
     # Preserve the original manifest across continuation; each invocation records its settings.
     if not (run_dir/'run.json').exists(): json_write(run_dir/'run.json', run_metadata)
@@ -171,12 +191,13 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
         if baseline_path.exists():
             baseline = json.loads(baseline_path.read_text(encoding='utf-8'))
         else:
-            baseline = evaluate(None, seeds)
+            baseline = evaluate(None, seeds, factory=factory)
             json_write(baseline_path, baseline)
         for key,value in baseline['summary'].items():
             if key != 'components': writer.add_scalar(f'baseline/{key}', value, global_step)
         # Fresh deterministic episode seeds on resume; simulator world snapshots are not claimed.
-        batch = SimBatch(config.num_envs, config.seed + completed*config.num_envs, recurrent=config.recurrent)
+        batch = SimBatch(config.num_envs, config.seed + completed*config.num_envs,
+                         factory=factory, recurrent=config.recurrent)
         running = [episode_metrics() for _ in batch.envs]
         shape = (config.num_steps,config.num_envs)
         obs_buffer = torch.empty((*shape,len(observation_high)),device=resolved_device)
@@ -190,7 +211,7 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
             state_buffers = tuple(torch.empty((config.num_steps, *s.shape), device=resolved_device) for s in recurrent_state)
         for update in range(completed+1, config.updates+1):
             update_start = time.perf_counter()
-            lr = config.learning_rate*(1-(update-1)/config.updates) if config.anneal_lr else config.learning_rate
+            lr = learning_rate(config, update, curriculum)
             optimizer.param_groups[0]['lr'] = lr
             component_sums = dict.fromkeys(COMPONENTS,0.)
             action_counts = np.zeros(len(ACTIONS),dtype=np.int64)
@@ -265,6 +286,7 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
             for key,value in losses.items(): writer.add_scalar(f'losses/{key}',value,global_step)
             writer.add_scalar('charts/parameter_delta',parameter_delta,global_step)
             writer.add_scalar('charts/learning_rate',lr,global_step)
+            writer.add_scalar('curriculum/cumulative_timesteps',curriculum['step_offset']+global_step,global_step)
             writer.add_scalar('charts/SPS_training',(global_step-invocation_start_step)/training_seconds,global_step)
             writer.add_scalar('charts/SPS_wall',(global_step-invocation_start_step)/(time.perf_counter()-start_time),global_step)
             writer.add_scalar('charts/mean_step_reward',float(rewards.mean()),global_step)
@@ -285,14 +307,28 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                 atomic_torch_save({'format':'mystic_sim_ppo_v2','metadata':contract,
                     'ppo_config':asdict(config),'agent':agent.state_dict(),'optimizer':optimizer.state_dict(),
                     'update':update,'global_step':global_step,'rng':capture_rng_state(),
-                    'episodes':episodes,'wins':wins},checkpoint)
+                    'episodes':episodes,'wins':wins,'curriculum':curriculum},checkpoint)
                 agent.eval()
                 recording = run_dir/'gameplay'/f'checkpoint_{index:02d}.gif' if record_gameplay else None
-                report = evaluate(agent,seeds,device=resolved_device,record_path=recording,record_stride=record_stride)
+                report = evaluate(agent,seeds,device=resolved_device,record_path=recording,
+                                  record_stride=record_stride,factory=factory)
                 sampled_recording = run_dir/'gameplay'/f'checkpoint_{index:02d}_sampled.gif' if record_gameplay else None
                 sampled_report = evaluate(agent,seeds,device=resolved_device,record_path=sampled_recording,
-                                          record_stride=record_stride,stochastic=True)
-                sampled_report.update(checkpoint=str(checkpoint),global_step=global_step)
+                                          record_stride=record_stride,stochastic=True,factory=factory)
+                # The original environment stays an independent comparison even
+                # while a selected easier encounter is being trained.
+                for mode, stage_report in (('greedy', report), ('sampled', sampled_report)):
+                    full_report = (evaluate(agent,seeds,device=resolved_device,
+                                            stochastic=mode=='sampled',factory=make_env)
+                                   if encounter is not None else dict(stage_report))
+                    full_report.update(checkpoint=str(checkpoint),global_step=global_step,
+                                       scenario='full',cumulative_timesteps=curriculum['step_offset']+global_step)
+                    json_write(run_dir/'evaluation'/f'checkpoint_{index:02d}_full_{mode}.json',full_report)
+                    for key,value in full_report['summary'].items():
+                        if key != 'components': writer.add_scalar(f'evaluation_full/{mode}/{key}',value,global_step)
+                sampled_report.update(checkpoint=str(checkpoint),global_step=global_step,
+                                      encounter=contract['scenario'].get('encounter'),
+                                      cumulative_timesteps=curriculum['step_offset']+global_step)
                 json_write(run_dir/'evaluation'/f'checkpoint_{index:02d}_sampled.json',sampled_report)
                 for mode, evaluation in (('greedy', report), ('sampled', sampled_report)):
                     for key,value in evaluation['summary'].items():
@@ -302,6 +338,8 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                     if evaluation['recording_error']:
                         writer.add_text(f'recording/{mode}_error',evaluation['recording_error'],global_step)
                 report.update(checkpoint=str(checkpoint),global_step=global_step,
+                              encounter=contract['scenario'].get('encounter'),
+                              cumulative_timesteps=curriculum['step_offset']+global_step,
                               return_vs_random=report['summary']['episode_return']-baseline['summary']['episode_return'])
                 json_write(run_dir/'evaluation'/f'checkpoint_{index:02d}.json',report)
                 for key,value in report['summary'].items():
@@ -313,6 +351,7 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                     writer.add_text('recording/error',report['recording_error'],global_step)
                 json_write(run_dir/'progress.json',{'checkpoint':str(checkpoint),'global_step':global_step,
                     'update':update,'complete':update==config.updates,'losses':losses,
+                    'curriculum':curriculum,'cumulative_timesteps':curriculum['step_offset']+global_step,
                     'parameter_delta':parameter_delta,'episodes':episodes,'wins':wins,
                     'training_sps':(global_step-invocation_start_step)/training_seconds,
                     'wall_sps':(global_step-invocation_start_step)/(time.perf_counter()-start_time)})

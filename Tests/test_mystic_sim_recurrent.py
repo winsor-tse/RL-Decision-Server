@@ -231,7 +231,8 @@ class RecurrentTests(unittest.TestCase):
                            num_steps=8, num_minibatches=2, update_epochs=1, eval_episodes=1)
         # Real training and evaluation, with short evaluation episodes only.
         def quick_evaluate(agent, seeds, **kwargs):
-            return evaluate(agent, seeds, factory=short_env, **kwargs)
+            kwargs['factory'] = short_env
+            return evaluate(agent, seeds, **kwargs)
         with tempfile.TemporaryDirectory() as directory, patch('Training.Mystic_Sim.train.evaluate', quick_evaluate):
             path = train(config, run_dir=Path(directory)/'run', device='cpu',
                          record_gameplay=False, stop_after_checkpoint=1)
@@ -246,7 +247,7 @@ class RecurrentTests(unittest.TestCase):
             self.assertEqual(last['global_step'], 160)
             for name in ('actor.lstm.weight_hh_l0', 'critic.lstm.weight_hh_l0'):
                 self.assertFalse(torch.equal(payload['agent'][name], last['agent'][name]))
-            self.assertEqual(len(list((path/'evaluation').glob('*.json'))), 20)
+            self.assertEqual(len(list((path/'evaluation').glob('*.json'))), 40)
             from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
             tags = EventAccumulator(str(path/'tensorboard')).Reload().Tags()['scalars']
             for tag in ('losses/actor_lstm_grad_norm','losses/actor_head_grad_norm',

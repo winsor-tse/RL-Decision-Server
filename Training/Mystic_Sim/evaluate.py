@@ -194,15 +194,19 @@ def main(argv=None):
     parser.add_argument('--seed', type=int, default=20000)
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cpu')
     parser.add_argument('--stochastic', action='store_true')
+    parser.add_argument('--full-scenario', action='store_true',
+                        help='Evaluate on the original 80-Innie task instead of the checkpoint encounter')
     parser.add_argument('--record', type=Path, help='Optional GIF of the first episode')
     parser.add_argument('--output', type=Path, default=Path('runs/mystic_sim/evaluation.json'))
     args = parser.parse_args(argv)
     if args.episodes < 1 or args.seed < 0: parser.error('Use positive episodes and a nonnegative seed')
     if args.device == 'cuda' and not torch.cuda.is_available(): parser.error('CUDA is unavailable')
     torch.set_num_threads(1)
-    env = make_env()
+    from .curriculum import checkpoint_factory
+    raw = torch.load(args.checkpoint, map_location='cpu', weights_only=True)
+    factory = checkpoint_factory(raw)
+    env = factory()
     try:
-        raw = torch.load(args.checkpoint, map_location='cpu', weights_only=True)
         config = saved_config(raw)
         recurrent = config.recurrent
         contract = metadata(env, recurrent=recurrent, actor_head=config.actor_head)
@@ -214,8 +218,11 @@ def main(argv=None):
         env.close()
     agent.eval()
     seeds = list(range(args.seed, args.seed+args.episodes))
-    result = evaluate(agent, seeds, device=args.device, record_path=args.record, stochastic=args.stochastic)
-    result['random_baseline'] = evaluate(None, seeds)
+    selected_factory = make_env if args.full_scenario else factory
+    result = evaluate(agent, seeds, device=args.device, record_path=args.record,
+                      stochastic=args.stochastic, factory=selected_factory)
+    result['random_baseline'] = evaluate(None, seeds, factory=selected_factory)
+    result['encounter'] = None if args.full_scenario else raw['metadata']['scenario'].get('encounter')
     result['checkpoint'] = str(args.checkpoint.resolve())
     json_write(args.output, result)
     print(result['summary'])
