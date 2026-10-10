@@ -15,10 +15,10 @@ class ViewerTests(unittest.TestCase):
     def test_pause_idle_and_replay(self):
         a,b=PlaySession(42),PlaySession(42)
         self.addCleanup(a.close);self.addCleanup(b.close)
-        self.assertIsNone(a.step(5))
+        self.assertIsNone(a.step(4))
         self.assertEqual(a.env.world.time_ms,0)
         a.paused=b.paused=False
-        for action in (None,0,3,5,6,7,None):
+        for action in (None,0,3,4,5,6,None):
             self.assertEqual(a.step(action),b.step(action))
         self.assertEqual(a.env.world,b.env.world)
         self.assertEqual(a.env.world.time_ms,1400)
@@ -85,7 +85,7 @@ class ViewerTests(unittest.TestCase):
         self.addCleanup(session.close)
         initial=deepcopy(session.env.world)
         session.paused=False
-        for action in (0,3,5,6,7):
+        for action in (0,3,4,5,6):
             session.step(action)
         old_world, old_engine=session.env.world,session.env.engine
         npc=next(iter(old_world.monsters.values()))

@@ -10,7 +10,7 @@ import torch
 from torch import nn
 from torch.distributions import Categorical
 
-from Custom_enviornments.Mystic_Sim.actions import contract_metadata
+from Custom_enviornments.Mystic_Sim.actions import ACTIONS, contract_metadata
 from Custom_enviornments.Mystic_Sim.config import ScenarioConfig
 from Custom_enviornments.Mystic_Sim.env import MysticSimEnv
 from Custom_enviornments.Mystic_Sim.map_loader import DEFAULT_MAP_PATH
@@ -19,6 +19,7 @@ from Custom_enviornments.Mystic_Sim.rewards import COMPONENTS
 
 @dataclass
 class PPOConfig:
+    recurrent: bool = False
     seed: int = 1
     total_timesteps: int = 262144
     num_envs: int = 1
@@ -58,6 +59,8 @@ class PPOConfig:
             raise ValueError('Seeds must be nonnegative')
         if self.batch_size % self.num_minibatches or self.batch_size // self.num_minibatches < 2:
             raise ValueError('Batch size must divide evenly into minibatches of at least two samples')
+        if self.recurrent and (self.num_steps % self.num_minibatches or self.num_steps // self.num_minibatches < 2):
+            raise ValueError('Recurrent num_steps must divide into num_minibatches sequences of at least two timesteps')
         if self.updates < 10:
             raise ValueError('Use at least ten PPO updates to produce ten distinct checkpoints')
         for name in ('learning_rate', 'actor_max_grad_norm', 'critic_max_grad_norm', 'clip_coef', 'reward_scale'):
@@ -93,12 +96,16 @@ class SimBatch:
     Step observations are always the final pre-reset observations. Phase 7 may
     replace this adapter with subprocess workers without changing PPO targets.
     """
-    def __init__(self, count, seed, factory=make_env):
+    def __init__(self, count, seed, factory=make_env, recurrent=False):
         self.envs = []
         try:
             for _ in range(count):
                 self.envs.append(factory())
             self.observations = np.stack([e.reset(seed=seed+i)[0] for i, e in enumerate(self.envs)])
+            from .history import ObservableHistory
+            self.histories = [ObservableHistory.from_env(e) for e in self.envs] if recurrent else None
+            if self.histories:
+                self.observations = np.stack([h.encode(o) for h, o in zip(self.histories, self.observations)])
         except Exception:
             self.close()
             raise
@@ -112,9 +119,18 @@ class SimBatch:
         terminated = np.asarray([row[2] for row in rows], dtype=bool)
         truncated = np.asarray([row[3] for row in rows], dtype=bool)
         infos = [row[4] for row in rows]
+        if self.histories:
+            for i, history in enumerate(self.histories):
+                history.update_from_info(self.observations[i], int(actions[i]), infos[i],
+                                         self.envs[i].config.timing.step_ms)
+            final_obs = np.stack([h.encode(o) for h, o in zip(self.histories, final_obs)])
         self.observations = final_obs.copy()
         for i in np.flatnonzero(terminated | truncated):
-            self.observations[i] = self.envs[i].reset()[0]
+            reset_obs = self.envs[i].reset()[0]
+            if self.histories:
+                self.histories[i].reset()
+                reset_obs = self.histories[i].encode(reset_obs)
+            self.observations[i] = reset_obs
         return final_obs, rewards, terminated, truncated, infos
 
     def close(self):
@@ -133,7 +149,7 @@ class Agent(nn.Module):
     def __init__(self, observation_high):
         super().__init__()
         self.register_buffer('observation_scale', torch.tensor(observation_high, dtype=torch.float32))
-        self.actor = nn.Sequential(layer(26, 128), nn.Tanh(), layer(128, 128), nn.Tanh(), layer(128, 8, .01))
+        self.actor = nn.Sequential(layer(26, 128), nn.Tanh(), layer(128, 128), nn.Tanh(), layer(128, len(ACTIONS), .01))
         self.critic = nn.Sequential(layer(26, 128), nn.Tanh(), layer(128, 128), nn.Tanh(), layer(128, 1, 1))
 
     def normalized(self, obs):
@@ -172,10 +188,10 @@ def json_write(path, data):
     temp.replace(path)
 
 
-def metadata(env):
+def metadata(env, recurrent=False):
     import inspect
     source = Path(inspect.getfile(MysticSimEnv)).parent
-    return {
+    result = {
         'backend': 'mystic_sim_python', 'architecture': 'ppo_mlp_128x128_v1',
         'training_schema': 'scaled_returns_separate_gradient_clips_v2',
         'contract': contract_metadata(),
@@ -189,6 +205,17 @@ def metadata(env):
             if p.name != 'viewer.py')).hexdigest(),
         'resume_policy': 'optimizer/counters/RNG restored; fresh simulator episodes, not exact world replay',
     }
+    if recurrent:
+        from .history import HISTORY_SCHEMA, HISTORY_FEATURES, SENSOR_RANGE, observation_high
+        result.update(architecture='ppo_separate_lstm_128_v1',
+                      history_schema=HISTORY_SCHEMA, history_features=HISTORY_FEATURES,
+                      terrain_sensors={'range_tiles': SENSOR_RANGE, 'directions': ['up', 'down', 'left', 'right'],
+                                       'distance': 'free_tiles_before_blocker_divided_by_range',
+                                       'boundaries_solid': True, 'entities_included': False},
+                      observation_scale=observation_high(env.observation_space.high).tolist())
+        result['contract'] = {**result['contract'], 'observation_schema': HISTORY_SCHEMA,
+                              'observation_size': len(result['observation_scale'])}
+    return result
 
 
 def load_checkpoint(path, expected_metadata):
@@ -212,8 +239,8 @@ def episode_metrics():
 def accumulate(metrics, action, reward, info):
     metrics['episode_return'] += float(reward)
     metrics['length'] += 1
-    metrics['cast_attempts'] += int(action >= 5)
-    metrics['invalid_casts'] += int(action >= 5 and not info['action_applied'])
+    metrics['cast_attempts'] += int(action >= 4)
+    metrics['invalid_casts'] += int(action >= 4 and not info['action_applied'])
     metrics['collisions'] += int(info['collision_kind'] is not None)
     metrics['cooldown_rejections'] += int(info['cooldown_penalty'] < 0)
     for event in info['damage_events']:

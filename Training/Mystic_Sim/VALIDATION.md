@@ -63,3 +63,42 @@ SPS excludes checkpoint evaluation/recording, is hardware-specific, and was
 measured with the two CPU runs overlapping. It is not a Phase 7 vector scaling
 benchmark. Raw local artifacts are in `runs/mystic_sim/phase6_cpu_smoke`,
 `phase6_cuda_smoke`, `phase6_seed11`, and `phase6_seed12` (gitignored).
+# Recurrent PPO validation — 2026-10-08
+
+`python -m unittest discover -s Tests -p "test_mystic_sim*.py"`: **121 passed**.
+New recurrent gates cover causal cast/collision history, independent autoreset,
+contiguous block coverage, collection/replay equivalence across multiple worlds,
+gradient flow through time with no leakage across episode resets, evaluation RNG
+isolation, actual recurrent weight updates, checkpoint compatibility and resume.
+Existing feed-forward PPO and simulator tests continue to pass.
+
+CUDA smoke: `runs/mystic_sim/lstm_cuda_smoke_20261008`, 640 transitions,
+two worlds, 32-step rollouts, two 16-step sequence minibatches, one update epoch.
+All ten checkpoints, evaluations and Pygame GIF recordings completed. The final
+CUDA checkpoint also loaded and ran stochastic evaluation on CPU through the
+normal evaluation CLI. This small run validates execution, not learning quality.
+
+No two-million-transition recurrent training experiment or live ZMQ validation
+has been run. This smoke used the original 46-feature recurrent contract,
+superseded by the sensor contract below; it is not a sensor-model CUDA benchmark.
+
+## Bounded terrain sensors — 2026-10-08
+
+The recurrent contract is now `mystic-local-terrain-51-v2`. Four static-terrain
+rays replace the three remembered blocked-origin values. The full Mystic Sim
+suite passes **125 tests**, including adjacent/farthest-visible/beyond-range
+blockers, map edges, nearest-hit behavior, translation invariance, recomputation
+after movement/reset, exclusion of moving entities, and old-contract rejection.
+Recurrent CPU training, resume and evaluation tests also pass with 51 inputs.
+Live adaptation remains documentation only; no live payload parity is claimed.
+
+## Attack removal
+
+The policy now uses `mystic-seven-v2` and the recurrent input is
+`mystic-local-terrain-50-v3`. Attack is removed; IDs 4/5/6 are the three spells.
+Old eight-action checkpoints are incompatible. Viewer idle uses an explicit
+non-policy clock method. The full existing 125-test Mystic suite passed after
+migration; targeted contract/recurrent tests then passed with an additional test
+for seven-output heads, previous-action encoding and rejected idle/old indices.
+Legacy demonstrations containing attack are rejected without dropping rows.
+The actor-head architecture is unchanged; its repair plan is in the README.

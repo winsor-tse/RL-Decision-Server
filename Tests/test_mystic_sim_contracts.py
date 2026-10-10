@@ -25,19 +25,22 @@ FIXTURES = Path(__file__).parent / "fixtures" / "simulation"
 
 class MysticPhaseZeroTests(unittest.TestCase):
     def test_action_roundtrip_and_rejected_values(self):
-        self.assertEqual(len(Action), 8)
+        self.assertEqual(len(Action), 7)
         for action in Action:
             self.assertEqual(action_from_label(action_label(action)), action)
         self.assertEqual(ACTIONS[:4], ("up", "down", "left", "right"))
-        for invalid in [-1, 8, True, 1.5, "1"]:
+        for invalid in [-1, 7, 8, None, True, 1.5, "1"]:
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 action_label(invalid)
         with self.assertRaises(ValueError):
             action_from_label("castSpell:5")
+        with self.assertRaises(ValueError):
+            action_from_label("attack")
+        self.assertEqual(ACTIONS[4:], ('castSpell:1', 'castSpell:2', 'castSpell:3'))
 
     def test_legacy_bc_remap(self):
-        self.assertEqual(remap_legacy_bc(range(8)), [0, 2, 3, 1, 4, 5, 6, 7])
-        for invalid in [8, 9, 10, -1, True, 1.5]:
+        self.assertEqual(remap_legacy_bc([0,1,2,3,5,6,7]), [0, 2, 3, 1, 4, 5, 6])
+        for invalid in [4, 8, 9, 10, -1, True, 1.5]:
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 remap_legacy_bc([invalid])
 
@@ -46,11 +49,19 @@ class MysticPhaseZeroTests(unittest.TestCase):
         before = source.read_bytes()
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "new.json"
-            migrate(source, destination)
+            with self.assertRaisesRegex(ValueError, 'removed action attack'):
+                migrate(source, destination)
+            self.assertFalse(destination.exists())
+            # An export with no removed actions retains every transition.
+            valid = json.loads(before)
+            valid['episodes'][0]['actions'][4] = 0
+            valid_source = Path(directory) / 'valid.json'
+            valid_source.write_text(json.dumps(valid))
+            migrate(valid_source, destination)
             result = json.loads(destination.read_text())
             validate_contract(result)
             self.assertEqual(result["dataset_id"], "mystic/BC-v1")
-            self.assertEqual(result["episodes"][0]["actions"], [0, 2, 3, 1, 4, 5, 6, 7])
+            self.assertEqual(result["episodes"][0]["actions"], [0, 2, 3, 1, 0, 4, 5, 6])
             self.assertEqual(result["episodes"][0]["observations"], list(range(9)))
             with self.assertRaises(ValueError):
                 migrate(source, destination)
@@ -122,7 +133,7 @@ class MysticPhaseZeroTests(unittest.TestCase):
 
     def test_registration_has_no_live_socket(self):
         env = gym.make(ENV_ID)
-        self.assertEqual(env.action_space.n, 8)
+        self.assertEqual(env.action_space.n, 7)
         self.assertEqual(env.observation_space.shape, (26,))
         self.assertNotIn("BaseEnv", [base.__name__ for base in type(env.unwrapped).__mro__])
         observation, info = env.reset(seed=1)

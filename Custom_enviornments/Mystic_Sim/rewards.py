@@ -14,7 +14,7 @@ def collision_penalty(world, config):
 
 def cooldown_penalty(config, action, failure_reason):
     # SIM ONLY: use the rejection at action time, not deadlines after advance().
-    if action in (5, 6, 7) and failure_reason in ("cooldown", "family_cooldown", "global_cooldown"):
+    if action in (4, 5, 6) and failure_reason in ("cooldown", "family_cooldown", "global_cooldown"):
         return -config.cooldown_attempt_penalty
     return 0.0
 

@@ -321,8 +321,8 @@ class TimingTests(unittest.TestCase):
              patch('time.sleep',side_effect=AssertionError('sleep')):
             for i in range(200):
                 # This movement-only test requires all NPCs to remain alive.
-                action=[0,2,1,3,4][i%5]
-                ra,rb=a.step(action),b.step(action)
+                action=[0,2,1,3,None][i%5]
+                ra,rb=(a.advance_idle(),b.advance_idle()) if action is None else (a.step(action),b.step(action))
                 assert_array_equal(ra[0],rb[0])
                 self.assertEqual(ra[1:],rb[1:])
                 self.assertEqual(len(a.world.occupancy),81)
@@ -339,7 +339,7 @@ class TimingTests(unittest.TestCase):
         for invalid in [-1,8,True,1.5,'0']:
             with self.assertRaises(ValueError): env.step(invalid)
         self.assertEqual(env.world.time_ms,0)
-        for _ in range(1024): result=env.step(4)
+        for _ in range(1024): result=env.advance_idle()
         self.assertEqual(result[2:4],(False,True))
         self.assertEqual(result[1],sum(result[4]['reward_components'].values()))
         with self.assertRaises(gym.error.ResetNeeded): env.step(0)

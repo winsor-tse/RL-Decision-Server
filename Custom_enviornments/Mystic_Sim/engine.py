@@ -449,8 +449,15 @@ class Engine:
     def advance(self, action, duration_ms=None):
         if duration_ms is not None and (type(duration_ms) is not int or duration_ms != self.config.timing.step_ms):
             raise ValueError("Advance duration must equal the configured decision interval")
-        if isinstance(action, bool) or not isinstance(action, Integral) or not 0 <= action < 8:
-            raise ValueError("Mystic action must be an integer from 0 through 7")
+        if isinstance(action, bool) or not isinstance(action, Integral) or not 0 <= action < 7:
+            raise ValueError("Mystic action must be an integer from 0 through 6")
+        return self._advance(action)
+
+    def advance_idle(self):
+        """Viewer-only time advance, outside the policy action space."""
+        return self._advance(None)
+
+    def _advance(self, action):
         self.trace = []
         self.damage_events = []
         self.death_events = []
@@ -459,7 +466,7 @@ class Engine:
         self.selected_target_id = None
         p = self.world.player
         self.world.player_collision_kind = None
-        if action < 4 and p.alive:
+        if action is not None and action < 4 and p.alive:
             applied = self.move(p, Direction(int(action)))
             reason = None if applied else "blocked"
             if applied:
@@ -468,29 +475,17 @@ class Engine:
                     if npc.alive and npc.aggro_target is None and self.distance(npc) <= npc.stats.aggro_radius:
                         self.acquire(npc, "player_moved")
                         self.queue_npc(npc, self.world.time_ms)
-        elif action == 4 and p.alive and self.config.gear_enabled:
-            if self.world.time_ms < p.next_attack_ms:
-                applied,reason=False,"cooldown"
-            else:
-                dx,dy=OFFSETS[p.facing]
-                target=self.entity(self.world.occupancy.get((p.x+dx,p.y+dy)))
-                self.selected_target_id = target.entity_id if target else None
-                applied=combat.can_hit(p,target)
-                reason=None if applied else "no_target"
-                if applied:
-                    self.melee_attack(p,target)
-                    p.next_attack_ms=self.world.time_ms+self.config.gear.attack_ms
-        elif action >= 5:
-            applied, reason = self.cast(int(action) - 4)
+        elif action is not None and action >= 4:
+            applied, reason = self.cast(int(action) - 3)
         else:
             applied = False
-            reason = "player_dead" if not p.alive else "gear_disabled"
+            reason = "player_dead" if not p.alive else "viewer_idle"
         # SIM ONLY: count consecutive blocked player decisions, before NPC updates.
         # A non-movement action or successful move breaks the streak; contact alone
         # is not a collision. Invalid actions were rejected before any mutation.
         self.world.player_collision_streak = (
             self.world.player_collision_streak + 1 if self.world.player_collision_kind else 0)
-        self.emit("action", p.entity_id, action=int(action), applied=applied, reason=reason)
+        self.emit("action", p.entity_id, action=None if action is None else int(action), applied=applied, reason=reason)
         self.scheduler.advance(self.world.time_ms + self.config.timing.step_ms, self.dispatch)
         self.world.step_count += 1
         return applied, reason

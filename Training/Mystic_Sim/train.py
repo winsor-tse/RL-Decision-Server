@@ -20,6 +20,7 @@ from Utils.ppo_checkpoint import atomic_torch_save, capture_rng_state, restore_r
 from .core import (Agent, PPOConfig, SimBatch, accumulate, advantages, checkpoint_updates,
                    episode_metrics, finish_metrics, json_write, load_checkpoint, make_env, metadata)
 from .evaluate import evaluate
+from .recurrent import RecurrentAgent, optimize_recurrent
 
 
 def critic_loss(value, old_value, returns, clip_coef=None):
@@ -102,10 +103,12 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
     resolved_device = 'cuda' if device == 'auto' and torch.cuda.is_available() else 'cpu' if device == 'auto' else device
     if resolved_device == 'cuda' and not torch.cuda.is_available():
         raise ValueError('CUDA requested but unavailable; use --device cpu or install a CUDA-enabled PyTorch')
+    if resume:
+        config = PPOConfig(**torch.load(resume, map_location='cpu', weights_only=True)['ppo_config'])
     probe = make_env()
     try:
-        contract = metadata(probe)
-        observation_high = probe.observation_space.high.copy()
+        contract = metadata(probe, recurrent=config.recurrent)
+        observation_high = np.asarray(contract['observation_scale'], dtype=np.float32)
     finally:
         probe.close()
     payload = load_checkpoint(resume, contract) if resume else None
@@ -134,7 +137,7 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
     torch.manual_seed(config.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    agent = Agent(observation_high).to(resolved_device)
+    agent = (RecurrentAgent if config.recurrent else Agent)(observation_high).to(resolved_device)
     optimizer = torch.optim.Adam(agent.parameters(), lr=config.learning_rate, eps=1e-5)
     episodes, wins = (payload['episodes'],payload['wins']) if payload else (0,0)
     if payload:
@@ -170,19 +173,24 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
         for key,value in baseline['summary'].items():
             if key != 'components': writer.add_scalar(f'baseline/{key}', value, global_step)
         # Fresh deterministic episode seeds on resume; simulator world snapshots are not claimed.
-        batch = SimBatch(config.num_envs, config.seed + completed*config.num_envs)
+        batch = SimBatch(config.num_envs, config.seed + completed*config.num_envs, recurrent=config.recurrent)
         running = [episode_metrics() for _ in batch.envs]
         shape = (config.num_steps,config.num_envs)
-        obs_buffer = torch.empty((*shape,26),device=resolved_device)
+        obs_buffer = torch.empty((*shape,len(observation_high)),device=resolved_device)
         actions = torch.empty(shape,dtype=torch.long,device=resolved_device)
         logprobs, values, rewards, next_values = [torch.empty(shape,device=resolved_device) for _ in range(4)]
         terminated, truncated = [torch.empty(shape,dtype=torch.bool,device=resolved_device) for _ in range(2)]
+        if config.recurrent:
+            recurrent_state = agent.initial_state(config.num_envs)
+            episode_starts = torch.ones(config.num_envs, dtype=torch.bool, device=resolved_device)
+            starts_buffer = torch.empty(shape, dtype=torch.bool, device=resolved_device)
+            state_buffers = tuple(torch.empty((config.num_steps, *s.shape), device=resolved_device) for s in recurrent_state)
         for update in range(completed+1, config.updates+1):
             update_start = time.perf_counter()
             lr = config.learning_rate*(1-(update-1)/config.updates) if config.anneal_lr else config.learning_rate
             optimizer.param_groups[0]['lr'] = lr
             component_sums = dict.fromkeys(COMPONENTS,0.)
-            action_counts = np.zeros(8,dtype=np.int64)
+            action_counts = np.zeros(len(ACTIONS),dtype=np.int64)
             cast_count = invalid_count = collision_count = cooldown_count = 0
             before = nn.utils.parameters_to_vector(agent.parameters()).detach().clone()
             agent.train()
@@ -190,21 +198,37 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                 observation = torch.as_tensor(batch.observations,device=resolved_device)
                 obs_buffer[t] = observation
                 with torch.no_grad():
-                    action, logprob, _, value = agent.action_value(observation)
+                    if config.recurrent:
+                        starts_buffer[t] = episode_starts
+                        for buffer, state in zip(state_buffers, recurrent_state):
+                            buffer[t] = state
+                        action, logprob, _, value, recurrent_state = agent.step(observation, recurrent_state, episode_starts)
+                    else:
+                        action, logprob, _, value = agent.action_value(observation)
                 actions[t], logprobs[t], values[t] = action,logprob,value
                 cpu_actions = action.cpu().numpy()
                 final_obs, reward, term, trunc, infos = batch.step(cpu_actions)
                 rewards[t] = torch.as_tensor(reward,device=resolved_device)
                 terminated[t], truncated[t] = torch.as_tensor(term,device=resolved_device),torch.as_tensor(trunc,device=resolved_device)
                 with torch.no_grad():
-                    next_values[t] = agent.value(torch.as_tensor(final_obs,device=resolved_device))
+                    if config.recurrent:
+                        # Bootstrap from FINAL state with pre-reset memory. Do not
+                        # commit this lookahead state: next rollout step consumes
+                        # that observation once, or masks memory after autoreset.
+                        _, bootstrap, _, _ = agent.sequence(
+                            torch.as_tensor(final_obs,device=resolved_device).unsqueeze(0),
+                            recurrent_state, torch.zeros((1,config.num_envs),dtype=torch.bool,device=resolved_device))
+                        next_values[t] = bootstrap[0]
+                        episode_starts = terminated[t] | truncated[t]
+                    else:
+                        next_values[t] = agent.value(torch.as_tensor(final_obs,device=resolved_device))
                 global_step += config.num_envs
-                action_counts += np.bincount(cpu_actions,minlength=8)
+                action_counts += np.bincount(cpu_actions,minlength=len(ACTIONS))
                 for i,info in enumerate(infos):
                     accumulate(running[i],int(cpu_actions[i]),reward[i],info)
                     for key in COMPONENTS: component_sums[key] += info['reward_components'][key]
-                    cast_count += int(cpu_actions[i]>=5)
-                    invalid_count += int(cpu_actions[i]>=5 and not info['action_applied'])
+                    cast_count += int(cpu_actions[i]>=4)
+                    invalid_count += int(cpu_actions[i]>=4 and not info['action_applied'])
                     collision_count += int(info['collision_kind'] is not None)
                     cooldown_count += int(info['cooldown_penalty']<0)
                     if term[i] or trunc[i]:
@@ -219,7 +243,14 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                 adv, returns = advantages(rewards * config.reward_scale,values,next_values,
                                           terminated,truncated,config.gamma,config.gae_lambda)
             if not torch.isfinite(returns).all(): raise FloatingPointError('Nonfinite PPO targets')
-            losses = optimize(agent,optimizer,config,obs_buffer,actions,logprobs,values,adv,returns)
+            if config.recurrent:
+                losses = optimize_recurrent(agent,optimizer,config,obs_buffer,actions,logprobs,
+                                            values,adv,returns,state_buffers,starts_buffer)
+                writer.add_scalar('lstm/actor_hidden_norm',float(recurrent_state[0].norm()),global_step)
+                writer.add_scalar('lstm/critic_hidden_norm',float(recurrent_state[2].norm()),global_step)
+                writer.add_scalar('lstm/sequence_length',config.num_steps//config.num_minibatches,global_step)
+            else:
+                losses = optimize(agent,optimizer,config,obs_buffer,actions,logprobs,values,adv,returns)
             parameter_delta = float((nn.utils.parameters_to_vector(agent.parameters()).detach()-before).norm())
             if not math.isfinite(parameter_delta): raise FloatingPointError('Nonfinite PPO parameters')
             training_seconds += time.perf_counter()-update_start

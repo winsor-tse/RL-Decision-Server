@@ -11,6 +11,9 @@ import torch
 
 from .core import (Agent, accumulate, episode_metrics, finish_metrics, json_write,
                    load_checkpoint, make_env, metadata)
+from Custom_enviornments.Mystic_Sim.actions import ACTIONS
+from .history import ObservableHistory
+from .recurrent import RecurrentAgent
 
 
 class GameplayRecorder:
@@ -83,6 +86,10 @@ def evaluate(agent, seeds, *, device='cpu', record_path=None, record_stride=5,
         env, recorder = factory(), None
         try:
             obs, info = env.reset(seed=seed)
+            recurrent = bool(getattr(agent, 'recurrent', False))
+            history = ObservableHistory.from_env(env) if recurrent else None
+            state = agent.initial_state(1) if recurrent else None
+            episode_start = True
             rng = np.random.default_rng(seed + 1000000)
             if record_path and index == 0:
                 try:
@@ -95,16 +102,26 @@ def evaluate(agent, seeds, *, device='cpu', record_path=None, record_stride=5,
             metrics = episode_metrics()
             while not env.episode_done:
                 if agent is None:
-                    action = int(rng.integers(8))
+                    action = int(rng.integers(len(ACTIONS)))
                 else:
                     with torch.no_grad():
-                        tensor = torch.as_tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
-                        if stochastic:
+                        policy_obs = history.encode(obs) if recurrent else obs
+                        tensor = torch.as_tensor(policy_obs, dtype=torch.float32, device=device).unsqueeze(0)
+                        if recurrent:
+                            logits, _, state, _ = agent.sequence(tensor.unsqueeze(0), state,
+                                torch.tensor([[episode_start]], dtype=torch.bool, device=device))
+                            episode_start = False
+                            probabilities = torch.softmax(logits[0,0], -1).cpu().numpy()
+                            action = int(rng.choice(len(ACTIONS), p=probabilities.astype(float) / probabilities.sum(dtype=float))) if stochastic else int(logits[0,0].argmax())
+                        elif stochastic:
                             probabilities = torch.softmax(agent.actor(agent.normalized(tensor)), -1)[0].cpu().numpy()
-                            action = int(rng.choice(8, p=probabilities.astype(float) / probabilities.sum(dtype=float)))
+                            action = int(rng.choice(len(ACTIONS), p=probabilities.astype(float) / probabilities.sum(dtype=float)))
                         else:
                             action = int(agent.greedy(tensor).item())
+                previous_obs = obs
                 obs, reward, _, _, info = env.step(action)
+                if recurrent:
+                    history.update_from_info(previous_obs, action, info, env.config.timing.step_ms)
                 accumulate(metrics, action, reward, info)
                 if recorder:
                     try:
@@ -149,8 +166,11 @@ def main(argv=None):
     torch.set_num_threads(1)
     env = make_env()
     try:
-        checkpoint = load_checkpoint(args.checkpoint, metadata(env))
-        agent = Agent(env.observation_space.high).to(args.device)
+        raw = torch.load(args.checkpoint, map_location='cpu', weights_only=True)
+        recurrent = raw.get('ppo_config', {}).get('recurrent', False)
+        contract = metadata(env, recurrent=recurrent)
+        checkpoint = load_checkpoint(args.checkpoint, contract)
+        agent = (RecurrentAgent if recurrent else Agent)(contract['observation_scale']).to(args.device)
         agent.load_state_dict(checkpoint['agent'])
     finally:
         env.close()

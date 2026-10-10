@@ -3,7 +3,7 @@ import gymnasium as gym
 import numpy as np
 from dataclasses import replace
 
-from .actions import ACTIONS, contract_metadata
+from .actions import ACTIONS, action_label, contract_metadata
 from .config import ScenarioConfig
 from .map_loader import DEFAULT_MAP_PATH, load_map_definition
 from .scenarios import build_scenario
@@ -65,10 +65,19 @@ class MysticSimEnv(gym.Env):
         return encode_observation(self.world), info
 
     def step(self, action):
+        action_label(action)
+        return self._step(action)
+
+    def advance_idle(self):
+        """Viewer-only clock tick; never a selectable Gym/policy action."""
+        return self._step(None)
+
+    def _step(self, action):
         if self.engine is None or self.episode_done:
             raise gym.error.ResetNeeded("Call reset before starting or continuing a finished episode")
         previous_obs = encode_observation(self.world)
-        applied, reason = self.engine.advance(action, self.config.timing.step_ms)
+        applied, reason = (self.engine.advance_idle() if action is None else
+                           self.engine.advance(action, self.config.timing.step_ms))
         obs = encode_observation(self.world)
         terminated, truncated, outcome, end_reason = rewards.episode_status(self.world, self.reward_config)
         self.episode_done = terminated or truncated
