@@ -3,12 +3,13 @@ from dataclasses import replace
 from pathlib import Path
 import tempfile
 import unittest
+import json
 from unittest.mock import patch
 
 import numpy as np
 import torch
 
-from Training.Mystic_Sim.core import PPOConfig, SimBatch, make_env, metadata, load_checkpoint
+from Training.Mystic_Sim.core import PPOConfig, SimBatch, make_env, metadata, load_checkpoint, saved_config
 from Training.Mystic_Sim.history import ObservableHistory, observation_high, terrain_sensors
 from Training.Mystic_Sim.recurrent import RecurrentAgent, recurrent_minibatches, optimize_recurrent
 from Training.Mystic_Sim.evaluate import evaluate
@@ -25,6 +26,49 @@ class RecurrentTests(unittest.TestCase):
         env = make_env()
         self.addCleanup(env.close)
         return RecurrentAgent(observation_high(env.observation_space.high)).to(device)
+
+    def test_head_comparison_preserves_critic_and_actor_trunk_initialization(self):
+        high = np.ones(50, dtype=np.float32)
+        torch.manual_seed(43)
+        linear = RecurrentAgent(high, 'linear')
+        torch.manual_seed(43)
+        tanh = RecurrentAgent(high, 'tanh')
+        self.assertIsInstance(linear.actor.head, torch.nn.Linear)
+        self.assertEqual((linear.actor.head.in_features, linear.actor.head.out_features), (128,7))
+        for module in ('critic', 'actor.network', 'actor.lstm'):
+            a = linear.get_submodule(module).state_dict()
+            b = tanh.get_submodule(module).state_dict()
+            for name in a:
+                torch.testing.assert_close(a[name], b[name], rtol=0, atol=0)
+        self.assertTrue(next(iter(linear.state_dict().keys())) == 'observation_scale')
+        self.assertTrue(next(iter(dict(tanh.named_parameters()))) .startswith('actor.'))
+
+    def test_legacy_config_and_head_contract_are_explicit(self):
+        self.assertEqual(PPOConfig().actor_head, 'linear')
+        self.assertEqual(saved_config({'ppo_config': {'recurrent':True}}).actor_head, 'tanh')
+        with self.assertRaises(ValueError):
+            PPOConfig(actor_head='bad').validate()
+        env = make_env()
+        self.addCleanup(env.close)
+        old = metadata(env, recurrent=True, actor_head='tanh')
+        self.assertEqual(old['architecture'], 'ppo_separate_lstm_128_v1')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'tanh.pt'
+            torch.save({'format':'mystic_sim_ppo_v2','metadata':old},path)
+            with self.assertRaisesRegex(ValueError, 'incompatible'):
+                load_checkpoint(path, metadata(env,recurrent=True,actor_head='linear'))
+
+    def test_constant_policy_diagnostics_detect_no_responsiveness(self):
+        agent = self.agent()
+        with torch.no_grad():
+            for parameter in agent.actor.parameters(): parameter.zero_()
+        report = evaluate(agent, [11,12], factory=short_env)
+        diag = report['diagnostics']
+        self.assertAlmostEqual(diag['probability_std_mean'], 0.)
+        self.assertEqual(diag['action_fraction/up'], 1.)
+        self.assertAlmostEqual(diag['probability_mean/castSpell_3'], 1/7, places=6)
+        self.assertTrue(any(key.startswith('conditional_probability/') for key in diag))
+        self.assertTrue(all(np.isfinite(value) for value in diag.values()))
 
     def test_history_is_causal_and_resets(self):
         env = make_env()
@@ -202,7 +246,17 @@ class RecurrentTests(unittest.TestCase):
             self.assertEqual(last['global_step'], 160)
             for name in ('actor.lstm.weight_hh_l0', 'critic.lstm.weight_hh_l0'):
                 self.assertFalse(torch.equal(payload['agent'][name], last['agent'][name]))
-            self.assertEqual(len(list((path/'evaluation').glob('*.json'))), 10)
+            self.assertEqual(len(list((path/'evaluation').glob('*.json'))), 20)
+            from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+            tags = EventAccumulator(str(path/'tensorboard')).Reload().Tags()['scalars']
+            for tag in ('losses/actor_lstm_grad_norm','losses/actor_head_grad_norm',
+                        'losses/actor_probability_std_mean','losses/actor_lstm_output_saturation',
+                        'evaluation/greedy/probability_std_mean','evaluation/sampled/probability_std_mean'):
+                self.assertIn(tag,tags)
+            greedy = json.loads((path/'evaluation/checkpoint_10.json').read_text())
+            sampled = json.loads((path/'evaluation/checkpoint_10_sampled.json').read_text())
+            self.assertEqual(greedy['policy'],'greedy')
+            self.assertEqual(sampled['policy'],'stochastic')
 
 
 if __name__ == '__main__':

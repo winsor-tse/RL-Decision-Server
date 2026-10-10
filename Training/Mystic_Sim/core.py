@@ -20,6 +20,7 @@ from Custom_enviornments.Mystic_Sim.rewards import COMPONENTS
 @dataclass
 class PPOConfig:
     recurrent: bool = False
+    actor_head: str = 'linear'
     seed: int = 1
     total_timesteps: int = 262144
     num_envs: int = 1
@@ -51,6 +52,8 @@ class PPOConfig:
         return math.ceil(self.total_timesteps / self.batch_size)
 
     def validate(self):
+        if self.actor_head not in ('linear', 'tanh'):
+            raise ValueError('actor_head must be linear or tanh')
         for name in ('total_timesteps', 'num_envs', 'num_steps', 'num_minibatches',
                      'update_epochs', 'eval_episodes'):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
@@ -188,7 +191,7 @@ def json_write(path, data):
     temp.replace(path)
 
 
-def metadata(env, recurrent=False):
+def metadata(env, recurrent=False, actor_head='linear'):
     import inspect
     source = Path(inspect.getfile(MysticSimEnv)).parent
     result = {
@@ -206,8 +209,11 @@ def metadata(env, recurrent=False):
         'resume_policy': 'optimizer/counters/RNG restored; fresh simulator episodes, not exact world replay',
     }
     if recurrent:
+        if actor_head not in ('linear', 'tanh'):
+            raise ValueError('actor_head must be linear or tanh')
         from .history import HISTORY_SCHEMA, HISTORY_FEATURES, SENSOR_RANGE, observation_high
-        result.update(architecture='ppo_separate_lstm_128_v1',
+        result.update(architecture=('ppo_separate_lstm_128_linear_actor_v2' if actor_head == 'linear'
+                                    else 'ppo_separate_lstm_128_v1'),
                       history_schema=HISTORY_SCHEMA, history_features=HISTORY_FEATURES,
                       terrain_sensors={'range_tiles': SENSOR_RANGE, 'directions': ['up', 'down', 'left', 'right'],
                                        'distance': 'free_tiles_before_blocker_divided_by_range',
@@ -216,6 +222,13 @@ def metadata(env, recurrent=False):
         result['contract'] = {**result['contract'], 'observation_schema': HISTORY_SCHEMA,
                               'observation_size': len(result['observation_scale'])}
     return result
+
+
+def saved_config(payload):
+    """Old recurrent checkpoints used Tanh; never infer linear from a new default."""
+    values = dict(payload['ppo_config'])
+    values.setdefault('actor_head', 'tanh')
+    return PPOConfig(**values)
 
 
 def load_checkpoint(path, expected_metadata):

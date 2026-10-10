@@ -1086,10 +1086,14 @@ Exit gate:
 Latest action decision: remove attack entirely from the policy, leaving four
 movement actions and three spells. Manual viewer idle uses a separate non-policy
 clock API. The recurrent schema is now `mystic-local-terrain-50-v3`; all old
-eight-action models require fresh training. Actor saturation repair is the next
-experiment, not completed by action removal. Keep LSTM size 128 initially; add
-actor-specific diagnostics and compare a direct linear logits head against the
-saturated two-Tanh head before increasing capacity. See the trainer README's
+eight-action models require fresh training. Step 1 actor simplification is now
+implemented: `--actor-head linear` is the default, with `--actor-head tanh` for
+comparison. The 128-unit actor LSTM projects directly to seven logits; critic
+and rewards remain unchanged. Diagnostics include actor probability variation,
+section gradient norms, activation saturation, rejection reasons, and paired
+greedy/sampled evaluations and recordings. Old recurrent checkpoints load with
+their Tanh head; use fresh runs to change architecture. Curriculum and reward
+changes remain deferred. See the trainer README's
 actor experiment plan for evaluation gates and controlled learning-rate trials.
 
 

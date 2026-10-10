@@ -102,3 +102,25 @@ migration; targeted contract/recurrent tests then passed with an additional test
 for seven-output heads, previous-action encoding and rejected idle/old indices.
 Legacy demonstrations containing attack are rejected without dropping rows.
 The actor-head architecture is unchanged; its repair plan is in the README.
+
+## Linear actor head and diagnostics — 2026-10-10
+
+Step 1 is implemented. New recurrent runs default to `--actor-head linear`;
+the optional `tanh` head retains the prior architecture. The critic, reward
+configuration, environment and recurrent sequence semantics are unchanged.
+
+All **129 Mystic Sim tests passed**. Added checks cover identical matched-seed
+critic/trunk initialization between heads, explicit old-checkpoint Tanh fallback,
+architecture mismatch rejection, constant-policy responsiveness diagnostics,
+both evaluation modes, and new TensorBoard actor metrics. Existing ordered
+sequence/BPTT, reset, optimizer/resume and RNG-isolation tests remain green.
+
+CUDA smoke: `runs/mystic_sim/linear_head_smoke_20261010`, 640 transitions across
+two environments. All ten model checkpoints, twenty evaluation JSON reports,
+and twenty multi-frame Pygame GIFs completed with no recording errors. The new
+checkpoint was also evaluated on CPU. The existing `lstm-200k` Tanh checkpoint
+loads via the normal evaluation CLI with its original head.
+
+These checks establish execution and compatibility, not improved training
+performance. No full training experiment, curriculum or reward changes were
+performed as part of Step 1.

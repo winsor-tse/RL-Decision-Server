@@ -1,5 +1,6 @@
 """Train standalone Mystic Sim PPO: python -m Training.Mystic_Sim.train --help."""
 import argparse
+from collections import Counter
 from dataclasses import asdict, fields
 from datetime import datetime, timezone
 import json
@@ -21,6 +22,7 @@ from .core import (Agent, PPOConfig, SimBatch, accumulate, advantages, checkpoin
                    episode_metrics, finish_metrics, json_write, load_checkpoint, make_env, metadata)
 from .evaluate import evaluate
 from .recurrent import RecurrentAgent, optimize_recurrent
+from .core import saved_config
 
 
 def critic_loss(value, old_value, returns, clip_coef=None):
@@ -104,16 +106,16 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
     if resolved_device == 'cuda' and not torch.cuda.is_available():
         raise ValueError('CUDA requested but unavailable; use --device cpu or install a CUDA-enabled PyTorch')
     if resume:
-        config = PPOConfig(**torch.load(resume, map_location='cpu', weights_only=True)['ppo_config'])
+        config = saved_config(torch.load(resume, map_location='cpu', weights_only=True))
     probe = make_env()
     try:
-        contract = metadata(probe, recurrent=config.recurrent)
+        contract = metadata(probe, recurrent=config.recurrent, actor_head=config.actor_head)
         observation_high = np.asarray(contract['observation_scale'], dtype=np.float32)
     finally:
         probe.close()
     payload = load_checkpoint(resume, contract) if resume else None
     if payload:
-        config = PPOConfig(**payload['ppo_config'])
+        config = saved_config(payload)
     config.validate()
     schedule = checkpoint_updates(config.updates)
     completed = payload['update'] if payload else 0
@@ -137,7 +139,8 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
     torch.manual_seed(config.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    agent = (RecurrentAgent if config.recurrent else Agent)(observation_high).to(resolved_device)
+    agent = (RecurrentAgent(observation_high, config.actor_head) if config.recurrent
+             else Agent(observation_high)).to(resolved_device)
     optimizer = torch.optim.Adam(agent.parameters(), lr=config.learning_rate, eps=1e-5)
     episodes, wins = (payload['episodes'],payload['wins']) if payload else (0,0)
     if payload:
@@ -192,6 +195,8 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
             component_sums = dict.fromkeys(COMPONENTS,0.)
             action_counts = np.zeros(len(ACTIONS),dtype=np.int64)
             cast_count = invalid_count = collision_count = cooldown_count = 0
+            failure_counts = Counter()
+            successful_moves = 0
             before = nn.utils.parameters_to_vector(agent.parameters()).detach().clone()
             agent.train()
             for t in range(config.num_steps):
@@ -231,6 +236,9 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                     invalid_count += int(cpu_actions[i]>=4 and not info['action_applied'])
                     collision_count += int(info['collision_kind'] is not None)
                     cooldown_count += int(info['cooldown_penalty']<0)
+                    successful_moves += int(cpu_actions[i] < 4 and info['action_applied'])
+                    if not info['action_applied']:
+                        failure_counts[f"{ACTIONS[cpu_actions[i]].replace(':', '_')}/{info['action_failure_reason'] or 'unknown'}"] += 1
                     if term[i] or trunc[i]:
                         row = finish_metrics(running[i],info)
                         episodes += 1
@@ -266,6 +274,9 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
             writer.add_scalar('environment/invalid_cast_rate',invalid_count/max(1,cast_count),global_step)
             writer.add_scalar('environment/collision_rate',collision_count/config.batch_size,global_step)
             writer.add_scalar('environment/cooldown_rejection_rate',cooldown_count/config.batch_size,global_step)
+            writer.add_scalar('environment/successful_move_rate',successful_moves/config.batch_size,global_step)
+            for key, count in failure_counts.items():
+                writer.add_scalar(f'environment/failure_rate/{key}',count/config.batch_size,global_step)
             writer.add_scalar('environment/player_hp',float(obs_buffer[:,:,3].mean()),global_step)
             writer.add_scalar('environment/player_mp',float(obs_buffer[:,:,4].mean()),global_step)
             if update in schedule:
@@ -278,6 +289,18 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                 agent.eval()
                 recording = run_dir/'gameplay'/f'checkpoint_{index:02d}.gif' if record_gameplay else None
                 report = evaluate(agent,seeds,device=resolved_device,record_path=recording,record_stride=record_stride)
+                sampled_recording = run_dir/'gameplay'/f'checkpoint_{index:02d}_sampled.gif' if record_gameplay else None
+                sampled_report = evaluate(agent,seeds,device=resolved_device,record_path=sampled_recording,
+                                          record_stride=record_stride,stochastic=True)
+                sampled_report.update(checkpoint=str(checkpoint),global_step=global_step)
+                json_write(run_dir/'evaluation'/f'checkpoint_{index:02d}_sampled.json',sampled_report)
+                for mode, evaluation in (('greedy', report), ('sampled', sampled_report)):
+                    for key,value in evaluation['summary'].items():
+                        if key != 'components': writer.add_scalar(f'evaluation/{mode}/{key}',value,global_step)
+                    for key,value in evaluation['diagnostics'].items():
+                        writer.add_scalar(f'evaluation/{mode}/{key}',value,global_step)
+                    if evaluation['recording_error']:
+                        writer.add_text(f'recording/{mode}_error',evaluation['recording_error'],global_step)
                 report.update(checkpoint=str(checkpoint),global_step=global_step,
                               return_vs_random=report['summary']['episode_return']-baseline['summary']['episode_return'])
                 json_write(run_dir/'evaluation'/f'checkpoint_{index:02d}.json',report)
@@ -310,6 +333,7 @@ def main(argv=None):
         default = getattr(defaults,field.name)
         options = {'action':argparse.BooleanOptionalAction} if isinstance(default,bool) else {
             'type':float if field.name == 'value_clip_coef' else type(default)}
+        if field.name == 'actor_head': options['choices'] = ('linear', 'tanh')
         parser.add_argument('--'+field.name.replace('_','-'),default=default,**options)
     parser.add_argument('--device',choices=('auto','cpu','cuda'),default='auto')
     parser.add_argument('--run-dir',type=Path)

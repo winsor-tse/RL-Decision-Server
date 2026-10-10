@@ -3,6 +3,20 @@
 ## Recurrent PPO (LSTM)
 
 Use `--recurrent` for the simulator adaptation of `Training/PPO_lstm_server.py`.
+New recurrent runs default to `--actor-head linear`: the actor's 128-unit LSTM
+feeds seven logits directly. Use `--actor-head tanh` for the previous two-layer
+Tanh head. The critic, ordered batching, 50 inputs, rewards and environment rules
+are unchanged. Head type is checkpointed; start a fresh run to change it.
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.train --recurrent --actor-head linear --device cuda --seed 42 --num-envs 4 --num-steps 256 --num-minibatches 4 --total-timesteps 200000 --run-dir runs/mystic_sim/lstm-linear-200k
+```
+
+Older seven-action recurrent checkpoints lacking `actor_head` load as **tanh**,
+including on resume. Resume restores their original head, not the new default.
+For fresh matched-seed comparisons, critic and actor embedding/LSTM initialization
+are identical between head choices. Initialization order was adjusted for this;
+fresh Tanh runs are not bit-for-bit reproductions of the older initialization.
 Feed-forward PPO remains the default. Old eight-action checkpoints are incompatible. Recurrent and MLP weights are not interchangeable; start a fresh run.
 
 ```powershell
@@ -76,8 +90,9 @@ map53 can still overfit to it; this change does not claim map generalization.
 **Deliberate differences/fixes relative to the server reference:**
 
 - Generalized contiguous sequence batching to multiple independent worlds.
-- Retained its ReLU embedding → 512 features → 128-unit LSTM → two 64-unit
-  Tanh head structure, but use separate actor/critic embeddings and LSTMs.
+- Retained its ReLU embedding → 512 features → 128-unit LSTM structure with
+  separate actor/critic embeddings and LSTMs. The critic keeps two 64-unit
+  Tanh layers; the default actor now projects the LSTM directly to seven logits.
   This costs more compute and preserves independent gradient clipping; a shared
   LSTM would couple actor and critic gradients again.
 - Truncations bootstrap from the final observation with pre-reset memory;
@@ -188,7 +203,8 @@ and four environments, request at least 5,120 timesteps.
 At each checkpoint the trainer:
 
 1. Atomically saves model, optimizer, progress, RNG state, and compatibility metadata.
-2. Runs greedy evaluation on fixed seeds (`--eval-seed 10000 --eval-episodes 3`).
+2. Runs both greedy and sampled evaluation on the same fixed seeds
+   (`--eval-seed 10000 --eval-episodes 3`).
 3. Records the first evaluation episode through the existing Pygame viewer as a
    660x430 animated GIF, with HP/MP, cooldowns, steps, kills, rewards and end reason.
 4. Saves evaluation JSON and TensorBoard metrics, including comparison with the
@@ -303,15 +319,16 @@ The policy action IDs are 0 up, 1 down, 2 left, 3 right, 4 Arcane Blast,
 tests; PPO cannot select it. The recurrent input loses the attack-history bit,
 so it is now 50 values. Start a fresh run with the new action/observation schemas.
 
-Actor repair is planned, not implemented by this action-removal change:
+Step 1 (linear head and diagnostics) is implemented. Curriculum and reward
+changes remain deferred. The comparison plan is:
 
 1. Keep the 128-unit LSTM and the healthy critic initially. Saturated Tanh heads
    indicate poor activation/optimization behavior, not evidence of insufficient
    memory capacity. A wider head can saturate too.
-2. Add actor activation/saturation and observation-sensitivity metrics, per-action
-   failure counts, and both greedy/sampled evaluations. Do this before another
-   long run; a healthy critic or improved raw return is not an actor exit gate.
-3. Compare a simple `LSTM(128) -> Linear(128, 7)` actor head against the current
+2. Inspect the new activation/sensitivity metrics, per-action failure counts,
+   and both greedy/sampled evaluations; a healthy critic or improved raw return
+   is not an actor exit gate.
+3. Compare the default `LSTM(128) -> Linear(128, 7)` actor head against the optional
    two 64-unit Tanh head, using fresh seeds and the same seven-action environment.
    Keep the embedding/LSTM/critic and rewards fixed to isolate the head change.
 4. If needed, separately test lower actor learning rate (e.g. 1e-4 versus 2.5e-4),
@@ -326,3 +343,40 @@ Actor repair is planned, not implemented by this action-removal change:
 Removing attack does not repair already saturated weights or guarantee useful
 behavior: illegal casts can still become ineffective stationary actions. No
 arbitrary movement reward or unconditional inactivity penalty was added.
+
+## Actor diagnostics and paired evaluation
+
+Each checkpoint now saves `checkpoint_NN.json` (greedy) and
+`checkpoint_NN_sampled.json`, plus matching greedy and `_sampled.gif` gameplay
+recordings when recording is enabled. Ten model checkpoints produce twenty
+evaluation reports and up to twenty GIFs. Evaluation takes more wall time but
+does not alter training worlds or training RNG. Existing `evaluation/*` scalar
+tags retain greedy results; explicit `evaluation/greedy/*` and
+`evaluation/sampled/*` tags identify the two modes.
+
+Recurrent TensorBoard metrics under `losses/` include:
+
+- `actor_embedding_grad_norm`, `actor_lstm_grad_norm`, `actor_head_grad_norm`:
+  gradient norms before independent actor/critic clipping.
+- `actor_probability_mean/<action>` and `actor_probability_std/<action>`:
+  preferences and variation across the rollout replayed in temporal order with
+  saved initial memory and episode masks, after optimization.
+- `actor_logit_std_mean`, `actor_feature_std_mean` and
+  `actor_probability_std_mean`: aggregate variation across those same states.
+- `actor_lstm_output_saturation` for the linear head, or
+  `actor_head_tanh_saturation` for Tanh: fraction with absolute activation >0.99.
+  They measure different layers; the linear head has no Tanh-head saturation.
+
+Training also reports `environment/successful_move_rate` and per-action
+`environment/failure_rate/<action>/<reason>` when failures occur. Each evaluation
+JSON's `diagnostics` contains action fractions, probability mean/std, successful
+moves, per-action failure counts, and spell probabilities grouped by cooldown
+ready/blocked states, with observation counts. These cooldown labels come from
+the engine **only for measurement**; they do not enter policy inputs or mask
+actions. Ready here means slot/family/global timers allow casting, not that MP,
+HP or targeting requirements are satisfied.
+
+Compare conditional ready/blocked probabilities together with cast failures and
+combat outcomes. Probability variation is descriptive, not a causal test that
+the policy understands cooldowns. Different histories/encounters can affect the
+statistics; neither high variation nor movement alone proves a better policy.
