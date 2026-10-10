@@ -15,6 +15,7 @@ from Custom_enviornments.Mystic_Sim.config import ScenarioConfig
 from Custom_enviornments.Mystic_Sim.env import MysticSimEnv
 from Custom_enviornments.Mystic_Sim.map_loader import DEFAULT_MAP_PATH
 from Custom_enviornments.Mystic_Sim.rewards import COMPONENTS
+from .encounter_diagnostics import EncounterDiagnostics
 
 
 @dataclass
@@ -105,6 +106,7 @@ class SimBatch:
             for _ in range(count):
                 self.envs.append(factory())
             self.observations = np.stack([e.reset(seed=seed+i)[0] for i, e in enumerate(self.envs)])
+            self.encounter_diagnostics = [EncounterDiagnostics(e.world) for e in self.envs]
             from .history import ObservableHistory
             self.histories = [ObservableHistory.from_env(e) for e in self.envs] if recurrent else None
             if self.histories:
@@ -116,7 +118,11 @@ class SimBatch:
     def step(self, actions):
         if len(actions) != len(self.envs):
             raise ValueError('One action per environment is required')
+        for tracker, env in zip(self.encounter_diagnostics, self.envs):
+            tracker.before(env.world)
         rows = [e.step(int(a)) for e, a in zip(self.envs, actions)]
+        for tracker, env, row in zip(self.encounter_diagnostics, self.envs, rows):
+            row[4]['combat_navigation'] = tracker.after(env.world, row[4])
         final_obs = np.stack([row[0] for row in rows])
         rewards = np.asarray([row[1] for row in rows], dtype=np.float32)
         terminated = np.asarray([row[2] for row in rows], dtype=bool)
@@ -130,6 +136,7 @@ class SimBatch:
         self.observations = final_obs.copy()
         for i in np.flatnonzero(terminated | truncated):
             reset_obs = self.envs[i].reset()[0]
+            self.encounter_diagnostics[i] = EncounterDiagnostics(self.envs[i].world)
             if self.histories:
                 self.histories[i].reset()
                 reset_obs = self.histories[i].encode(reset_obs)
@@ -250,6 +257,7 @@ def episode_metrics():
 
 
 def accumulate(metrics, action, reward, info):
+    metrics.update(info.get('combat_navigation', {}))
     metrics['episode_return'] += float(reward)
     metrics['length'] += 1
     metrics['cast_attempts'] += int(action >= 4)

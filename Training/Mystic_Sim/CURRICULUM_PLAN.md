@@ -224,6 +224,69 @@ The actual checkpoint-8-to-three-Innie preflight passed. Eight curriculum unit
 tests passed, including inheritance, stage listing, configured continuation and
 fresh-start overrides. No training was run for this extension.
 
+## Diagnostic and compact-spawn experiment (implemented)
+
+`configs/three_innies_tight.json` inherits the same checkpoint-8 starting weights,
+PPO settings and three-kill goal as the previous experiment. Only the initial
+walkable distance band changes: 2–20 becomes 3–8 tiles. All starts remain in the
+original player rectangle and NPC boxes on map53. Each NPC has a walkable path
+of at most eight steps to the player's start; consequently a route via that
+start connects any pair of NPC starts in at most sixteen steps (previous bound:
+forty). Spawn occupancy and terrain rules are unchanged. Seeded placement tests
+also check that player starts have at least two unblocked cardinal neighbours.
+
+There is no arena boundary, respawn restriction, added reward or changed policy
+observation. Movement and later respawns remain unrestricted within the original
+map rules. This tests *initial combat contact*, not sustained confinement. Closer
+spawns can increase combat pressure even though they reduce the navigation task.
+
+```powershell
+# Validate, then remove --validate-only when ready to train yourself.
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.curriculum_run --config Training/Mystic_Sim/configs/three_innies_tight.json --validate-only
+
+# Paired, evaluation-only comparison of a fixed policy and random baseline.
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.compare_encounters --config Training/Mystic_Sim/configs/three_innies_tight.json --checkpoint runs/mystic_sim/curriculum/one_innie_seed42/checkpoints/checkpoint_08.pt --output runs/mystic_sim/curriculum/my_tight_comparison.json
+```
+
+The comparison evaluates random, greedy and sampled behavior on both encounters
+using the same 30 seed numbers (20000–20029); different placement rules still
+produce different world layouts/RNG consumption. No weights are updated. Reports
+include complete per-episode data. Existing output files are not overwritten.
+
+The training/evaluation adapters now collect read-only diagnostics:
+
+| Metric | Definition |
+| --- | --- |
+| `enemy_in_cast_range_fraction` | Fraction of decisions with a living enemy inside the inclusive X±16/Y±10 window before acting; ignores cooldown, mana and immunity. |
+| `outside_cast_range_fraction` | Fraction outside that window, considering only decisions with at least one living enemy. |
+| `no_living_enemy_fraction` | Separates respawn gaps from searching for living enemies. |
+| `seconds_since_damage` | Time since the last decision interval dealing positive player damage, or reset if none. |
+| `longest_no_damage_seconds` | Longest such gap, measured at 200-ms decision resolution. |
+| `damage_per_in_range_second` | Player damage during intervals starting with an enemy in range, divided by those intervals' duration; includes DoT damage. |
+| `successful_move_revisit_fraction` | Successful moves returning to a position in the preceding 32-position window. |
+| `movement_reversal_fraction` | Successful moves reversing the immediately preceding decision's successful displacement. |
+| `mean_recent_unique_cells` | Mean number of distinct cells in the rolling 32-position window; initial windows are shorter. |
+
+Training writes finished-episode metrics under TensorBoard `combat_navigation/`.
+Evaluation JSON includes them in each episode and its summary; evaluation
+TensorBoard tags inherit the stage/full and greedy/sampled grouping. Summary
+fractions are means of episode fractions, not pooled time-weighted fractions.
+Each environment has its own tracker, reset on autoreset after final metrics are
+captured. Revisit/reversal counts are not penalties: effective kiting can revisit
+cells while dealing damage. Interpret them alongside combat progress.
+
+Diagnostics live outside the engine, so existing checkpoint engine fingerprints
+remain valid. Default and tighter encounter replays use the same action and
+observation contracts. Raw `MysticSimEnv` callers are unchanged; these metrics
+are supplied by `SimBatch` and `evaluate`, not by the underlying Gym environment.
+
+The initial paired comparison used the original one-Innie checkpoint 8, without
+training. Standard versus tight sampled success was 22/30 versus 21/30; mean
+out-of-range fractions were 46.7% versus 39.5%. Greedy success remained 0/30 in
+both. Random-policy success fell from 16/30 to 10/30, indicating greater combat
+pressure. These results demonstrate increased contact, not a proven learning
+improvement. Detailed results: `runs/mystic_sim/curriculum/tight_encounter_comparison.json`.
+
 ## Later phases — automatic progression deferred to Phase 7 or later
 
 Add a stage controller on top of the manual training and continuation tools,

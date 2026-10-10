@@ -23,6 +23,7 @@ from .core import (Agent, PPOConfig, SimBatch, accumulate, advantages, checkpoin
 from .evaluate import evaluate
 from .recurrent import RecurrentAgent, optimize_recurrent
 from .core import saved_config
+from .encounter_diagnostics import METRICS as ENCOUNTER_METRICS
 from .curriculum import (encounter_factory, encounter_from_dict, load_stage_checkpoint,
                          stage_schedule, learning_rate)
 
@@ -90,6 +91,9 @@ def optimize(agent, optimizer, config, observations, actions, old_logprobs, valu
 
 
 def log_episode(writer, row, step, episodes, wins):
+    for key in ENCOUNTER_METRICS:
+        if key in row:
+            writer.add_scalar(f'combat_navigation/{key}', row[key], step)
     for key in ('episode_return', 'length', 'kills', 'survival_seconds', 'damage_dealt',
                 'damage_taken', 'invalid_cast_rate', 'collisions', 'cooldown_rejections'):
         writer.add_scalar(f'episodes/{key}', row[key], step)

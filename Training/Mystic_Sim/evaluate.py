@@ -14,6 +14,7 @@ from .core import (Agent, accumulate, episode_metrics, finish_metrics, json_writ
 from Custom_enviornments.Mystic_Sim.actions import ACTIONS
 from .history import ObservableHistory
 from .recurrent import RecurrentAgent
+from .encounter_diagnostics import EncounterDiagnostics, METRICS as ENCOUNTER_METRICS
 
 
 class GameplayRecorder:
@@ -92,6 +93,7 @@ def evaluate(agent, seeds, *, device='cpu', record_path=None, record_stride=5,
         env, recorder = factory(), None
         try:
             obs, info = env.reset(seed=seed)
+            encounter_diagnostics = EncounterDiagnostics(env.world)
             recurrent = bool(getattr(agent, 'recurrent', False))
             history = ObservableHistory.from_env(env) if recurrent else None
             state = agent.initial_state(1) if recurrent else None
@@ -138,7 +140,9 @@ def evaluate(agent, seeds, *, device='cpu', record_path=None, record_stride=5,
                     cooldown_observation_count[key] += 1
                 action_counts[action] += 1
                 previous_obs = obs
+                encounter_diagnostics.before(env.world)
                 obs, reward, _, _, info = env.step(action)
+                info['combat_navigation'] = encounter_diagnostics.after(env.world, info)
                 successful_moves += int(action < 4 and info['action_applied'])
                 if not info['action_applied']:
                     failures[f"{ACTIONS[action].replace(':', '_')}/{info['action_failure_reason'] or 'unknown'}"] += 1
@@ -162,7 +166,7 @@ def evaluate(agent, seeds, *, device='cpu', record_path=None, record_stride=5,
             if recorder: recorder.close()
             env.close()
     keys = ('episode_return', 'length', 'kills', 'win', 'survived', 'survival_seconds',
-            'damage_dealt', 'damage_taken', 'invalid_cast_rate', 'collisions', 'cooldown_rejections')
+            'damage_dealt', 'damage_taken', 'invalid_cast_rate', 'collisions', 'cooldown_rejections') + ENCOUNTER_METRICS
     summary = {key: float(np.mean([row[key] for row in episodes])) for key in keys}
     summary['sps_including_recording'] = sum(row['length'] for row in episodes) / max(.000001, time.perf_counter()-start)
     summary['components'] = {key: float(np.mean([row['components'][key] for row in episodes]))

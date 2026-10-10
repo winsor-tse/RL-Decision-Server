@@ -13,6 +13,12 @@ retained. Automatic stage progression is deferred to Phase 7 or later.
 
 ## Recurrent PPO (LSTM)
 
+For the compact-spawn experiment, use `configs/three_innies_tight.json` with
+`curriculum_run`. It changes initial path distances to 3–8 tiles and retains
+the same checkpoint-8 start. New training and evaluation runs log range access,
+damage gaps, revisits and movement reversals. See the curriculum plan for
+definitions and the evaluation-only `compare_encounters` command.
+
 To continue the completed one-Innie run into three Innies using checkpoint 8:
 
 ```powershell
