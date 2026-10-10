@@ -80,14 +80,13 @@ fragments in `Simulation/Source-Code` as the mechanics reference. The first
 version includes only:
 
 - cardinal movement: `up`, `down`, `left`, `right`;
-- `attack`: a deliberately simple close-range basic-damage action;
 - `castSpell:1`, `castSpell:2`, and `castSpell:3`, translated from their three
   supplied C# implementations;
 - Innie movement, aggro, attacks, damage, death, and respawn;
 - the existing Mystic observation layout and Gymnasium API.
 
 Actions for spell slots 5, 6, and 7 are out of scope. The simulator therefore
-has eight actions:
+has seven actions:
 
 
 | ID | Action        | Initial behavior                                           |
@@ -96,14 +95,13 @@ has eight actions:
 |  1 | `down`        | Move one tile south if legal.                              |
 |  2 | `left`        | Move one tile west if legal.                               |
 |  3 | `right`       | Move one tile east if legal.                               |
-|  4 | `attack`      | Damage one close target using the configured basic damage. |
-|  5 | `castSpell:1` | Execute`Spell1_Arcane Blast_single_target_spell.txt`.      |
-|  6 | `castSpell:2` | Execute`Spell2_Acid Cloud_large AoE.txt`.                  |
-|  7 | `castSpell:3` | Execute`Spell3_Tempest Inferno.txt`.                       |
+|  4 | `castSpell:1` | Execute`Spell1_Arcane Blast_single_target_spell.txt`.      |
+|  5 | `castSpell:2` | Execute`Spell2_Acid Cloud_large AoE.txt`.                  |
+|  6 | `castSpell:3` | Execute`Spell3_Tempest Inferno.txt`.                       |
 
 Before a simulator-trained policy is used with the live game, the selected live
-Mystic adapter must expose the same shared eight-action definition. Preserve the
-legacy live default for existing models; MysticBC migration is deferred. Changing from 11 to 8
+Mystic adapter must expose the same shared seven-action definition. Preserve the
+legacy live default for existing models; MysticBC migration is deferred. Changing from 11 to 7
 actions changes the policy output layer, so existing 11-action checkpoints will
 need retraining or an explicit output-head migration. The 26-value observation
 shape can remain unchanged.
@@ -578,7 +576,7 @@ Custom_enviornments/
   Mystic_Sim/
     __init__.py
     env.py                 # thin Gymnasium adapter
-    actions.py             # shared eight-action definition
+    actions.py             # shared seven-action definition
     config.py              # immutable player, NPC, spell and scenario values
     state.py               # player, monster, effect, map and event dataclasses
     engine.py              # reset and deterministic 200 ms state transition
@@ -805,13 +803,13 @@ Damage, spells, and combat reward are now implemented through Phases 3–5 below
 
 Deliverables:
 
-- Add `Mystic_Sim/actions.py` with one `IntEnum` and the canonical eight labels.
+- Add `Mystic_Sim/actions.py` with one `IntEnum` and the canonical seven labels.
 - Make live `Mystic`, `MysticBC`, the simulator, trainers, and inference import
-  that definition when they migrate to the eight-action version.
+  that definition when they migrate to the seven-action version.
 - Give the simulator its own registration, `YugenSaga/MysticSim-v0`, so live
   socket behavior cannot be selected accidentally during simulation training.
 - Version action metadata in checkpoints and datasets. Existing 11-output
-  checkpoints cannot load into an eight-output policy head without migration.
+  checkpoints cannot load into an seven-output policy head without migration.
 - Note the current movement-order difference: live Mystic uses up/down/left/
   right, while MysticBC uses up/left/right/down. Define the canonical order as
   up/down/left/right and provide an explicit legacy-BC remapping tool.
@@ -1056,7 +1054,7 @@ are detached snapshots, with the selected target captured at action time.
 
 - Keep `env.py` thin: validate the action, call `engine.advance(action, 200)`,
   encode state, calculate reward, and return the Gymnasium five-tuple.
-- Declare `Discrete(8)` and a 26-value `Box` with bounds that reflect coordinates,
+- Declare `Discrete(7)` and a 26-value `Box` with bounds that reflect coordinates,
   direction codes, percentages, distance, and map ID.
 - Implement `reset(seed, options)` through `super().reset(seed=seed)`. Options may
   select a fidelity profile or fixed fixture, but cannot mutate global state.
@@ -1085,14 +1083,44 @@ Exit gate:
 
 ### Phase 6 - Train PPO on the current Mystic Sim environment
 
+Latest action decision: remove attack entirely from the policy, leaving four
+movement actions and three spells. Manual viewer idle uses a separate non-policy
+clock API. The recurrent schema is now `mystic-local-terrain-50-v3`; all old
+eight-action models require fresh training. Step 1 actor simplification is now
+implemented: `--actor-head linear` is the default, with `--actor-head tanh` for
+comparison. The 128-unit actor LSTM projects directly to seven logits; critic
+and rewards remain unchanged. Diagnostics include actor probability variation,
+section gradient norms, activation saturation, rejection reasons, and paired
+greedy/sampled evaluations and recordings. Old recurrent checkpoints load with
+their Tanh head; use fresh runs to change architecture. Curriculum and reward
+changes remain deferred. See the trainer README's
+actor experiment plan for evaluation gates and controlled learning-rate trials.
+
+
 Primary deliverable: repeatable single-environment PPO training, checkpointing,
 and evaluation on the current Mystic simulator. This phase is simulation-only:
 no live adapter implementation, ZMQ contract tests, payload comparisons, or game
 sessions. Training must work without a running game, ZMQ connection, or Pygame window.
 
-Implementation: `Training/Mystic_Sim/train.py` is a standalone feed-forward PPO
-trainer, with `core.py` for batching/contracts and `evaluate.py` for checkpoint
-evaluation/Pygame GIFs. See `Training/Mystic_Sim/README.md` for commands and
+Implementation: `Training/Mystic_Sim/train.py` supports standalone feed-forward PPO
+and `--recurrent` PPO + LSTM adapted from `Training/PPO_lstm_server.py`.
+The recurrent path uses contiguous time-block minibatches across independent
+worlds, saved sequence-start hidden/cell states, episode-start masks, and
+separate actor/critic LSTMs. Its policy consumes the existing 26 values plus
+24 additional features (previous action/outcome, confirmed cast ages,
+and four bounded static-terrain rays with detection flags), not hidden cooldowns
+or a full terrain grid. Rays inspect four tiles up/down/left/right, stop at the
+first wall/boundary, and return free tiles before the blocker divided by four.
+No hit gives distance 1 and detection 0. Entities are excluded from terrain rays
+but retained in blocked-movement feedback. Absolute blocked-origin memory is removed.
+The Gym contract remains 26 values; the recurrent policy contract is separately
+versioned at 50 (`mystic-local-terrain-50-v3`); old recurrent weights require a new
+run. Base player X/Y and map ID remain; generalization is not guaranteed by sensors
+alone. See the README for sequence layout, server-reference differences,
+and validation. Curriculum remains future work.
+
+The simulation trainer uses `core.py` for batching/contracts and `evaluate.py`
+for checkpoint evaluation/Pygame GIFs. See `Training/Mystic_Sim/README.md` for commands and
 `Training/Mystic_Sim/VALIDATION.md` for measured checks. This follows the updated
 user scope: a simulator trainer, not a server or an extension of live automation.
 
@@ -1102,7 +1130,7 @@ user scope: a simulator trainer, not a server or an extension of live automation
    rules, never free play. Default to one environment; support `--num-envs` with
    independent synchronous worlds and batched policy inference, and
    `--device auto|cpu|cuda`. Subprocess optimization remains Phase 7 work.
-2. Consume Mystic Sim's current `Discrete(8)` and float32 26-value observation
+2. Consume Mystic Sim's current `Discrete(7)` and float32 26-value observation
    directly. Verify that policy input/output dimensions, action labels, and
    preprocessing match this simulator. Divide observations by fixed Box upper
    bounds inside the checkpointed model. Scale rewards by 0.01 only when building
@@ -1157,7 +1185,7 @@ Exit gate:
   boundaries with one or multiple environments; recurrent PPO is deferred;
 - a completed run saves ten distinct checkpoints, TensorBoard metrics, fixed-seed
   evaluation reports, and ten gameplay GIFs when optional recording is available;
-- a simulator-trained eight-action checkpoint reloads for simulator evaluation;
+- a simulator-trained seven-action checkpoint reloads for simulator evaluation;
 - run metadata records the simulator reward and fidelity settings; the trainer has
   an environment-factory boundary ready for Phase 7. No Minari or BC work is required.
 
@@ -1435,10 +1463,30 @@ Exit gate:
 - sync/async deterministic worker replay matches the single-env reference;
 - a benchmark table identifies the fastest stable settings on this machine,
   with engine SPS and end-to-end PPO SPS measured separately;
-- eight-action checkpoints remain compatible with Phase 6 simulator evaluation.
+- seven-action checkpoints remain compatible with Phase 6 simulator evaluation.
   Vectorization must not change game mechanics to achieve higher throughput.
 
 ### Phase 8 - Test the live ZMQ contract, payload differences, and sim-to-game gap
+
+Recurrent policy deployment requires a future live-server implementation of the
+same model and `mystic-local-terrain-50-v3` feature builder. The current live
+LSTM server and inference code are not compatible with these simulator weights.
+Maintain per-session hidden/cell state and causal action history, resetting both
+at episode/reconnect/map boundaries. Add authoritative action acknowledgements,
+cast success, blocked movement, cooldown rejection and timestamp alignment to
+the payload adapter. Do not infer successful execution merely from sending a
+command. Verify history features, elapsed cast ages, reset behavior, normalized
+inputs, logits and action mappings against simulator replay fixtures before live
+training or deployment. Current simulator-only unit tests do not validate ZMQ.
+
+For live terrain sensors, load the authoritative static map collision layer and
+dimensions, and recompute four four-tile cardinal rays at the player's current
+position each observation. Terrain stays fixed in map coordinates; relative
+distances change as the player moves. Match negative-Y up, direction ordering,
+first-blocker occlusion, solid map boundaries, free-tile normalization and
+detection flags. Exclude moving entity occupancy, which remains collision
+feedback. Reload on map change and test movement/teleport/respawn, no-hit,
+adjacent-wall and exact-range cases against the simulator sensor fixtures.
 
 Primary deliverable: a live-versus-simulator comparison report, with repeatable
 regression cases for each discovered discrepancy. Matching the connected live
@@ -1449,7 +1497,7 @@ on the current simulator without requiring those live checks.
 
 Before running policy-driven live sessions:
 
-- Implement an explicit eight-action live Mystic adapter over the existing ZMQ
+- Implement an explicit seven-action live Mystic adapter over the existing ZMQ
   request/response path. Keep the legacy 11-action default available for existing
   models; do not silently reinterpret output indices. Validate checkpoint action
   labels, observation schema, and preprocessing before transmitting actions.
@@ -1518,7 +1566,7 @@ Before running policy-driven live sessions:
 
 Exit gate:
 
-- the eight-action live adapter passes contract tests and rejects incompatible
+- the seven-action live adapter passes contract tests and rejects incompatible
   checkpoints before sending actions;
 - payload-difference fixtures cover raw transport data and encoded observations,
   with every required difference either reconciled or explicitly reported;
@@ -1533,7 +1581,7 @@ Exit gate:
 
 ### Deferred - Behavior cloning, Minari, and offline learning
 
-Keep existing offline tools functional, but defer new BC training, eight-action
+Keep existing offline tools functional, but defer new BC training, seven-action
 Minari dataset production, legacy demonstration migration, dataset publication,
 and AWAC/offline experiments until PPO training and live parity are established.
 Existing action/schema safeguards remain in place. Lightweight ZMQ fidelity
@@ -1576,7 +1624,7 @@ integration.
 
 - The environment runs headlessly with no socket, rendering, sleep, or hot-path
   file writes.
-- Its public contract is `Discrete(8)` plus the versioned 26-value observation.
+- Its public contract is `Discrete(7)` plus the versioned 26-value observation.
 - `map53.json` drives dimensions and all template-5300 spawn regions.
 - Reset, event scheduling, movement, target selection, combat, cooldowns,
   effects, death, and respawn are deterministic for a seed.
@@ -1589,7 +1637,7 @@ integration.
 - Checkpoints record enough schema/profile metadata to prevent incompatible
   live, legacy-11-action, or higher-fidelity models from being mixed silently.
 - PPO trains on the simulator without sockets, saves/reloads compatible models,
-  and has a tested eight-action live ZMQ evaluation path.
+  and has a tested seven-action live ZMQ evaluation path.
 - Sync/async vector PPO supports independent worlds and correct episode handling,
   with measured environment and end-to-end training throughput.
 - Required live map-53 scenarios have held-out comparison reports with explicit

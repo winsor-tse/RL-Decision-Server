@@ -8,18 +8,17 @@ class Action(IntEnum):
     DOWN = 1
     LEFT = 2
     RIGHT = 3
-    ATTACK = 4
-    ARCANE_BLAST = 5
-    ACID_CLOUD = 6
-    TEMPEST_INFERNO = 7
+    ARCANE_BLAST = 4
+    ACID_CLOUD = 5
+    TEMPEST_INFERNO = 6
 
 
-ACTIONS = ("up", "down", "left", "right", "attack",
+ACTIONS = ("up", "down", "left", "right",
            "castSpell:1", "castSpell:2", "castSpell:3")
-ACTION_SCHEMA = "mystic-eight-v1"
+ACTION_SCHEMA = "mystic-seven-v2"
 OBSERVATION_SCHEMA = "mystic-26-v1"
 DATASET_ID = "mystic/BC-v1"
-LEGACY_LIVE_ACTIONS = ACTIONS + ("castSpell:5", "castSpell:6", "castSpell:7")
+LEGACY_LIVE_ACTIONS = ("up", "down", "left", "right", "attack", "castSpell:1", "castSpell:2", "castSpell:3") + ("castSpell:5", "castSpell:6", "castSpell:7")
 LEGACY_BC_ACTIONS = ("up", "left", "right", "down") + LEGACY_LIVE_ACTIONS[4:]
 
 

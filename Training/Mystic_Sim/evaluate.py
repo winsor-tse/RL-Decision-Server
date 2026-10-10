@@ -1,6 +1,6 @@
 """Evaluate a simulator checkpoint and optionally record its Pygame gameplay."""
 import argparse
-from collections import deque
+from collections import deque, Counter
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,8 +9,11 @@ import time
 import numpy as np
 import torch
 
-from .core import (Agent, accumulate, episode_metrics, finish_metrics, json_write,
+from .core import (Agent, accumulate, episode_metrics, finish_metrics, json_write, saved_config,
                    load_checkpoint, make_env, metadata)
+from Custom_enviornments.Mystic_Sim.actions import ACTIONS
+from .history import ObservableHistory
+from .recurrent import RecurrentAgent
 
 
 class GameplayRecorder:
@@ -77,12 +80,22 @@ def evaluate(agent, seeds, *, device='cpu', record_path=None, record_stride=5,
     if not seeds or record_stride < 1:
         raise ValueError('Evaluation needs at least one seed and a positive recording stride')
     episodes = []
+    action_counts = np.zeros(len(ACTIONS), dtype=np.int64)
+    failures = Counter()
+    probability_rows = []
+    successful_moves = 0
+    cooldown_probability_sum = Counter()
+    cooldown_observation_count = Counter()
     recording_error = None
     start = time.perf_counter()
     for index, seed in enumerate(seeds):
         env, recorder = factory(), None
         try:
             obs, info = env.reset(seed=seed)
+            recurrent = bool(getattr(agent, 'recurrent', False))
+            history = ObservableHistory.from_env(env) if recurrent else None
+            state = agent.initial_state(1) if recurrent else None
+            episode_start = True
             rng = np.random.default_rng(seed + 1000000)
             if record_path and index == 0:
                 try:
@@ -95,16 +108,42 @@ def evaluate(agent, seeds, *, device='cpu', record_path=None, record_stride=5,
             metrics = episode_metrics()
             while not env.episode_done:
                 if agent is None:
-                    action = int(rng.integers(8))
+                    action = int(rng.integers(len(ACTIONS)))
+                    probabilities = np.full(len(ACTIONS), 1 / len(ACTIONS))
                 else:
                     with torch.no_grad():
-                        tensor = torch.as_tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
-                        if stochastic:
+                        policy_obs = history.encode(obs) if recurrent else obs
+                        tensor = torch.as_tensor(policy_obs, dtype=torch.float32, device=device).unsqueeze(0)
+                        if recurrent:
+                            logits, _, state, _ = agent.sequence(tensor.unsqueeze(0), state,
+                                torch.tensor([[episode_start]], dtype=torch.bool, device=device))
+                            episode_start = False
+                            probabilities = torch.softmax(logits[0,0], -1).cpu().numpy()
+                            action = int(rng.choice(len(ACTIONS), p=probabilities.astype(float) / probabilities.sum(dtype=float))) if stochastic else int(logits[0,0].argmax())
+                        elif stochastic:
                             probabilities = torch.softmax(agent.actor(agent.normalized(tensor)), -1)[0].cpu().numpy()
-                            action = int(rng.choice(8, p=probabilities.astype(float) / probabilities.sum(dtype=float)))
+                            action = int(rng.choice(len(ACTIONS), p=probabilities.astype(float) / probabilities.sum(dtype=float)))
                         else:
-                            action = int(agent.greedy(tensor).item())
+                            probabilities = torch.softmax(agent.actor(agent.normalized(tensor)), -1)[0].cpu().numpy()
+                            action = int(probabilities.argmax())
+                probability_rows.append(probabilities)
+                # Diagnostic-only oracle. Never appended to policy observations.
+                player, now = env.world.player, env.world.time_ms
+                for spell in env.config.spells:
+                    ready = (now >= player.cooldowns.global_ready_at_ms
+                             and now >= player.cooldowns.slots.get(spell.slot, 0)
+                             and (not spell.family or now >= player.cooldowns.families.get(spell.family, 0)))
+                    key = f'castSpell_{spell.slot}/cooldown_{"ready" if ready else "blocked"}'
+                    cooldown_probability_sum[key] += float(probabilities[spell.slot+3])
+                    cooldown_observation_count[key] += 1
+                action_counts[action] += 1
+                previous_obs = obs
                 obs, reward, _, _, info = env.step(action)
+                successful_moves += int(action < 4 and info['action_applied'])
+                if not info['action_applied']:
+                    failures[f"{ACTIONS[action].replace(':', '_')}/{info['action_failure_reason'] or 'unknown'}"] += 1
+                if recurrent:
+                    history.update_from_info(previous_obs, action, info, env.config.timing.step_ms)
                 accumulate(metrics, action, reward, info)
                 if recorder:
                     try:
@@ -128,7 +167,21 @@ def evaluate(agent, seeds, *, device='cpu', record_path=None, record_stride=5,
     summary['sps_including_recording'] = sum(row['length'] for row in episodes) / max(.000001, time.perf_counter()-start)
     summary['components'] = {key: float(np.mean([row['components'][key] for row in episodes]))
                              for key in episodes[0]['components']}
+    probabilities = np.asarray(probability_rows, dtype=np.float64)
+    diagnostics = {'successful_moves': successful_moves,
+                   'movement_attempt_rate': float(action_counts[:4].sum()/action_counts.sum()),
+                   'probability_std_mean': float(probabilities.std(0).mean())}
+    for i, label in enumerate(ACTIONS):
+        label = label.replace(':', '_')
+        diagnostics[f'action_fraction/{label}'] = float(action_counts[i]/action_counts.sum())
+        diagnostics[f'probability_mean/{label}'] = float(probabilities[:,i].mean())
+        diagnostics[f'probability_std/{label}'] = float(probabilities[:,i].std())
+    diagnostics.update({f'failure_count/{key}': count for key,count in failures.items()})
+    for key, count in cooldown_observation_count.items():
+        diagnostics[f'conditional_probability/{key}'] = cooldown_probability_sum[key]/count
+        diagnostics[f'conditional_observations/{key}'] = count
     return {'policy': 'random' if agent is None else 'stochastic' if stochastic else 'greedy',
+            'diagnostics': diagnostics,
             'episodes': episodes, 'summary': summary,
             'recording': str(record_path) if record_path and not recording_error else None,
             'recording_error': recording_error}
@@ -149,8 +202,13 @@ def main(argv=None):
     torch.set_num_threads(1)
     env = make_env()
     try:
-        checkpoint = load_checkpoint(args.checkpoint, metadata(env))
-        agent = Agent(env.observation_space.high).to(args.device)
+        raw = torch.load(args.checkpoint, map_location='cpu', weights_only=True)
+        config = saved_config(raw)
+        recurrent = config.recurrent
+        contract = metadata(env, recurrent=recurrent, actor_head=config.actor_head)
+        checkpoint = load_checkpoint(args.checkpoint, contract)
+        agent = (RecurrentAgent(contract['observation_scale'], config.actor_head) if recurrent
+                 else Agent(contract['observation_scale'])).to(args.device)
         agent.load_state_dict(checkpoint['agent'])
     finally:
         env.close()
