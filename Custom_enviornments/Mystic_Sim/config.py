@@ -247,6 +247,26 @@ class GearConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class EncounterConfig:
+    """Initial placements only; normal combat and original-box respawns still apply."""
+    stage_id: str
+    enemy_count: int
+    kill_goal: int
+    path_distance: tuple[int, int] = (1, 10000)
+
+    def __post_init__(self):
+        if not isinstance(self.stage_id, str) or not self.stage_id.strip() or self.stage_id == "full":
+            raise ValueError("stage_id must be nonempty and distinct from full")
+        integer("enemy_count", self.enemy_count, 1)
+        integer("kill_goal", self.kill_goal, 1)
+        if not self.kill_goal <= self.enemy_count <= 80:
+            raise ValueError("Require kill_goal <= enemy_count <= 80")
+        interval("path_distance", self.path_distance, 10001)
+        if self.path_distance[0] < 1:
+            raise ValueError("path_distance must exclude the player's cell")
+
+
+@dataclass(frozen=True, slots=True)
 class ScenarioConfig:
     profile: str = "map53"
     map_id: int = 53
@@ -264,8 +284,14 @@ class ScenarioConfig:
     spells: tuple[SpellConfig, ...] = field(default_factory=baseline_spells)
     timing: TimingConfig = field(default_factory=TimingConfig)
     reward: RewardConfig = field(default_factory=RewardConfig)
+    encounter: EncounterConfig | None = None
 
     def __post_init__(self):
+        if self.encounter is not None:
+            if not isinstance(self.encounter, EncounterConfig):
+                raise ValueError("encounter must be an EncounterConfig")
+            if self.reward.win_kills != self.encounter.kill_goal:
+                raise ValueError("Encounter kill_goal must match reward.win_kills")
         for name, cls in (("player", PlayerConfig), ("innie", InnieConfig),
                           ("timing", TimingConfig), ("reward", RewardConfig), ("spell_rules", SpellRules)):
             if not isinstance(getattr(self, name), cls):

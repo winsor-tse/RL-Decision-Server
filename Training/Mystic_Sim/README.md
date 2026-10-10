@@ -1,5 +1,10 @@
 # Standalone Mystic Sim PPO
 
+Curriculum Phase 0/1 foundations are documented in
+[CURRICULUM_PLAN.md](CURRICULUM_PLAN.md): immutable encounter settings, seeded
+encounter factories, and the unchanged full-scenario evaluation baseline.
+Automatic curriculum progression is not yet enabled in the trainer.
+
 ## Recurrent PPO (LSTM)
 
 Use `--recurrent` for the simulator adaptation of `Training/PPO_lstm_server.py`.
