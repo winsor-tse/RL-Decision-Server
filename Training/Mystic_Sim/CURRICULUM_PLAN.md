@@ -1,5 +1,19 @@
 # Mystic curriculum foundation
 
+Timeout reward update: Mystic Sim now charges `terminal = -25` once when an
+unfinished episode reaches its configured step limit (normally 1024). The flag
+remains `truncated=True`; PPO's existing timeout bootstrapping is unchanged.
+Win/death outcomes take priority and keep their existing rewards. Early Y-boundary
+truncations retain their separate positioning penalties. Observation visibility
+is unchanged. `RewardConfig.timeout_penalty` defaults to 25 for both simulator
+reward profiles, including easier encounters and full-scenario evaluation.
+
+This changes the engine/reward checkpoint contract: pre-change checkpoints are
+not accepted by strict resume/continuation. The old checkpoint-based example
+commands below require a compatible checkpoint; to start a new run with the
+updated reward, use `--fresh --run-dir <new-directory>`. No implicit migration of
+old checkpoints or their critic/optimizer state is performed.
+
 ## Phase 0 — Freeze the comparison contract (implemented)
 
 The baseline remains the original map53: 80 Innies, five kills to win,

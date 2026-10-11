@@ -52,9 +52,12 @@ Terminal defaults are +200 on reaching five kills and -200 on player death
 Thus a win gives +250 in kill/terminal rewards; four kills then death give -160,
 before other components. Weights are independently configurable.
 Award the terminal reward once, alongside the final step's normal components;
-death takes priority over a simultaneous fifth kill. Step-limit and Y-boundary
-truncation are not losses and add no terminal reward. Existing Y penalties still
-apply. Live Mystic rewards are unchanged.
+death takes priority over a simultaneous fifth kill. Step-limit truncation now
+adds a one-time -25 terminal component (`RewardConfig.timeout_penalty`) at the
+configured limit, normally 1024 decisions. Win/death take priority over timeout.
+Y-boundary truncation adds no terminal reward; existing Y penalties still apply.
+Gym timeout truncation and PPO bootstrapping remain unchanged. Live Mystic
+rewards and observation visibility are unchanged.
 
 The single map profile is `map53`, used by both the viewer and headless training.
 Terrain and entity collision are always enabled for movement, pathfinding,

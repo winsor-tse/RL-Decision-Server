@@ -202,7 +202,7 @@ class RewardTests(unittest.TestCase):
         result=env.advance_idle()
         self.assertEqual(result[2:4],(False,True))
         self.assertEqual(result[4]['episode_end_reason'],'step_limit')
-        self.assertEqual(result[4]['reward_components']['terminal'],0)
+        self.assertEqual(result[4]['reward_components']['terminal'],-25)
 
     def test_large_terminal_rewards_in_both_profiles_and_custom_weights(self):
         for profile in ('combat_reward_v1','legacy_reward_v0'):
@@ -235,10 +235,40 @@ class RewardTests(unittest.TestCase):
             env=self.scene(RewardConfig(profile=profile))
             self.assertEqual(env.advance_idle()[4]['reward_components']['terminal'],0)
             env.world.step_count=env.reward_config.max_episode_steps-1
-            self.assertEqual(env.advance_idle()[4]['reward_components']['terminal'],0)
-        for name in ('win_bonus','death_penalty'):
+            self.assertEqual(env.advance_idle()[4]['reward_components']['terminal'],-25)
+        for name in ('win_bonus','death_penalty','timeout_penalty'):
             for value in (-1,True,float('nan'),float('inf')):
                 with self.assertRaises(ValueError): RewardConfig(**{name:value})
+
+    def test_timeout_penalty_once_on_step_1024_only(self):
+        for profile in ('combat_reward_v1', 'legacy_reward_v0'):
+            env = self.scene(RewardConfig(profile=profile))
+            env.world.step_count = 1022
+            before = env.advance_idle()
+            self.assertEqual(before[2:4], (False, False))
+            self.assertEqual(before[4]['reward_components']['terminal'], 0)
+            result = env.advance_idle()
+            self.assertEqual(env.world.step_count, 1024)
+            self.assertEqual(result[2:4], (False, True))
+            self.assertEqual(result[4]['reward_components']['terminal'], -25)
+            self.assertEqual(result[1], sum(result[4]['reward_components'].values()))
+            if profile == 'combat_reward_v1':
+                self.assertAlmostEqual(result[1], -25.001)
+            with self.assertRaises(gym.error.ResetNeeded):
+                env.advance_idle()
+            _, reset_info = env.reset(seed=42)
+            self.assertEqual(reset_info['reward_components']['terminal'], 0)
+
+    def test_timeout_config_does_not_penalize_early_y_truncation(self):
+        for cost in (0, 12.5, 25):
+            env = self.scene(RewardConfig(timeout_penalty=cost, max_episode_steps=2))
+            env.advance_idle()
+            self.assertEqual(env.advance_idle()[4]['reward_components']['terminal'], -cost)
+        env = self.scene()
+        env.world.player.y = 29
+        result = env.advance_idle()
+        self.assertEqual(result[4]['episode_end_reason'], 'y_boundary')
+        self.assertEqual(result[4]['reward_components']['terminal'], 0)
 
     def kill_progress_scene(self, profile, **weights):
         env=self.scene(RewardConfig(profile=profile, **weights))

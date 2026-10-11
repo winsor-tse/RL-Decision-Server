@@ -197,6 +197,8 @@ class RewardConfig:
     # Terminal magnitude is 20 default kill bonuses, outweighing partial progress.
     win_bonus: float = 200.0
     death_penalty: float = 200.0
+    # SIM ONLY: charged once on the configured step-limit truncation, not on death or Y exits.
+    timeout_penalty: float = 25.0
     time_cost: float = 0.001
     # Simulator-only shaping for attempted movement into occupied/blocked cells.
     collision_penalty_weight: float = 5.0
@@ -214,7 +216,7 @@ class RewardConfig:
         if self.profile not in ("combat_reward_v1", "legacy_reward_v0"):
             raise ValueError("Unknown reward profile")
         for name in ("enemy_damage_weight", "kill_bonus", "player_damage_weight", "death_penalty", "time_cost",
-                     "collision_penalty_weight", "win_bonus", "cooldown_attempt_penalty"):
+                     "collision_penalty_weight", "win_bonus", "cooldown_attempt_penalty", "timeout_penalty"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be a finite nonnegative number")

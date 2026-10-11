@@ -83,7 +83,7 @@ class MysticSimEnv(gym.Env):
         self.episode_done = terminated or truncated
         components = rewards.calculate(self.world, self.reward_config, previous_obs, obs, action,
                                        self.engine.damage_events, self.engine.death_events, outcome,
-                                       failure_reason=reason)
+                                       failure_reason=reason, end_reason=end_reason)
         info = build_info(self, action=action, applied=applied, reason=reason,
                           components=components, outcome=outcome, end_reason=end_reason)
         return obs, float(sum(components.values())), terminated, truncated, info

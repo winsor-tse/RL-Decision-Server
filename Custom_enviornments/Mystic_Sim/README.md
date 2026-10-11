@@ -310,11 +310,16 @@ moving an enemy outside the observation does not earn a kill reward.
 | `positioning` | Collision/cooldown-attempt penalties plus -100 * (31 - Y) below 31 or -100 * (Y - 85) above 85 |
 | `damage_taken` | -50 * actual player damage / player maximum HP |
 | `damage_dealt` | 25 * sum of actual player damage / each enemy's maximum HP |
-| `terminal` | +200 for reaching five kills; -200 for player death; 0 otherwise |
+| `terminal` | +200 for reaching the kill goal; -200 for player death; -25 once on step-limit truncation; 0 otherwise |
 | `killed` | +10 per confirmed player kill, including kills 1–4 |
 
 The returned reward is exactly the sum of these six components. Weights, kill
 goal, and time limit are configurable through frozen `RewardConfig` fields.
+The simulator-only `timeout_penalty=25` applies to both reward profiles at the
+configured limit (default decision 1024). It is not a premature termination or
+a penalty for lack of visible enemies. Win/death rewards take priority; early
+Y exits retain their existing positioning penalties. Timeout remains a Gym
+truncation, and stepping again requires reset, preventing duplicate charges.
 The default training profile (`combat_reward_v1`, also used by the viewer) uses
 `enemy_damage_weight=25` and `player_damage_weight=50`, up from 1 each. Removing
 10% of one enemy's HP earns +2.5; losing 10% of player HP costs -5. Full enemy
