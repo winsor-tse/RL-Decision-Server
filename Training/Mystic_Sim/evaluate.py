@@ -191,6 +191,32 @@ def evaluate(agent, seeds, *, device='cpu', record_path=None, record_stride=5,
             'recording_error': recording_error}
 
 
+def load_evaluation_agent(path, device='cpu'):
+    """Load frozen weights after checking the checkpoint's original env contract."""
+    from .curriculum import checkpoint_factory
+    raw = torch.load(path, map_location='cpu', weights_only=True)
+    factory = checkpoint_factory(raw)
+    env = factory()
+    try:
+        config = saved_config(raw)
+        contract = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head)
+        checkpoint = load_checkpoint(path, contract)
+        agent = (RecurrentAgent(contract['observation_scale'], config.actor_head)
+                 if config.recurrent else Agent(contract['observation_scale'])).to(device)
+        agent.load_state_dict(checkpoint['agent'])
+    finally:
+        env.close()
+    agent.eval()
+    return agent, factory, contract
+
+
+def evaluation_line(label, report):
+    summary = report['summary']
+    return (f'{label}: return={summary["episode_return"]:.2f}, '
+            f'win={summary["win"]:.1%}, kills={summary["kills"]:.2f}, '
+            f'steps={summary["length"]:.1f}')
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('checkpoint', type=Path)
@@ -206,27 +232,13 @@ def main(argv=None):
     if args.episodes < 1 or args.seed < 0: parser.error('Use positive episodes and a nonnegative seed')
     if args.device == 'cuda' and not torch.cuda.is_available(): parser.error('CUDA is unavailable')
     torch.set_num_threads(1)
-    from .curriculum import checkpoint_factory
-    raw = torch.load(args.checkpoint, map_location='cpu', weights_only=True)
-    factory = checkpoint_factory(raw)
-    env = factory()
-    try:
-        config = saved_config(raw)
-        recurrent = config.recurrent
-        contract = metadata(env, recurrent=recurrent, actor_head=config.actor_head)
-        checkpoint = load_checkpoint(args.checkpoint, contract)
-        agent = (RecurrentAgent(contract['observation_scale'], config.actor_head) if recurrent
-                 else Agent(contract['observation_scale'])).to(args.device)
-        agent.load_state_dict(checkpoint['agent'])
-    finally:
-        env.close()
-    agent.eval()
+    agent, factory, contract = load_evaluation_agent(args.checkpoint, args.device)
     seeds = list(range(args.seed, args.seed+args.episodes))
     selected_factory = make_env if args.full_scenario else factory
     result = evaluate(agent, seeds, device=args.device, record_path=args.record,
                       stochastic=args.stochastic, factory=selected_factory)
     result['random_baseline'] = evaluate(None, seeds, factory=selected_factory)
-    result['encounter'] = None if args.full_scenario else raw['metadata']['scenario'].get('encounter')
+    result['encounter'] = None if args.full_scenario else contract['scenario'].get('encounter')
     result['checkpoint'] = str(args.checkpoint.resolve())
     json_write(args.output, result)
     print(result['summary'])

@@ -1,0 +1,10 @@
+{
+  "extends": "curriculum_manual.json",
+  "stages": {
+    "four_innies_tight": {"enemy_count": 4, "kill_goal": 4, "path_distance": [3, 8]},
+    "five_innies_tight": {"enemy_count": 5, "kill_goal": 5, "path_distance": [3, 8]},
+    "ten_innies_goal5": {"enemy_count": 10, "kill_goal": 5, "path_distance": [3, 8]},
+    "fifteen_innies_goal5": {"enemy_count": 15, "kill_goal": 5, "path_distance": [3, 12]},
+    "twenty_innies_goal5": {"enemy_count": 20, "kill_goal": 5, "path_distance": [3, 12]}
+  }
+}

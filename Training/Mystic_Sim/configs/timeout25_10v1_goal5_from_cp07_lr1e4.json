@@ -1,0 +1,10 @@
+{
+  "extends": "timeout25_10v1_goal5_from_5v1_cp08.json",
+  "continue_from": "runs/mystic_sim/curriculum/timeout25_10v1_goal5_from_5v1_cp08_seed42/checkpoints/checkpoint_07.pt",
+  "ppo": {
+    "learning_rate": 0.0001
+  },
+  "runtime": {
+    "run_dir": "runs/mystic_sim/curriculum/timeout25_10v1_goal5_from_cp07_lr1e4_seed{seed}"
+  }
+}

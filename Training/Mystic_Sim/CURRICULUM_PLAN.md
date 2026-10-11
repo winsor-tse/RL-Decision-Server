@@ -303,6 +303,74 @@ improvement. Detailed results: `runs/mystic_sim/curriculum/tight_encounter_compa
 
 ## Later phases — automatic progression deferred to Phase 7 or later
 
+### TODO — remaining curriculum integration
+
+Phases 0–3 are implemented. The items below are planned work, not implemented
+features or newly assigned Phases 4–6. Prioritize checkpoint selection and gate
+reporting before automatic advancement.
+
+- [ ] Add best-checkpoint selection with an explicit, saved evaluation criterion
+  and action mode (greedy, sampled, or both). Report the reason for selection;
+  preserve all numbered checkpoints and allow the user to choose a different
+  compatible checkpoint. Do not assume checkpoint 10 is best.
+- [ ] Track and report the provisional advancement gate: at least 24 successes
+  out of 30 held-out episodes in two consecutive evaluations. Save evaluation
+  seeds, checkpoint IDs, action mode and consecutive-pass history. Report greedy
+  and sampled results separately; never silently switch which mode qualifies.
+  Keep full-scenario results alongside stage results. In manual mode the gate is
+  advisory and does not block the user's choice of the next stage.
+- [ ] Automate evaluation across the reserved validation seed banks and repeat
+  experiments across training seeds. Reserve a separate final test bank that is
+  not used for checkpoint selection or advancement. Support matched direct-training
+  comparisons so improvements can be distinguished from extra training budget.
+- [ ] Add an opt-in stage controller in curriculum Phase 7 or later. Save the
+  selected stage, source checkpoint, stage/cumulative budgets, gate history and
+  advancement decisions. Switch encounters at episode boundaries while retaining
+  actor, critic, both LSTMs, optimizer state and the shared learning-rate schedule;
+  reset episode-specific memory normally.
+- [ ] Support interruption/resume of the entire automated curriculum without
+  repeating a completed stage, losing gate history, or overwriting previous runs.
+  Preserve the existing documented distinction between checkpoint continuation
+  and exact mid-episode world replay.
+- [ ] Test that manual and automated execution reuse the same encounter factories,
+  checkpoint validation, rewards, observations and evaluation code. Automation
+  must not introduce a separate simulator or bypass compatibility checks.
+
+### Manual curriculum remains a supported workflow
+
+Automation must be optional and explicitly enabled. Preserve the existing
+single-stage runner as the default, including configuration inheritance,
+`--stage`, configured `continue_from`, `--continue-from`, `--resume`, `--fresh`,
+`--run-dir`, `--validate-only` and `--list-stages`.
+
+The user must remain able to choose any configured encounter, repeat an easier
+stage, change the local budget where continuation permits it, select a compatible
+checkpoint, train/save that stage, and stop without advancing. A failed or missing
+advancement gate must not prevent a manual run; normal schema, checkpoint and
+output-directory safety checks still apply. Best-checkpoint selection must offer
+a recommendation without replacing an explicit user checkpoint choice.
+
+Future automated runs must also produce checkpoints usable by the manual runner.
+Leaving automation must not require a curriculum controller to load the model or
+wipe any learned LSTM weights. Record lineage and manual/automatic mode in run
+metadata so comparisons remain reviewable.
+
+### Related TODOs in the broader Python integration plan
+
+These are separate from curriculum phase numbering:
+
+- [ ] Python integration Phase 7: optimize vector execution and steps per second,
+  including parallel backends, worker-count benchmarks, diagnostic overhead and
+  reset/GAE correctness. Current `SimBatch` provides synchronous independent worlds.
+- [ ] Python integration Phase 8: validate live ZMQ payloads, visibility filtering,
+  action mapping, timing/acknowledgements, terrain sensors and per-session LSTM
+  memory against the simulator contract. Current sim policies are not yet validated
+  for live deployment.
+- [ ] Keep behavior cloning, Minari and offline learning deferred; they are not
+  prerequisites for continuing manual curriculum experiments.
+
+### Future progression design
+
 Add a stage controller on top of the manual training and continuation tools,
 with checkpointed gate history and stage changes at episode boundaries.
 A provisional ladder is 1/2/3/5/10–20/40/80

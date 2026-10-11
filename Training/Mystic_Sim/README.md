@@ -407,3 +407,56 @@ Compare conditional ready/blocked probabilities together with cast failures and
 combat outcomes. Probability variation is descriptive, not a causal test that
 the policy understands cooldowns. Different histories/encounters can affect the
 statistics; neither high variation nor movement alone proves a better policy.
+
+## Compare frozen policies across stages
+
+Run from the repository root (evaluation only; no training):
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.compare --config Training/Mystic_Sim/configs/compare_4v1_5v1.json
+```
+
+The example compares 4v1 checkpoint 10 and 5v1 checkpoint 10 on
+`ten_innies_goal5` (10 enemies, five total kills, including respawn kills) and
+`full` (the original scenario). Both sampled (temperature 1) and greedy modes
+use the same episode seeds. LSTM state resets per episode; weights stay frozen.
+Full episode metrics and diagnostics are saved to the configured JSON output.
+
+Edit `policies` to add named checkpoint paths, and `stages` to choose stage names
+from `comparison_stages.json`. That file inherits the existing manual curriculum
+stages and adds tight 4/5/10-enemy encounters. You may instead point `stage_config`
+to any existing curriculum run config. The stage-config path is relative to the
+comparison config; checkpoint and output paths are relative to your working directory.
+Training initialization and budget settings in stage configs are ignored.
+
+Use `--validate-only` to check all checkpoint/stage contracts and reset geometry
+without episode rollouts. Override `--episodes 100`, `--seed 23000`, or `--output`
+for another evaluation bank. Output is updated after each pairing, so interrupted
+comparisons may contain only some results. Reusing an output path replaces it.
+Only encounter settings and kill goals may differ; incompatible engine/reward/
+observation contracts are rejected. No best checkpoint is automatically promoted.
+
+The training checkpoint CLI now prints explicitly labeled **stage sampled** and
+**stage greedy** return, win rate, kills, and episode length. Curriculum runs also
+print both **full** scenario modes. Sampled is shown first; saved TensorBoard tags
+and report names remain compatible.
+
+### Smaller-update continuation from the 10v1 checkpoint 7
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.curriculum_run --config Training/Mystic_Sim/configs/timeout25_10v1_goal5_from_cp07_lr1e4.json
+```
+
+This experiment starts from checkpoint 7 of `timeout25_10v1_goal5_from_5v1_cp08_seed42`.
+It retains all learned weights and Adam moments, reducing the constant learning
+rate from 0.00025 to 0.0001. The engine, rewards, ten enemies, five-kill goal,
+seed 42, and other PPO settings stay unchanged. It adds 200,704 transitions and
+writes a separate run directory named `timeout25_10v1_goal5_from_cp07_lr1e4_seed42`.
+This tests a smaller optimizer step size; it does not guarantee smaller actual
+policy changes. Compare sampled success and survival with the source checkpoint.
+
+Explicit `continue_from` runs now permit a learning-rate change; the training
+loop overrides the restored optimizer rate before the first update. Resume
+still requires the exact saved PPO configuration. Other PPO hyperparameter
+changes remain rejected by continuation validation. Add `--validate-only` to
+check compatibility without training.

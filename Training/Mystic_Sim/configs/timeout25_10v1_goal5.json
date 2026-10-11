@@ -1,0 +1,8 @@
+{
+  "extends": "comparison_stages.json",
+  "stage": "ten_innies_goal5",
+  "continue_from": "runs/mystic_sim/curriculum/timeout25_5v1_from_4v1_cp10_seed42/checkpoints/checkpoint_10.pt",
+  "runtime": {
+    "run_dir": "runs/mystic_sim/curriculum/timeout25_10v1_goal5_from_5v1_cp10_seed{seed}"
+  }
+}

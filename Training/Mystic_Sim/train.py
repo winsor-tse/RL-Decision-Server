@@ -20,7 +20,7 @@ from Custom_enviornments.Mystic_Sim.rewards import COMPONENTS
 from Utils.ppo_checkpoint import atomic_torch_save, capture_rng_state, restore_rng_state
 from .core import (Agent, PPOConfig, SimBatch, accumulate, advantages, checkpoint_updates,
                    episode_metrics, finish_metrics, json_write, load_checkpoint, make_env, metadata)
-from .evaluate import evaluate
+from .evaluate import evaluate, evaluation_line
 from .recurrent import RecurrentAgent, optimize_recurrent
 from .core import saved_config
 from .encounter_diagnostics import METRICS as ENCOUNTER_METRICS
@@ -321,6 +321,7 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                                           record_stride=record_stride,stochastic=True,factory=factory)
                 # The original environment stays an independent comparison even
                 # while a selected easier encounter is being trained.
+                full_reports = {}
                 for mode, stage_report in (('greedy', report), ('sampled', sampled_report)):
                     full_report = (evaluate(agent,seeds,device=resolved_device,
                                             stochastic=mode=='sampled',factory=make_env)
@@ -328,6 +329,7 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                     full_report.update(checkpoint=str(checkpoint),global_step=global_step,
                                        scenario='full',cumulative_timesteps=curriculum['step_offset']+global_step)
                     json_write(run_dir/'evaluation'/f'checkpoint_{index:02d}_full_{mode}.json',full_report)
+                    full_reports[mode] = full_report
                     for key,value in full_report['summary'].items():
                         if key != 'components': writer.add_scalar(f'evaluation_full/{mode}/{key}',value,global_step)
                 sampled_report.update(checkpoint=str(checkpoint),global_step=global_step,
@@ -360,8 +362,13 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                     'training_sps':(global_step-invocation_start_step)/training_seconds,
                     'wall_sps':(global_step-invocation_start_step)/(time.perf_counter()-start_time)})
                 writer.flush()
-                print(f'Checkpoint {index}/10: step={global_step}, eval_return={report["summary"]["episode_return"]:.2f}, '
-                      f'kills={report["summary"]["kills"]:.2f}, SPS={(global_step-invocation_start_step)/training_seconds:.0f}',flush=True)
+                print(f'Checkpoint {index}/10: step={global_step}, '
+                      f'SPS={(global_step-invocation_start_step)/training_seconds:.0f}', flush=True)
+                print('  ' + evaluation_line('stage sampled', sampled_report), flush=True)
+                print('  ' + evaluation_line('stage greedy', report), flush=True)
+                if encounter is not None:
+                    for mode in ('sampled', 'greedy'):
+                        print('  ' + evaluation_line(f'full {mode}', full_reports[mode]), flush=True)
                 if stop_after_checkpoint == index: break
         return run_dir
     finally:

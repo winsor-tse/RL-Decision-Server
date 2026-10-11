@@ -121,6 +121,28 @@ class CurriculumTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_stage_checkpoint(path, target, replace(run.ppo, gamma=.5))
 
+    def test_lower_rate_continuation_preserves_optimizer_and_resume_is_strict(self):
+        path, payload, run = self.checkpoint()
+        config = replace(run.ppo, learning_rate=.0001)
+        transferred = load_stage_checkpoint(path, payload['metadata'], config)
+        agent = RecurrentAgent(payload['metadata']['observation_scale'], 'linear')
+        agent.load_state_dict(transferred['agent'])
+        optimizer = torch.optim.Adam(agent.parameters(), lr=config.learning_rate)
+        optimizer.load_state_dict(transferred['optimizer'])
+        schedule = stage_schedule(config, source_payload=transferred,
+                                  schedule_timesteps=run.schedule_timesteps)
+        # Same assignment as train(), before any gradient update.
+        optimizer.param_groups[0]['lr'] = learning_rate(config, 1, schedule)
+        self.assertEqual(optimizer.param_groups[0]['lr'], .0001)
+        for name, value in agent.state_dict().items():
+            torch.testing.assert_close(value, payload['agent'][name], rtol=0, atol=0)
+        for state in optimizer.state.values():
+            self.assertEqual(float(state['step']), 7)
+            self.assertTrue(torch.all(state['exp_avg'] == .125))
+            self.assertTrue(torch.all(state['exp_avg_sq'] == .25))
+        with self.assertRaisesRegex(ValueError, 'Resume config must match'):
+            preflight(replace(run, ppo=config), resume=path)
+
     def test_schedule_continues_without_restarting_decay(self):
         config = PPOConfig(total_timesteps=1280, anneal_lr=True)
         first = stage_schedule(config, schedule_timesteps=10000)

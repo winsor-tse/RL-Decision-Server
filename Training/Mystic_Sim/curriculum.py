@@ -79,14 +79,15 @@ def load_stage_checkpoint(path, target_metadata, config):
         env.close()
     payload = load_checkpoint(path, source_metadata)
     validate_transfer_metadata(source_metadata, target_metadata)
-    # Keep the optimizer/schedule and PPO update contract consistent. Budget,
-    # evaluation seeds and training seed may change between explicit manual runs.
+    # Explicit continuations may change the learning rate while retaining Adam
+    # moments. train() applies the configured rate before the first PPO update.
+    # Resume remains strict; all other PPO update settings stay compatible.
     from dataclasses import asdict
     old, new = asdict(old_config), asdict(config)
-    for key in ('total_timesteps', 'seed', 'eval_seed', 'eval_episodes'):
+    for key in ('total_timesteps', 'seed', 'eval_seed', 'eval_episodes', 'learning_rate'):
         old.pop(key); new.pop(key)
     if old != new:
-        raise ValueError('Stage continuation requires matching PPO settings except budget and seeds/evaluation count')
+        raise ValueError('Stage continuation requires matching PPO settings except learning rate, budget and seeds/evaluation count')
     if (type(payload['update']) is not int or type(payload['global_step']) is not int
             or payload['update'] not in checkpoint_updates(old_config.updates)
             or payload['global_step'] != payload['update'] * old_config.batch_size):
