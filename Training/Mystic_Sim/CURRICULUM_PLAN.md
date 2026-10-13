@@ -396,3 +396,20 @@ Adam's update method was guarded to raise if any test attempted training.
 Validation: full-reset pre-change fingerprint, immutable/validated configuration,
 multi-seed legal placements, deterministic action replay, isolated worlds,
 impossible-placement rejection, stage victory and original-box respawn tests.
+
+## Implemented alternative: fixed mixture, no gates
+
+The mixed_easy_medium_hard.json config automates episode-level easy/medium/hard/full sampling using the existing PPO pipeline. It starts fresh LSTM PPO, preserves learned weights across scenarios, and resets episode memory normally. The provisional gates above are not used. Manual stage training remains available. See [MIXED_SCENARIOS.md](MIXED_SCENARIOS.md) for usage and diagnostics.
+
+TODO: assess per-scenario results across training seeds and actual transition exposure after user-run experiments. Adjust weights explicitly if needed; do not enable automatic advancement gates.
+
+
+### Implemented: EASY to MEDIUM to HARD budget-based pipeline
+
+The pipeline module now chains three configured difficulty mixtures for one million requested transitions each, without success gates. EASY uses bounded random nearby original spawn cells (2-9 path tiles for 1v1-3v1) with kill goals 1/2/3; populations of five or more use goal five. MEDIUM mixes nearest and random twenty-area tasks with easy practice. HARD mixes forty/sixty/eighty and medium practice. Sixty covers all forty areas with twenty extra occupants. Checkpoint 10 transfers all learned parameters and optimizer state. Manual commands, explicit resume, and validation-only remain supported; see MIXED_SCENARIOS.md for commands. No training experiment was launched.
+
+
+### Revised MEDIUM/HARD population distributions
+
+MEDIUM now samples 20/30/40 enemies equally; HARD samples 50/60/70/80 equally. Nearest-twenty and easier anchor episodes were removed from these two mixtures; EASY is unchanged. Up to forty uses random distinct original areas with one occupant each. Above forty uses all forty areas and randomly selected additional occupants, capped at two per area. Spawn cells remain randomized. New random_counts run directories preserve the previous results. Use a new continuation from an explicitly chosen checkpoint rather than strict resume of the previous mixture. See MIXED_SCENARIOS.md for commands.
+

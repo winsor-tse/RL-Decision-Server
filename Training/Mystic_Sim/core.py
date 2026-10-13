@@ -100,12 +100,18 @@ class SimBatch:
     Step observations are always the final pre-reset observations. Phase 7 may
     replace this adapter with subprocess workers without changing PPO targets.
     """
-    def __init__(self, count, seed, factory=make_env, recurrent=False):
+    def __init__(self, count, seed, factory=make_env, recurrent=False, sampling_states=None):
         self.envs = []
         try:
             for _ in range(count):
                 self.envs.append(factory())
-            self.observations = np.stack([e.reset(seed=seed+i)[0] for i, e in enumerate(self.envs)])
+            if sampling_states is not None:
+                if len(sampling_states) != count:
+                    raise ValueError('Sampler checkpoint must match the environment count')
+                for env, state in zip(self.envs, sampling_states):
+                    env.restore_sampling_state(state)
+            self.observations = np.stack([e.reset(seed=None if sampling_states is not None else seed+i)[0]
+                                          for i, e in enumerate(self.envs)])
             self.encounter_diagnostics = [EncounterDiagnostics(e.world) for e in self.envs]
             from .history import ObservableHistory
             self.histories = [ObservableHistory.from_env(e) for e in self.envs] if recurrent else None

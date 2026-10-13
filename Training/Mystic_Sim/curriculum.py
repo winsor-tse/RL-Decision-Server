@@ -17,7 +17,9 @@ class EncounterFactory:
         scenario_for_encounter(self.encounter)  # Fail before creating workers.
 
     def __call__(self):
-        return MysticSimEnv(config=scenario_for_encounter(self.encounter), trace=False)
+        from .nearby_areas import NearbyAreasEncounter, NearbyAreasEnv
+        env_type = NearbyAreasEnv if isinstance(self.encounter, NearbyAreasEncounter) else MysticSimEnv
+        return env_type(config=scenario_for_encounter(self.encounter), trace=False)
 
 
 # Never derive the evaluation baseline from the current training stage.
@@ -42,12 +44,22 @@ def encounter_from_dict(value):
             raise ValueError('path_distance must be a two-value array')
         values['path_distance'] = tuple(values['path_distance'])
     try:
+        if 'mixture' in values:
+            from .mixed_scenarios import mixture_from_dict
+            return mixture_from_dict(values)
+        if 'placement' in values or 'spawn_area_count' in values:
+            from .nearby_areas import NearbyAreasEncounter
+            return NearbyAreasEncounter(**values)
         return EncounterConfig(**values)
     except TypeError as exc:
         raise ValueError(f'Invalid encounter configuration: {exc}') from exc
 
 
 def encounter_factory(encounter):
+    from .mixed_scenarios import MixedEncounter, MixedScenarioEnv
+    from functools import partial
+    if isinstance(encounter, MixedEncounter):
+        return partial(MixedScenarioEnv, encounter)
     return make_env if encounter is None else EncounterFactory(encounter)
 
 

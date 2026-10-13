@@ -156,7 +156,11 @@ def evaluate(agent, seeds, *, device='cpu', record_path=None, record_stride=5,
                         recording_error = f'{type(exc).__name__}: {exc}'
                         recorder.close()
                         recorder = None
-            episodes.append({'seed': seed, **finish_metrics(metrics, info)})
+            row = {'seed': seed, **finish_metrics(metrics, info)}
+            if 'training_scenario' in info:
+                row['training_scenario'] = info['training_scenario']
+                row['scenario_kill_goal'] = info['scenario_kill_goal']
+            episodes.append(row)
             if recorder:
                 try:
                     recorder.save()

@@ -5,6 +5,10 @@
     "five_innies_tight": {"enemy_count": 5, "kill_goal": 5, "path_distance": [3, 8]},
     "ten_innies_goal5": {"enemy_count": 10, "kill_goal": 5, "path_distance": [3, 8]},
     "fifteen_innies_goal5": {"enemy_count": 15, "kill_goal": 5, "path_distance": [3, 12]},
-    "twenty_innies_goal5": {"enemy_count": 20, "kill_goal": 5, "path_distance": [3, 12]}
+    "twenty_innies_goal5": {"enemy_count": 20, "kill_goal": 5, "path_distance": [3, 12]},
+    "ten_innies_mapwide_goal5": {"enemy_count": 10, "kill_goal": 5, "path_distance": [1, 10000]},
+    "twenty_innies_mapwide_goal5": {"enemy_count": 20, "kill_goal": 5, "path_distance": [1, 10000]},
+    "thirty_innies_mapwide_goal5": {"enemy_count": 30, "kill_goal": 5, "path_distance": [1, 10000]},
+    "fourty_innies_mapwide_goal5": {"enemy_count": 40, "kill_goal": 5, "path_distance": [1, 10000]}
   }
 }

@@ -1,5 +1,6 @@
 """Evaluate frozen checkpoints across configured stages; never train."""
 import argparse
+from dataclasses import asdict
 import json
 from pathlib import Path
 
@@ -90,9 +91,7 @@ def main(argv=None):
     output = args.output or Path(data['output'])
     result = {'training_performed': False, 'seeds': seeds, 'modes': data['modes'],
               'stages': {name: (None if run.encounter is None else
-                         {'enemy_count': run.encounter.enemy_count,
-                          'kill_goal': run.encounter.kill_goal,
-                          'path_distance': list(run.encounter.path_distance)})
+                         asdict(run.encounter))
                          for name, run in runs.items()}, 'results': {}}
     for label, checkpoint, agent, factories in prepared:
         entry = {'checkpoint': str(Path(checkpoint).resolve()), 'stages': {}}

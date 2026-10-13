@@ -460,3 +460,108 @@ loop overrides the restored optimizer rate before the first update. Resume
 still requires the exact saved PPO configuration. Other PPO hyperparameter
 changes remain rejected by continuation validation. Add `--validate-only` to
 check compatibility without training.
+
+### Evaluate original spawn areas across the map
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.compare --config Training/Mystic_Sim/configs/compare_20v1_mapwide.json
+```
+
+Compares the source low-rate 10v1 checkpoint 9 and the resulting 20v1
+checkpoints 3 and 10, on map-wide 10/20-enemy scenarios and the original full
+scenario. Both modes use 100 episodes starting at seed 25000.
+
+The map-wide stages reuse the original spawn boxes and quantities, sampling
+NPC slots without replacement. `[1, 10000]` permits all reachable spawn cells
+except the player cell, removing the local-distance cap on this 100x100 map.
+This samples from original spawn areas; it does not force even spacing, populate
+every region, or reproduce the full scenario's exact reset RNG sequence.
+Respawns remain in each selected NPC's original box. The five-kill objective,
+map collisions, observations, rewards and Y-boundary rules remain unchanged.
+This evaluates placement transfer separately from increasing population to 80.
+No training is launched by this command.
+
+### Twenty Innies in the ten nearest original spawn areas
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.curriculum_run --config Training/Mystic_Sim/configs/timeout25_20v1_nearest10_areas.json
+```
+
+Continues from lower-LR 10v1 checkpoint 9 at learning rate 0.0001, retaining
+weights and Adam state, for 200,704 additional transitions (CUDA, four envs,
+seed 42). The five-kill goal, normal damage/HP, movement, cooldowns, Y rules,
+and 50-second original-area respawns remain unchanged.
+
+`placement: nearest_spawn_areas_v1` ranks original areas by shortest terrain
+path from the sampled player start to a legal non-player cell, breaking ties
+by object ID. It populates the nearest ten areas with their original quantity
+of two Innies. Spawn positions use normal legal-cell sampling throughout each
+selected rectangle. `[1, 10000]` is required as a neutral inherited field;
+there is no individual-enemy distance cap. Unselected areas stay unpopulated.
+Placement runs in a training env subclass and does not change the shared combat
+engine or invalidate existing checkpoint engine hashes. All configuration
+changes during reset are instance-local and restored before stepping.
+
+Optional frozen-policy baseline before training:
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.compare --config Training/Mystic_Sim/configs/compare_nearest10_areas.json
+```
+
+This evaluates the source on the new placement and full scenario in both modes,
+100 episodes per pairing, starting at seed 26000. Add `--validate-only` to either
+command for compatibility/reset checks without training or evaluation rollouts.
+
+### One Innie per original spawn area: 20, 30, 40
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.compare --config Training/Mystic_Sim/configs/compare_single_innie_areas.json
+```
+
+Evaluates lower-LR 10v1 checkpoint 9 on the nearest 20/30/40 original areas,
+one Innie per area, plus the unchanged full scenario. There are 100 episodes
+per stage/mode (sampled and greedy), seeds 26000–26099, matching the earlier
+nearest-ten-area evaluation bank. Results go to
+`runs/mystic_sim/comparisons/single_innie_areas.json`.
+
+`nearest_spawn_areas_single_v1` preserves terrain-path ranking and legal-cell
+sampling inside original rectangles, with one NPC assigned to each selected
+area. An area is a spawn rectangle, not a single fixed tile. At 40 areas all
+original spawn areas are represented, with half the full population. Each NPC
+respawns in its assigned area after 50 seconds; a second NPC is not added.
+Normal combat stats, training boundaries and the five-kill goal remain intact.
+The existing two-per-area mode remains unchanged. These are initial placement
+rules: NPC movement and deaths can leave areas temporarily empty.
+
+Stage definitions are in `single_innie_area_stages.json`; evaluate first before
+choosing whether and which stage to train. This comparison never trains.
+
+### Direct map-wide transfer: twenty random distinct areas
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.curriculum_run --config Training/Mystic_Sim/configs/timeout25_twenty_random_areas_single_goal5_400k.json
+```
+
+Starts from the original lower-LR 10v1 checkpoint 9, retaining learned weights
+and Adam state. Uses learning rate 0.0001, seed 42, four environments, CUDA,
+and 400,384 actual transitions (400,000 requested, rounded to rollout batches).
+Ten checkpoints include sampled/greedy evaluations and original full-scenario
+evaluations. Rewards, five-kill goal, Y limits and normal combat stats are unchanged.
+
+`random_spawn_areas_single_v1` uniformly samples 20 distinct reachable original
+spawn areas without replacement each reset, without a nearest-area preference.
+One Innie is placed normally within each chosen rectangle and respawns in that
+same area after 50 seconds. Areas are not reselected on an NPC death. This
+allows map-wide coverage but does not guarantee even geographical spacing.
+Selection uses the environment's seeded RNG; the nearest-area modes are unchanged.
+
+Optional 100-episode source baseline on the random-area task and full scenario:
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.compare --config Training/Mystic_Sim/configs/compare_twenty_random_areas_baseline.json
+```
+
+## Mixed-scenario training without gates
+
+See [MIXED_SCENARIOS.md](MIXED_SCENARIOS.md) for the fresh LSTM PPO config, command, episode probabilities, per-scenario evaluations, and resume behavior. Manual stage configs remain supported.
+

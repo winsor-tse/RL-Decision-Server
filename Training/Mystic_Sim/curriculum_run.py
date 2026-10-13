@@ -97,9 +97,10 @@ def load_run_config(path, stage=None):
     runtime = data.get('runtime', {})
     if not isinstance(runtime, dict) or set(runtime) - {
             'device', 'run_dir', 'record_gameplay', 'record_stride', 'torch_threads',
-            'stop_after_checkpoint'}:
+            'stop_after_checkpoint', 'record_from_checkpoint', 'evaluate_full_scenario'}:
         raise ValueError('Unknown runtime configuration fields')
-    runtime = dict(device='auto', record_gameplay=True, record_stride=5, torch_threads=1) | runtime
+    runtime = dict(device='auto', record_gameplay=True, record_stride=5, torch_threads=1,
+                   record_from_checkpoint=1, evaluate_full_scenario=True) | runtime
     if runtime['device'] not in ('auto', 'cpu', 'cuda'):
         raise ValueError('device must be auto, cpu or cuda')
     for name in ('record_stride', 'torch_threads'):
@@ -107,6 +108,11 @@ def load_run_config(path, stage=None):
             raise ValueError(f'{name} must be a positive integer')
     if type(runtime['record_gameplay']) is not bool:
         raise ValueError('record_gameplay must be boolean')
+    if type(runtime['evaluate_full_scenario']) is not bool:
+        raise ValueError('evaluate_full_scenario must be boolean')
+    first = runtime['record_from_checkpoint']
+    if type(first) is not int or not 1 <= first <= 10:
+        raise ValueError('record_from_checkpoint must be in 1..10')
     stop = runtime.get('stop_after_checkpoint')
     if stop is not None and (type(stop) is not int or not 1 <= stop <= 10):
         raise ValueError('stop_after_checkpoint must be in 1..10')
@@ -151,10 +157,25 @@ def preflight(run, *, resume=None, continue_from=None):
         # Only reset: there are no rollout steps, agent construction or optimizer calls.
         for seed in training_seeds:
             env.reset(seed=seed)
+        # A random reset sample need not select every mixture member. Validate
+        # each member's geometry explicitly without collecting any transitions.
+        from .mixed_scenarios import MixedEncounter
+        if isinstance(run.encounter, MixedEncounter):
+            schedule['mode'] = 'fixed_episode_mixture'
+            total_weight = sum(c.weight for c in run.encounter.mixture)
+            schedule['episode_probabilities'] = {c.name: c.weight/total_weight for c in run.encounter.mixture}
+            for choice in run.encounter.mixture:
+                member = encounter_factory(choice.encounter)()
+                try:
+                    member.reset(seed=initial_seed)
+                finally:
+                    member.close()
         return {'stage': run.stage, 'encounter': contract['scenario']['encounter'],
                 'local_timesteps': run.ppo.updates * run.ppo.batch_size,
                 'schedule': schedule, 'evaluation_seeds': list(evaluation_seeds),
-                'full_scenario_evaluation': True, 'automatic_advancement': False}
+                'full_scenario_evaluation': run.runtime['evaluate_full_scenario'],
+                'record_from_checkpoint': run.runtime['record_from_checkpoint'],
+                'automatic_advancement': False}
     finally:
         env.close()
 

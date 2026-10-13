@@ -23,6 +23,7 @@ from .core import (Agent, PPOConfig, SimBatch, accumulate, advantages, checkpoin
 from .evaluate import evaluate, evaluation_line
 from .recurrent import RecurrentAgent, optimize_recurrent
 from .core import saved_config
+from .mixed_scenarios import MixedEncounter
 from .encounter_diagnostics import METRICS as ENCOUNTER_METRICS
 from .curriculum import (encounter_factory, encounter_from_dict, load_stage_checkpoint,
                          stage_schedule, learning_rate)
@@ -102,13 +103,32 @@ def log_episode(writer, row, step, episodes, wins):
         writer.add_scalar(f'rewards/episode_{key}', value, step)
 
 
+def checkpoint_recordings(run_dir, index, enabled, first_checkpoint):
+    if not enabled or index < first_checkpoint:
+        return None, None
+    return (run_dir/'gameplay'/f'checkpoint_{index:02d}.gif',
+            run_dir/'gameplay'/f'checkpoint_{index:02d}_sampled.gif')
+
+
+def full_evaluations(agent, seeds, *, enabled, encounter, device, stage_reports):
+    if not enabled:
+        return {}
+    return {mode: (evaluate(agent,seeds,device=device,stochastic=mode=='sampled',factory=make_env)
+                   if encounter is not None else dict(report))
+            for mode,report in stage_reports.items()}
+
+
 def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=True,
           record_stride=5, stop_after_checkpoint=None, encounter=None, continue_from=None,
-          schedule_timesteps=None):
+          schedule_timesteps=None, record_from_checkpoint=1, evaluate_full_scenario=True):
     if resume and continue_from:
         raise ValueError('Choose resume or continue_from, not both')
     if device not in ('auto','cpu','cuda'): raise ValueError('device must be auto, cpu, or cuda')
     if record_stride < 1: raise ValueError('record_stride must be positive')
+    if type(record_from_checkpoint) is not int or not 1 <= record_from_checkpoint <= 10:
+        raise ValueError('record_from_checkpoint must be in 1..10')
+    if type(evaluate_full_scenario) is not bool:
+        raise ValueError('evaluate_full_scenario must be boolean')
     if stop_after_checkpoint is not None and not 1 <= stop_after_checkpoint <= 10:
         raise ValueError('stop_after_checkpoint must be in 1..10')
     resolved_device = 'cuda' if device == 'auto' and torch.cuda.is_available() else 'cpu' if device == 'auto' else device
@@ -122,6 +142,7 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
             raise ValueError('Resume cannot change encounter; use stage continuation in a new run')
         encounter = saved_encounter
     factory = make_env if encounter is None else encounter_factory(encounter)
+    choices = encounter.mixture if isinstance(encounter, MixedEncounter) else ()
     probe = factory()
     try:
         contract = metadata(probe, recurrent=config.recurrent, actor_head=config.actor_head)
@@ -137,6 +158,9 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                                 schedule_timesteps=schedule_timesteps)
     if continue_from:
         curriculum['source_checkpoint'] = str(Path(continue_from).resolve())
+    if choices:
+        curriculum['mode'] = 'fixed_episode_mixture'
+        curriculum['episode_probabilities'] = {c.name: c.weight / sum(x.weight for x in choices) for c in choices}
     schedule = checkpoint_updates(config.updates)
     completed = payload['update'] if payload else 0
     if payload and (completed not in schedule or payload['global_step'] != completed*config.batch_size):
@@ -176,6 +200,8 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                     'checkpoint_steps': {str(i): u*config.batch_size for u,i in schedule.items()},
                     'resume_from': str(Path(resume).resolve()) if resume else None,
                     'record_gameplay': record_gameplay, 'record_stride': record_stride,
+                    'record_from_checkpoint': record_from_checkpoint,
+                    'evaluate_full_scenario': evaluate_full_scenario,
                     'curriculum': curriculum,
                     'torch': str(torch.__version__), 'batch_backend': 'synchronous_independent_worlds'}
     # Preserve the original manifest across continuation; each invocation records its settings.
@@ -201,7 +227,8 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
             if key != 'components': writer.add_scalar(f'baseline/{key}', value, global_step)
         # Fresh deterministic episode seeds on resume; simulator world snapshots are not claimed.
         batch = SimBatch(config.num_envs, config.seed + completed*config.num_envs,
-                         factory=factory, recurrent=config.recurrent)
+                         factory=factory, recurrent=config.recurrent,
+                         sampling_states=payload.get('scenario_sampler_states') if payload and choices else None)
         running = [episode_metrics() for _ in batch.envs]
         shape = (config.num_steps,config.num_envs)
         obs_buffer = torch.empty((*shape,len(observation_high)),device=resolved_device)
@@ -222,6 +249,8 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
             cast_count = invalid_count = collision_count = cooldown_count = 0
             failure_counts = Counter()
             successful_moves = 0
+            scenario_steps = Counter()
+            scenario_episodes = Counter()
             before = nn.utils.parameters_to_vector(agent.parameters()).detach().clone()
             agent.train()
             for t in range(config.num_steps):
@@ -255,6 +284,9 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                 global_step += config.num_envs
                 action_counts += np.bincount(cpu_actions,minlength=len(ACTIONS))
                 for i,info in enumerate(infos):
+                    scenario_name = info.get('training_scenario')
+                    if scenario_name:
+                        scenario_steps[scenario_name] += 1
                     accumulate(running[i],int(cpu_actions[i]),reward[i],info)
                     for key in COMPONENTS: component_sums[key] += info['reward_components'][key]
                     cast_count += int(cpu_actions[i]>=4)
@@ -269,6 +301,10 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                         episodes += 1
                         wins += int(row['win'])
                         log_episode(writer,row,global_step,episodes,wins)
+                        if scenario_name:
+                            scenario_episodes[scenario_name] += 1
+                            for metric in ('win', 'episode_return', 'kills', 'length'):
+                                writer.add_scalar(f'training_scenarios/{scenario_name}/{metric}', row[metric], global_step)
                         running[i] = episode_metrics()
             with torch.no_grad():
                 # Only learning targets use scaled rewards. Environment, episode,
@@ -288,6 +324,11 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
             if not math.isfinite(parameter_delta): raise FloatingPointError('Nonfinite PPO parameters')
             training_seconds += time.perf_counter()-update_start
             for key,value in losses.items(): writer.add_scalar(f'losses/{key}',value,global_step)
+            for choice in choices:
+                writer.add_scalar(f'training_scenarios/{choice.name}/completed_episodes',
+                                  scenario_episodes[choice.name], global_step)
+                writer.add_scalar(f'training_scenarios/{choice.name}/transition_fraction',
+                                  scenario_steps[choice.name]/config.batch_size, global_step)
             writer.add_scalar('charts/parameter_delta',parameter_delta,global_step)
             writer.add_scalar('charts/learning_rate',lr,global_step)
             writer.add_scalar('curriculum/cumulative_timesteps',curriculum['step_offset']+global_step,global_step)
@@ -311,31 +352,46 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                 atomic_torch_save({'format':'mystic_sim_ppo_v2','metadata':contract,
                     'ppo_config':asdict(config),'agent':agent.state_dict(),'optimizer':optimizer.state_dict(),
                     'update':update,'global_step':global_step,'rng':capture_rng_state(),
-                    'episodes':episodes,'wins':wins,'curriculum':curriculum},checkpoint)
+                    'episodes':episodes,'wins':wins,'curriculum':curriculum,
+                    'scenario_sampler_states': [e.sampling_state() for e in batch.envs] if choices else None},checkpoint)
                 agent.eval()
-                recording = run_dir/'gameplay'/f'checkpoint_{index:02d}.gif' if record_gameplay else None
+                recording, sampled_recording = checkpoint_recordings(
+                    run_dir,index,record_gameplay,record_from_checkpoint)
                 report = evaluate(agent,seeds,device=resolved_device,record_path=recording,
                                   record_stride=record_stride,factory=factory)
-                sampled_recording = run_dir/'gameplay'/f'checkpoint_{index:02d}_sampled.gif' if record_gameplay else None
                 sampled_report = evaluate(agent,seeds,device=resolved_device,record_path=sampled_recording,
                                           record_stride=record_stride,stochastic=True,factory=factory)
                 # The original environment stays an independent comparison even
                 # while a selected easier encounter is being trained.
-                full_reports = {}
-                for mode, stage_report in (('greedy', report), ('sampled', sampled_report)):
-                    full_report = (evaluate(agent,seeds,device=resolved_device,
-                                            stochastic=mode=='sampled',factory=make_env)
-                                   if encounter is not None else dict(stage_report))
+                full_reports = full_evaluations(agent,seeds,enabled=evaluate_full_scenario,
+                    encounter=encounter,device=resolved_device,
+                    stage_reports={'greedy':report,'sampled':sampled_report})
+                for mode, full_report in full_reports.items():
                     full_report.update(checkpoint=str(checkpoint),global_step=global_step,
                                        scenario='full',cumulative_timesteps=curriculum['step_offset']+global_step)
                     json_write(run_dir/'evaluation'/f'checkpoint_{index:02d}_full_{mode}.json',full_report)
-                    full_reports[mode] = full_report
                     for key,value in full_report['summary'].items():
                         if key != 'components': writer.add_scalar(f'evaluation_full/{mode}/{key}',value,global_step)
                 sampled_report.update(checkpoint=str(checkpoint),global_step=global_step,
                                       encounter=contract['scenario'].get('encounter'),
                                       cumulative_timesteps=curriculum['step_offset']+global_step)
                 json_write(run_dir/'evaluation'/f'checkpoint_{index:02d}_sampled.json',sampled_report)
+                # Evaluate every mixture member separately: aggregate success can
+                # hide failure on hard encounters. These reports never gate training.
+                for choice in choices:
+                    if choice.encounter is None and not evaluate_full_scenario:
+                        continue
+                    for mode in ('sampled', 'greedy'):
+                        member_report = (dict(full_reports[mode]) if choice.encounter is None else
+                                         evaluate(agent,seeds,device=resolved_device,
+                                                  stochastic=mode=='sampled',factory=encounter_factory(choice.encounter)))
+                        member_report.update(checkpoint=str(checkpoint),global_step=global_step,
+                                             scenario=choice.name,encounter=asdict(choice.encounter) if choice.encounter else None)
+                        json_write(run_dir/'evaluation'/f'checkpoint_{index:02d}_scenario_{choice.name}_{mode}.json',member_report)
+                        for key,value in member_report['summary'].items():
+                            if key != 'components':
+                                writer.add_scalar(f'evaluation_scenarios/{choice.name}/{mode}/{key}',value,global_step)
+                        print('  ' + evaluation_line(f'{choice.name} {mode}',member_report),flush=True)
                 for mode, evaluation in (('greedy', report), ('sampled', sampled_report)):
                     for key,value in evaluation['summary'].items():
                         if key != 'components': writer.add_scalar(f'evaluation/{mode}/{key}',value,global_step)
@@ -366,7 +422,7 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                       f'SPS={(global_step-invocation_start_step)/training_seconds:.0f}', flush=True)
                 print('  ' + evaluation_line('stage sampled', sampled_report), flush=True)
                 print('  ' + evaluation_line('stage greedy', report), flush=True)
-                if encounter is not None:
+                if encounter is not None and full_reports:
                     for mode in ('sampled', 'greedy'):
                         print('  ' + evaluation_line(f'full {mode}', full_reports[mode]), flush=True)
                 if stop_after_checkpoint == index: break
@@ -390,6 +446,8 @@ def main(argv=None):
     parser.add_argument('--resume',type=Path,help='Restore saved hyperparameters/optimizer/RNG; fresh simulator episodes')
     parser.add_argument('--record-gameplay',action=argparse.BooleanOptionalAction,default=True)
     parser.add_argument('--record-stride',type=int,default=5,help='Record every N decisions; 5 = one frame per simulated second')
+    parser.add_argument('--record-from-checkpoint',type=int,default=1)
+    parser.add_argument('--evaluate-full-scenario',action=argparse.BooleanOptionalAction,default=True)
     parser.add_argument('--torch-threads',type=int,default=1)
     parser.add_argument('--stop-after-checkpoint',type=int,help='Stop cleanly after checkpoint 1..10; resume later')
     args = parser.parse_args(argv)
@@ -398,6 +456,7 @@ def main(argv=None):
     config = PPOConfig(**{field.name:getattr(args,field.name) for field in fields(defaults)})
     train(config,run_dir=args.run_dir,device=args.device,resume=args.resume,
           record_gameplay=args.record_gameplay,record_stride=args.record_stride,
+          record_from_checkpoint=args.record_from_checkpoint,evaluate_full_scenario=args.evaluate_full_scenario,
           stop_after_checkpoint=args.stop_after_checkpoint)
 
 

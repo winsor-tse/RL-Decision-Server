@@ -20,6 +20,7 @@ Simulation/Source-Code
 runs/
 logs/
 wandb/
+/Training/Mystic_Sim/configs/
 *.pt
 *.pth
 *.onnx
