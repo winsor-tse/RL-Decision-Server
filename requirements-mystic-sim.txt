@@ -1,0 +1,8 @@
+# Standalone simulator/PPO dependencies; no live server, cloud, BC or Minari stack.
+# Install the appropriate CPU/CUDA PyTorch build first (see FULL_TRAINING.md).
+torch>=2.9,<3
+numpy>=2.2,<3
+gymnasium>=1.2,<2
+tensorboard>=2.20,<3
+pygame-ce>=2.5.8,<3
+Pillow>=11,<13

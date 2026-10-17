@@ -162,7 +162,7 @@ class CombatTests(unittest.TestCase):
         self.assertIsNone(npc.aggro_target)
         env.engine.regenerate()
         self.assertEqual(p.hp,0)
-        result=env.step(4)
+        result=env.advance_idle()
         self.assertTrue(result[2])
         self.assertEqual(result[4]['episode_outcome'],'loss')
 
@@ -191,20 +191,18 @@ class CombatTests(unittest.TestCase):
         self.assertEqual(combat.regen_amount(0,100,0),2) # C# midpoint-to-even
         self.assertEqual(combat.regen_amount(0,140,0),4)
 
-    def test_gear_disabled_and_enabled_attack_cadence(self):
+    def test_melee_helpers_are_not_policy_actions(self):
         env,w,p,npc=self.scene()
         rng=ScriptedRng([]);env.engine.rng=rng
-        self.assertEqual(env.step(4)[4]['action_failure_reason'],'gear_disabled')
+        self.assertEqual(env.advance_idle()[4]['action_failure_reason'],'viewer_idle')
         self.assertEqual(rng.calls,[])
         cfg=ScenarioConfig(gear_enabled=True,gear=GearConfig(100,1000))
         env,w,p,npc=self.scene(cfg)
         rng=ScriptedRng([False,True,False]);env.engine.rng=rng
-        result=env.step(4)
-        self.assertTrue(result[4]['action_applied'])
-        self.assertTrue(result[4]['damage_events'][0]['crit'])
+        # Keep combat math coverage; player melee is no longer a selectable action.
+        env.engine.melee_attack(p,npc)
+        self.assertTrue(env.engine.damage_events[0].crit)
         self.assertEqual([r[0] for r in rng.calls],['dodge','melee_crit','block'])
-        self.assertEqual(p.next_attack_ms,1000)
-        self.assertEqual(env.step(4)[4]['action_failure_reason'],'cooldown')
         with self.assertRaises(ValueError): ScenarioConfig(gear_enabled=True)
         with self.assertRaises(ValueError): ScenarioConfig(gear=object())
         with self.assertRaises(ValueError): ScenarioConfig(gear=GearConfig(100,1000))

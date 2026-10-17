@@ -1,0 +1,10 @@
+{
+  "extends": "three_innies_from_one.json",
+  "stage": "three_innies_tight",
+  "stages": {
+    "three_innies_tight": {"enemy_count": 3, "kill_goal": 3, "path_distance": [3, 8]}
+  },
+  "runtime": {
+    "run_dir": "runs/mystic_sim/curriculum/{stage}_from_one_cp08_seed{seed}"
+  }
+}

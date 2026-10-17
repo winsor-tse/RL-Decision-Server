@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "stage_config": "comparison_stages.json",
+  "stages": ["ten_innies_goal5", "full"],
+  "policies": {
+    "4v1_cp10": "runs/mystic_sim/curriculum/timeout25_4v1_from_3v1_cp09_seed42/checkpoints/checkpoint_10.pt",
+    "5v1_cp08": "runs/mystic_sim/curriculum/timeout25_5v1_from_4v1_cp10_seed42/checkpoints/checkpoint_08.pt"
+  },
+  "episodes": 30,
+  "seed": 22000,
+  "modes": ["sampled", "greedy"],
+  "device": "cpu",
+  "output": "runs/mystic_sim/comparisons/4v1_vs_5v1.json"
+}

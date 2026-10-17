@@ -153,11 +153,11 @@ class SpellTests(unittest.TestCase):
             w.player.mp = w.player.max_mp
             self.assertTrue(engine.cast(slot)[0])
             env,w,engine = self.scene((), rolls=[False]*10) if slot == 2 else self.scene(rolls=[False]*10)
-            self.assertTrue(env.step(slot+4)[4]['action_applied'])
+            self.assertTrue(env.step(slot+3)[4]['action_applied'])
             while w.time_ms < boundary:
-                self.assertFalse(env.step(slot+4)[4]['action_applied'])
+                self.assertFalse(env.step(slot+3)[4]['action_applied'])
             w.player.mp = w.player.max_mp
-            self.assertTrue(env.step(slot+4)[4]['action_applied'])
+            self.assertTrue(env.step(slot+3)[4]['action_applied'])
             self.assertEqual(engine.cast_events[0].time_ms,boundary)
 
     def test_arcane_is_single_target_and_block_mitigates(self):
@@ -187,12 +187,12 @@ class SpellTests(unittest.TestCase):
 
     def test_global_cooldown_decision_boundary_movement_and_reset(self):
         env,w,engine=self.scene(rolls=[False]*4)
-        result=env.step(5)
+        result=env.step(4)
         self.assertEqual(result[4]['cooldowns']['global_ready_at_ms'],300)
-        result=env.step(6)  # Attempt at 200 ms, before deadline.
+        result=env.step(5)  # Attempt at 200 ms, before deadline.
         self.assertEqual(result[4]['action_failure_reason'],'global_cooldown')
         self.assertEqual(w.player.cooldowns.global_ready_at_ms,300)
-        self.assertTrue(env.step(6)[4]['action_applied'])  # Attempt at 400 ms.
+        self.assertTrue(env.step(5)[4]['action_applied'])  # Attempt at 400 ms.
         self.assertEqual(w.player.cooldowns.global_ready_at_ms,700)
         self.assertTrue(env.step(0)[4]['action_applied'])  # Movement at 600 ms is legal.
         env.reset(seed=42)
@@ -363,8 +363,8 @@ class SpellTests(unittest.TestCase):
         cast_count=tick_count=0
         with patch('builtins.open',side_effect=AssertionError('runtime file access')):
             for i in range(100):
-                action=[6,5,7,4][i%4]
-                ra,rb=a.step(action),b.step(action)
+                action=[5,4,6,None][i%4]
+                ra,rb=(a.advance_idle(),b.advance_idle()) if action is None else (a.step(action),b.step(action))
                 assert_array_equal(ra[0],rb[0])
                 self.assertEqual(ra[1:],rb[1:])
                 self.assertEqual(a.world,b.world)

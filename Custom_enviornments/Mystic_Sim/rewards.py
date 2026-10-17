@@ -14,7 +14,7 @@ def collision_penalty(world, config):
 
 def cooldown_penalty(config, action, failure_reason):
     # SIM ONLY: use the rejection at action time, not deadlines after advance().
-    if action in (5, 6, 7) and failure_reason in ("cooldown", "family_cooldown", "global_cooldown"):
+    if action in (4, 5, 6) and failure_reason in ("cooldown", "family_cooldown", "global_cooldown"):
         return -config.cooldown_attempt_penalty
     return 0.0
 
@@ -32,7 +32,7 @@ def episode_status(world, config):
 
 
 def calculate(world, config, previous_obs, obs, action, damage_events, death_events, outcome,
-              *, failure_reason=None):
+              *, failure_reason=None, end_reason=None):
     parts = empty_components()
     player = world.player
     taken = sum(e.damage / player.max_hp for e in damage_events if e.target_id == player.entity_id)
@@ -63,10 +63,12 @@ def calculate(world, config, previous_obs, obs, action, damage_events, death_eve
     # SIM ONLY: dense progress reward for each confirmed kill, including kills
     # 1-4 before the goal. Use this step's death events, never cumulative kills.
     parts["killed"] = config.kill_bonus * killed
-    # SIM ONLY: explicit episode outcomes award the win/loss bonus once. A time
-    # limit or Y-boundary truncation is not a death and receives neither bonus.
+    # SIM ONLY: explicit episode outcomes are charged once; the env requires
+    # reset after this transition. A timeout stays truncated (PPO bootstraps it).
+    # Win/death take priority; Y exits retain their separate positioning penalties.
     parts["terminal"] = (config.win_bonus if outcome == "win" else
-                         -config.death_penalty if outcome == "loss" else 0.0)
+                         -config.death_penalty if outcome == "loss" else
+                         -config.timeout_penalty if outcome == "truncated" and end_reason == "step_limit" else 0.0)
     parts["positioning"] += collision_penalty(world, config)
     # Preserve dashboard components; unsuccessful action costs live in positioning.
     parts["positioning"] += cooldown_penalty(config, action, failure_reason)

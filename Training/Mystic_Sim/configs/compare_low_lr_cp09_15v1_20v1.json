@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "stage_config": "comparison_stages.json",
+  "stages": ["fifteen_innies_goal5", "twenty_innies_goal5"],
+  "policies": {
+    "10v1_low_lr_cp09": "runs/mystic_sim/curriculum/timeout25_10v1_goal5_from_cp07_lr1e4_seed42/checkpoints/checkpoint_09.pt"
+  },
+  "episodes": 100,
+  "seed": 24000,
+  "modes": ["sampled", "greedy"],
+  "device": "cpu",
+  "output": "runs/mystic_sim/comparisons/low_lr_cp09_15v1_20v1.json"
+}
