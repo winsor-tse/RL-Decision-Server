@@ -274,10 +274,8 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                         # Bootstrap from FINAL state with pre-reset memory. Do not
                         # commit this lookahead state: next rollout step consumes
                         # that observation once, or masks memory after autoreset.
-                        _, bootstrap, _, _ = agent.sequence(
-                            torch.as_tensor(final_obs,device=resolved_device).unsqueeze(0),
-                            recurrent_state, torch.zeros((1,config.num_envs),dtype=torch.bool,device=resolved_device))
-                        next_values[t] = bootstrap[0]
+                        next_values[t] = agent.bootstrap_value(
+                            torch.as_tensor(final_obs,device=resolved_device),recurrent_state)
                         episode_starts = terminated[t] | truncated[t]
                     else:
                         next_values[t] = agent.value(torch.as_tensor(final_obs,device=resolved_device))
@@ -306,6 +304,8 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
                             for metric in ('win', 'episode_return', 'kills', 'length'):
                                 writer.add_scalar(f'training_scenarios/{scenario_name}/{metric}', row[metric], global_step)
                         running[i] = episode_metrics()
+            rollout_seconds = time.perf_counter()-update_start
+            optimization_start = time.perf_counter()
             with torch.no_grad():
                 # Only learning targets use scaled rewards. Environment, episode,
                 # evaluation and reward-component metrics remain in original units.
@@ -323,6 +323,8 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
             parameter_delta = float((nn.utils.parameters_to_vector(agent.parameters()).detach()-before).norm())
             if not math.isfinite(parameter_delta): raise FloatingPointError('Nonfinite PPO parameters')
             training_seconds += time.perf_counter()-update_start
+            writer.add_scalar('charts/SPS_rollout',config.batch_size/rollout_seconds,global_step)
+            writer.add_scalar('charts/optimization_seconds',time.perf_counter()-optimization_start,global_step)
             for key,value in losses.items(): writer.add_scalar(f'losses/{key}',value,global_step)
             for choice in choices:
                 writer.add_scalar(f'training_scenarios/{choice.name}/completed_episodes',
@@ -432,9 +434,9 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
         writer.close()
 
 
-def main(argv=None):
+def main(argv=None, *, defaults=None, record_from_checkpoint=1, run_root=None, full_only=False):
     parser = argparse.ArgumentParser(description=__doc__)
-    defaults = PPOConfig()
+    defaults = defaults if defaults is not None else PPOConfig()
     for field in fields(defaults):
         default = getattr(defaults,field.name)
         options = {'action':argparse.BooleanOptionalAction} if isinstance(default,bool) else {
@@ -446,15 +448,57 @@ def main(argv=None):
     parser.add_argument('--resume',type=Path,help='Restore saved hyperparameters/optimizer/RNG; fresh simulator episodes')
     parser.add_argument('--record-gameplay',action=argparse.BooleanOptionalAction,default=True)
     parser.add_argument('--record-stride',type=int,default=5,help='Record every N decisions; 5 = one frame per simulated second')
-    parser.add_argument('--record-from-checkpoint',type=int,default=1)
+    parser.add_argument('--record-from-checkpoint',type=int,default=record_from_checkpoint)
     parser.add_argument('--evaluate-full-scenario',action=argparse.BooleanOptionalAction,default=True)
     parser.add_argument('--torch-threads',type=int,default=1)
     parser.add_argument('--stop-after-checkpoint',type=int,help='Stop cleanly after checkpoint 1..10; resume later')
+    parser.add_argument('--validate-only',action='store_true',help='Check settings, map/reset and checkpoint without training or writing run files')
     args = parser.parse_args(argv)
     if args.torch_threads < 1: parser.error('--torch-threads must be positive')
     torch.set_num_threads(args.torch_threads)
     config = PPOConfig(**{field.name:getattr(args,field.name) for field in fields(defaults)})
-    train(config,run_dir=args.run_dir,device=args.device,resume=args.resume,
+    if run_root is not None:
+        run_root = Path(run_root).resolve()
+        if args.resume is not None: args.resume = (run_root/args.resume).resolve()
+        if args.run_dir is not None: args.run_dir = (run_root/args.run_dir).resolve()
+        elif args.resume is None:
+            args.run_dir = run_root/'runs'/'mystic_sim'/'full'/(
+                datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')+f'_seed{config.seed}_{uuid.uuid4().hex[:6]}')
+    if full_only or args.validate_only:
+        raw = torch.load(args.resume,map_location='cpu',weights_only=True) if args.resume else None
+        if raw:
+            config = saved_config(raw)
+        encounter = encounter_from_dict(raw['metadata']['scenario'].get('encounter')) if raw else None
+        if full_only and encounter is not None:
+            parser.error('This launcher trains the original full scenario; a curriculum checkpoint cannot be resumed here')
+        config.validate()
+        if args.device=='cuda' and not torch.cuda.is_available():
+            parser.error('CUDA requested but unavailable; install CUDA-enabled PyTorch or use --device cpu')
+        if args.record_stride < 1 or not 1 <= args.record_from_checkpoint <= 10:
+            parser.error('record-stride must be positive; record-from-checkpoint must be in 1..10')
+        if args.stop_after_checkpoint is not None and not 1 <= args.stop_after_checkpoint <= 10:
+            parser.error('stop-after-checkpoint must be in 1..10')
+        env = encounter_factory(encounter)()
+        try:
+            if raw:
+                payload = load_checkpoint(args.resume,metadata(env,recurrent=config.recurrent,actor_head=config.actor_head))
+                if payload['update'] >= config.updates:
+                    parser.error('Checkpoint already completed its training budget')
+            env.reset(seed=config.seed)
+            report = {'scenario':'full' if encounter is None else encounter.stage_id,
+                      'enemy_count':len(env.world.monsters),'kill_goal':env.reward_config.win_kills,
+                      'max_episode_steps':env.reward_config.max_episode_steps,
+                      'initialization':'resume' if raw else 'fresh','ppo_config':asdict(config),
+                      'actual_timesteps':config.updates*config.batch_size,
+                      'run_dir':str(args.run_dir or args.resume.resolve().parent.parent) if args.run_dir or args.resume else None,
+                      'record_from_checkpoint':args.record_from_checkpoint,
+                      'device':('cuda' if torch.cuda.is_available() else 'cpu') if args.device=='auto' else args.device}
+        finally:
+            env.close()
+        print(json.dumps(report,indent=2),flush=True)
+        if args.validate_only:
+            return report
+    return train(config,run_dir=args.run_dir,device=args.device,resume=args.resume,
           record_gameplay=args.record_gameplay,record_stride=args.record_stride,
           record_from_checkpoint=args.record_from_checkpoint,evaluate_full_scenario=args.evaluate_full_scenario,
           stop_after_checkpoint=args.stop_after_checkpoint)

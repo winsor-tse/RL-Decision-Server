@@ -36,9 +36,14 @@ class RecurrentBranch(nn.Module):
     def forward(self, observations, state, starts):
         embedded = self.network(observations)
         outputs = []
-        for embedding, start in zip(embedded, starts):
-            mask = (~start.bool()).to(embedding.dtype).view(1, -1, 1)
-            output, state = self.lstm(embedding.unsqueeze(0), tuple(x * mask for x in state))
+        # Execute contiguous spans in one LSTM call, splitting only where an
+        # environment resets. Chronology and reset gradient barriers are unchanged.
+        # Single-step rollout inference avoids any device-to-host reset scan.
+        boundaries = ([0, len(embedded)] if len(embedded)==1 else
+                      sorted({0, len(embedded), *starts.any(dim=1).nonzero().flatten().tolist()}))
+        for begin, end in zip(boundaries, boundaries[1:]):
+            mask = (~starts[begin].bool()).to(embedded.dtype).view(1, -1, 1)
+            output, state = self.lstm(embedded[begin:end], tuple(x * mask for x in state))
             outputs.append(output)
         if self.head_type == 'linear':
             hidden = torch.cat(outputs)
@@ -75,6 +80,16 @@ class RecurrentAgent(nn.Module):
         distribution = Categorical(logits=logits[0])
         action = distribution.sample() if action is None else action
         return action, distribution.log_prob(action), distribution.entropy(), value[0], state
+
+    def bootstrap_value(self, obs, state):
+        """Final-state critic lookahead without evaluating the unused actor.
+
+        Caller retains its original recurrent state: this does not commit the
+        lookahead, and timeout bootstrap still uses pre-reset episode memory.
+        """
+        starts = torch.zeros((1,obs.shape[0]),dtype=torch.bool,device=obs.device)
+        value, _, _ = self.critic((obs/self.observation_scale).unsqueeze(0),state[2:],starts)
+        return value[0,:,0]
 
 
 def recurrent_minibatches(num_steps, num_minibatches):

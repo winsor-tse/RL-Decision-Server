@@ -565,3 +565,8 @@ Optional 100-episode source baseline on the random-area task and full scenario:
 
 See [MIXED_SCENARIOS.md](MIXED_SCENARIOS.md) for the fresh LSTM PPO config, command, episode probabilities, per-scenario evaluations, and resume behavior. Manual stage configs remain supported.
 
+
+## Standalone full-scenario training (no curriculum config)
+
+Use python -m Training.Mystic_Sim.train_full or Train_Mystic_Full.bat for fresh 1v80 LSTM PPO with three million requested transitions. See [FULL_TRAINING.md](FULL_TRAINING.md) for portable setup, CLI overrides, validation, resume, and TensorBoard commands. Curriculum JSON workflows remain available separately.
+
