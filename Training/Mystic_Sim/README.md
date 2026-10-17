@@ -74,7 +74,49 @@ boundaries, but inference memory persists across blocks and rollout updates.
 Saved boundary states are detached rollout-policy states, as in the server;
 there is no burn-in or full-episode recurrent-state recomputation after updates.
 
-**Observable history:** the Gym environment retains its 26-value contract.
+**Base observation: 26-value contract (`mystic-26-v1`).** Both `reset()` and
+`step()` return a `float32` array with shape `(26,)`, encoded by
+[`encode_observation`](../../Custom_enviornments/Mystic_Sim/observation.py).
+Indices are zero-based. These are raw Gym values on the current 100 x 100 map53,
+before policy normalization.
+
+| Index | Value | Raw bounds / meaning |
+|---|---|---|
+| 0 | Player X | 0-99, absolute tile coordinate |
+| 1 | Player Y | 0-99, absolute tile coordinate; increasing Y points down |
+| 2 | Player facing | 0-4, direction codes below |
+| 3 | Player HP fraction | 0-1, current HP / maximum HP |
+| 4 | Player MP fraction | 0-1, current MP / maximum MP |
+| 5 | Map ID | Box bounds 0-53; current map emits 53 |
+| 6, 7, 8, 9 | Nearest enemy: distance, direction, HP fraction, MP fraction | 0-198, 0-4, 0-1, 0-1 |
+| 10, 11, 12, 13 | Second enemy: distance, direction, HP fraction, MP fraction | 0-198, 0-4, 0-1, 0-1 |
+| 14, 15, 16, 17 | Third enemy: distance, direction, HP fraction, MP fraction | 0-198, 0-4, 0-1, 0-1 |
+| 18, 19, 20, 21 | Fourth enemy: distance, direction, HP fraction, MP fraction | 0-198, 0-4, 0-1, 0-1 |
+| 22, 23, 24, 25 | Fifth enemy: distance, direction, HP fraction, MP fraction | 0-198, 0-4, 0-1, 0-1 |
+
+Direction codes are **up = 0, down = 1, left = 2, right = 3, idle = 4**.
+Player direction is its facing; enemy direction points from the player toward
+that enemy, not the enemy's facing. It selects the axis with the larger absolute
+coordinate difference, choosing the Y axis on a tie. Equal positions give idle.
+These observation codes differ from the C# server direction codes.
+
+Enemy distance is **Manhattan distance**, `abs(enemy.x - player.x) +
+abs(enemy.y - player.y)`. Living monsters are sorted by that distance, then
+entity ID, and only the first five are encoded. Slots are re-ranked every
+observation; they do not track persistent enemy identities. The current simulator
+has **no visibility or casting-range filter** for these slots: a distant living
+enemy can still appear. This observation distance is separate from spell
+eligibility and targeting rules.
+
+Missing enemy slots are four zeros; there is no separate presence flag. HP/MP
+fractions are clamped to `[0, 1]`, with zero returned when the maximum is zero
+(Innies therefore have MP fraction zero). The base array contains no enemy IDs,
+enemy X/Y coordinates, total enemy count, cooldown timers, or terrain grid.
+The policy divides each feature by its Box upper bound: X/Y by 99, directions
+by 4, map ID by 53, and distances by 198; fractions remain unchanged. Direction
+codes are scalar inputs, not one-hot vectors.
+
+**Observable history:** the Gym environment retains this 26-value contract.
 The recurrent trainer/evaluator append 24 features, giving a separately versioned
 50-value policy input (`mystic-local-terrain-50-v3`), implemented in `history.py`.
 Start a fresh recurrent run: older 46/51-input recurrent and eight-action checkpoints are rejected.
@@ -570,3 +612,6 @@ See [MIXED_SCENARIOS.md](MIXED_SCENARIOS.md) for the fresh LSTM PPO config, comm
 
 Use python -m Training.Mystic_Sim.train_full or Train_Mystic_Full.bat for fresh 1v80 LSTM PPO with three million requested transitions. See [FULL_TRAINING.md](FULL_TRAINING.md) for portable setup, CLI overrides, validation, resume, and TensorBoard commands. Curriculum JSON workflows remain available separately.
 
+
+
+Watch a frozen checkpoint on a chosen seed in Pygame: [Policy viewer commands and controls](WATCH_POLICY.md).
