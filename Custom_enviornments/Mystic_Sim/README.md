@@ -78,7 +78,7 @@ decisions count; paused/render-only frames do not.
 
 For exploration and respawn testing, explicitly select **free play**, which
 overrides the kill and step limits (the panel shows the overridden limit).
-Player death and Y-boundary truncation still end play:
+Player death and Y-boundary failure still end play:
 
 ```powershell
 .\RL_venv\Scripts\python.exe -m Custom_enviornments.Mystic_Sim.viewer --free-play --seed 42
@@ -295,10 +295,10 @@ converted. The supplied full-state golden vector is reproduced exactly.
 
 `rewards.py` and `diagnostics.py` keep `env.py` focused on the Gym five-tuple.
 The action space is now Discrete(7); the base observation remains 26-value float32.
-Default episodes terminate on death or five kills and truncate at 1024 steps.
+Default episodes terminate on death, five kills, or task Y-boundary failure; they truncate at 1024 steps.
 Death takes precedence over a simultaneous kill goal; termination takes
 precedence over a simultaneous time limit. `episode_end_reason` distinguishes
-`player_death`, `kill_goal`, `step_limit`, and `y_boundary` truncation.
+`player_death`, `kill_goal`, `step_limit` truncation, and `y_boundary` termination.
 
 `combat_reward_v1` uses actual damage/death events, including DoT damage and
 overkill capped at remaining HP. Regeneration cannot mask damage taken, and
@@ -351,13 +351,13 @@ the three weights remain independently configurable (not automatically linked).
 This
 terminal component is awarded once, in addition to that step's damage, kill,
 and positioning rewards. Death takes priority if the kill goal is reached on
-the same step. Truncation is not a loss and receives no terminal bonus/penalty.
+the same step. Time-limit truncation receives -25 once; boundary failure retains its positioning penalty without an extra death penalty.
 These are simulator-only rules; the legacy profile shares this terminal override.
 The simulator defaults to inclusive `y_bounds=(30, 86)`: reaching Y <= 29 or
-Y >= 87 truncates. The boundary step still receives its positioning penalty
+Y >= 87 terminates as loss (no value bootstrap). The boundary step still receives its positioning penalty
 (-200 at 29 or 87), without a death penalty. Rows 30 and 86 receive -100 and
 continue; rows 31 through 85 receive no Y penalty. Set `y_bounds=None` only to
-explicitly disable Y truncation. These task rules apply only to the simulator.
+explicitly disable Y-boundary termination. These task rules apply only to the simulator.
 
 **Simulator-only collision shaping (both reward profiles):** an attempted player
 move into terrain, an occupied tile, or an outer map boundary receives
@@ -403,7 +403,7 @@ replaces legacy's inferred fixed -10 blocked-move penalty without double chargin
 Legacy alone retains healing rewards
 and the `hp != 0.5` branch for comparison. Both reward profiles enable
 `legacy_y_penalty_below=31` and `legacy_y_penalty_above=85` by default, applying
-the same Y penalties alongside boundary truncation. Set either threshold to
+the same Y penalties alongside boundary termination. Set either threshold to
 `None` only to explicitly disable that side's shaping.
 
 ```python

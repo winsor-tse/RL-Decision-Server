@@ -25,7 +25,8 @@ def episode_status(world, config):
     if world.kills >= config.win_kills:
         return True, False, "win", "kill_goal"
     if config.y_bounds is not None and not config.y_bounds[0] <= world.player.y <= config.y_bounds[1]:
-        return False, True, "truncated", "y_boundary"
+        # SIM task failure, not an external cutoff: PPO must not bootstrap it.
+        return True, False, "loss", "y_boundary"
     if world.step_count >= config.max_episode_steps:
         return False, True, "truncated", "step_limit"
     return False, False, None, None
@@ -67,7 +68,7 @@ def calculate(world, config, previous_obs, obs, action, damage_events, death_eve
     # reset after this transition. A timeout stays truncated (PPO bootstraps it).
     # Win/death take priority; Y exits retain their separate positioning penalties.
     parts["terminal"] = (config.win_bonus if outcome == "win" else
-                         -config.death_penalty if outcome == "loss" else
+                         -config.death_penalty if outcome == "loss" and end_reason != "y_boundary" else
                          -config.timeout_penalty if outcome == "truncated" and end_reason == "step_limit" else 0.0)
     parts["positioning"] += collision_penalty(world, config)
     # Preserve dashboard components; unsuccessful action costs live in positioning.

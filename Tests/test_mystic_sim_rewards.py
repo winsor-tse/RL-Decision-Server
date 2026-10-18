@@ -259,7 +259,7 @@ class RewardTests(unittest.TestCase):
             _, reset_info = env.reset(seed=42)
             self.assertEqual(reset_info['reward_components']['terminal'], 0)
 
-    def test_timeout_config_does_not_penalize_early_y_truncation(self):
+    def test_timeout_config_does_not_penalize_y_failure(self):
         for cost in (0, 12.5, 25):
             env = self.scene(RewardConfig(timeout_penalty=cost, max_episode_steps=2))
             env.advance_idle()
@@ -268,6 +268,8 @@ class RewardTests(unittest.TestCase):
         env.world.player.y = 29
         result = env.advance_idle()
         self.assertEqual(result[4]['episode_end_reason'], 'y_boundary')
+        self.assertEqual(result[2:4], (True, False))
+        self.assertEqual(result[4]['episode_outcome'], 'loss')
         self.assertEqual(result[4]['reward_components']['terminal'], 0)
 
     def kill_progress_scene(self, profile, **weights):
@@ -327,7 +329,7 @@ class RewardTests(unittest.TestCase):
             env=self.scene(RewardConfig(y_bounds=(25,60)))
             env.world.player.y=y
             result=env.advance_idle()
-            self.assertEqual(result[2:4],(False,outside))
+            self.assertEqual(result[2:4],(outside,False))
             if outside: self.assertEqual(result[4]['episode_end_reason'],'y_boundary')
 
     def test_legacy_numeric_snapshot_and_healing_quirk(self):
@@ -370,7 +372,7 @@ class RewardTests(unittest.TestCase):
             self.assertEqual(rewards.calculate(env.world,config,obs,obs,4,[],[],None)['positioning'],
                              3 if profile=='legacy_reward_v0' else 0)
 
-    def test_sim_y_penalty_and_truncation_boundaries(self):
+    def test_sim_y_penalty_and_termination_boundaries(self):
         for profile in ('combat_reward_v1','legacy_reward_v0'):
             for y,penalty,truncated in ((28,-300,True),(29,-200,True),(30,-100,False),
                                         (31,0,False),(85,0,False),(86,-100,False),
@@ -380,14 +382,29 @@ class RewardTests(unittest.TestCase):
                     env.world.player.y=y
                     env.world.monsters[2].y=y  # Keep legacy distance shaping constant at +3.
                     obs,reward,term,trunc,info=env.advance_idle()
-                    self.assertEqual((term,trunc),(False,truncated))
+                    self.assertEqual((term,trunc),(truncated,False))
                     self.assertEqual(info['reward_components']['positioning'],
                                      penalty+(3 if profile=='legacy_reward_v0' else 0))
                     self.assertEqual(reward,sum(info['reward_components'].values()))
                     if truncated:
                         self.assertEqual(info['episode_end_reason'],'y_boundary')
+                        self.assertEqual(info['episode_outcome'],'loss')
                         self.assertEqual(info['reward_components']['terminal'],0)
                         with self.assertRaises(gym.error.ResetNeeded): env.advance_idle()
+
+    def test_y_failure_has_no_value_bootstrap(self):
+        import torch
+        from Training.Mystic_Sim.core import advantages
+        env = self.scene()
+        env.world.player.y = 87
+        _, reward, term, trunc, info = env.advance_idle()
+        self.assertAlmostEqual(reward, -200.001)
+        self.assertEqual(info['reward_components']['terminal'], 0)
+        # Even an enormous future value cannot leak into a task-failure target.
+        _, returns = advantages(torch.tensor([[reward * .01]]), torch.zeros(1, 1),
+                                torch.tensor([[1000.]]), torch.tensor([[term]]),
+                                torch.tensor([[trunc]]), .999, .95)
+        self.assertAlmostEqual(returns.item(), reward * .01, places=5)
 
     def test_reset_profiles_are_local_and_validation_is_atomic(self):
         a,b=self.scene(),self.scene()

@@ -615,3 +615,6 @@ Use python -m Training.Mystic_Sim.train_full or Train_Mystic_Full.bat for fresh 
 
 
 Watch a frozen checkpoint on a chosen seed in Pygame: [Policy viewer commands and controls](WATCH_POLICY.md).
+
+
+Task Y-boundary exits now terminate as failure without bootstrapping. Existing penalties are retained. See [checkpoint migration and continuation commands](Y_BOUNDARY_TERMINATION.md) before loading older checkpoints.
