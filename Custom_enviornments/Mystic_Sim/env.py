@@ -7,7 +7,8 @@ from .actions import ACTIONS, action_label, contract_metadata
 from .config import ScenarioConfig
 from .map_loader import DEFAULT_MAP_PATH, load_map_definition
 from .scenarios import build_scenario
-from .observation import encode_observation
+from .observation import (encode_observation, OBSERVATION_SIZE, LEGACY_ENEMY_SLOTS,
+                          RELATIVE_ENEMY_SLOTS, RELATIVE_OFFSET)
 from .engine import Engine
 from . import rewards
 from .diagnostics import build_info
@@ -30,9 +31,12 @@ class MysticSimEnv(gym.Env):
         self.action_space = gym.spaces.Discrete(len(ACTIONS))
         max_distance = self.config.width + self.config.height - 2
         high = [self.config.width - 1, self.config.height - 1, 4, 1, 1,
-                self.config.map_id] + [max_distance, 4, 1, 1] * 5
+                self.config.map_id] + [max_distance, 4, 1, 1] * LEGACY_ENEMY_SLOTS
+        high += [self.config.width - 1, self.config.height - 1] * RELATIVE_ENEMY_SLOTS
+        low = np.zeros(OBSERVATION_SIZE, dtype=np.float32)
+        low[RELATIVE_OFFSET:] = -np.array(high[RELATIVE_OFFSET:], dtype=np.float32)
         self.observation_space = gym.spaces.Box(
-            low=np.zeros(26, dtype=np.float32), high=np.array(high, dtype=np.float32))
+            low=low, high=np.array(high, dtype=np.float32))
         self.contract = contract_metadata()
 
     def reset(self, *, seed=None, options=None):

@@ -134,7 +134,7 @@ class MysticPhaseZeroTests(unittest.TestCase):
     def test_registration_has_no_live_socket(self):
         env = gym.make(ENV_ID)
         self.assertEqual(env.action_space.n, 7)
-        self.assertEqual(env.observation_space.shape, (26,))
+        self.assertEqual(env.observation_space.shape, (56,))
         self.assertNotIn("BaseEnv", [base.__name__ for base in type(env.unwrapped).__mro__])
         observation, info = env.reset(seed=1)
         self.assertTrue(env.observation_space.contains(observation))

@@ -165,8 +165,8 @@ class Agent(nn.Module):
     def __init__(self, observation_high):
         super().__init__()
         self.register_buffer('observation_scale', torch.tensor(observation_high, dtype=torch.float32))
-        self.actor = nn.Sequential(layer(26, 128), nn.Tanh(), layer(128, 128), nn.Tanh(), layer(128, len(ACTIONS), .01))
-        self.critic = nn.Sequential(layer(26, 128), nn.Tanh(), layer(128, 128), nn.Tanh(), layer(128, 1, 1))
+        self.actor = nn.Sequential(layer(len(observation_high), 128), nn.Tanh(), layer(128, 128), nn.Tanh(), layer(128, len(ACTIONS), .01))
+        self.critic = nn.Sequential(layer(len(observation_high), 128), nn.Tanh(), layer(128, 128), nn.Tanh(), layer(128, 1, 1))
 
     def normalized(self, obs):
         # Fixed per-feature scaling, checkpointed with the model; no running stats.

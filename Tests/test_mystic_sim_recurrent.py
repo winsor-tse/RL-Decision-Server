@@ -83,8 +83,8 @@ class RecurrentTests(unittest.TestCase):
         self.assertEqual(h.features[9], 1)
         h.update(obs, 0, applied=False, blocked=True, cooldown_rejected=False)
         self.assertEqual(h.features[8], 1)
-        self.assertEqual(h.encode(obs).shape, (50,))
-        self.assertTrue(env.observation_space.contains(h.encode(obs)[:26]))
+        self.assertEqual(h.encode(obs).shape, (80,))
+        self.assertTrue(env.observation_space.contains(h.encode(obs)[:56]))
         h.reset()
         self.assertFalse(h.features.any())
 
@@ -99,7 +99,7 @@ class RecurrentTests(unittest.TestCase):
 
     def test_sequence_replay_matches_collection_and_resets_independently(self):
         agent = self.agent()
-        obs = torch.rand(12, 3, 50) * agent.observation_scale
+        obs = torch.rand(12, 3, 80) * agent.observation_scale
         starts = torch.zeros(12, 3, dtype=torch.bool)
         starts[0] = True
         starts[5, 1] = True
@@ -124,7 +124,7 @@ class RecurrentTests(unittest.TestCase):
 
     def test_bptt_reaches_prior_observations_but_not_across_reset(self):
         agent = self.agent()
-        obs = torch.rand(6, 1, 50, requires_grad=True)
+        obs = torch.rand(6, 1, 80, requires_grad=True)
         starts = torch.zeros(6, 1, dtype=torch.bool)
         starts[3] = True
         logits, _, _, _ = agent.sequence(obs, agent.initial_state(1), starts)
@@ -138,15 +138,15 @@ class RecurrentTests(unittest.TestCase):
         batch.envs[0].world.step_count = 7
         final, _, _, truncated, _ = batch.step([4, 4])
         self.assertTrue(truncated[0])
-        self.assertEqual(final[0, 26+4], 1)
-        self.assertFalse(batch.observations[0, 26:42].any())
+        self.assertEqual(final[0, 56+4], 1)
+        self.assertFalse(batch.observations[0, 56:72].any())
         # Sensors are recomputed at both the final and reset positions.
         for i in range(2):
             for encoded in (final[i], batch.observations[i]):
                 expected = terrain_sensors(int(encoded[0]), int(encoded[1]), width=100,
                     height=100, blocked_cells=batch.envs[i].map_definition.blocked_cells)
-                np.testing.assert_array_equal(encoded[42:], expected)
-        self.assertEqual(batch.observations[1, 26+4], 1)
+                np.testing.assert_array_equal(encoded[72:], expected)
+        self.assertEqual(batch.observations[1, 56+4], 1)
 
     def test_sensor_edges_range_and_first_blocker(self):
         sensed = terrain_sensors(10, 10, width=30, height=30,
@@ -187,7 +187,7 @@ class RecurrentTests(unittest.TestCase):
         env = make_env()
         self.addCleanup(env.close)
         contract = metadata(env, recurrent=True)
-        self.assertEqual(contract['contract']['observation_size'], 50)
+        self.assertEqual(contract['contract']['observation_size'], 80)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/'old.pt'
             torch.save({'format': 'mystic_sim_ppo_v2', 'metadata': {

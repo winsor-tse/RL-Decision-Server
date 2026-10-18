@@ -74,63 +74,65 @@ boundaries, but inference memory persists across blocks and rollout updates.
 Saved boundary states are detached rollout-policy states, as in the server;
 there is no burn-in or full-episode recurrent-state recomputation after updates.
 
-**Base observation: 26-value contract (`mystic-26-v1`).** Both `reset()` and
-`step()` return a `float32` array with shape `(26,)`, encoded by
-[`encode_observation`](../../Custom_enviornments/Mystic_Sim/observation.py).
-Indices are zero-based. These are raw Gym values on the current 100 x 100 map53,
-before policy normalization.
+**Base observation: 56-value contract (`mystic-ten-enemies-relative-five-56-v2`).**
+Both `reset()` and `step()` return a `float32` array with shape `(56,)`.
+The existing first 26 values retain their meaning. Five more legacy-format
+slots extend coverage to ten enemies; signed offsets describe the same nearest
+five enemies without duplicating their HP/MP fields. This is one combined
+observation, not two selectable experiment modes.
 
-| Index | Value | Raw bounds / meaning |
+| Indices (zero-based) | Value | Raw bounds on map53 |
 |---|---|---|
-| 0 | Player X | 0-99, absolute tile coordinate |
-| 1 | Player Y | 0-99, absolute tile coordinate; increasing Y points down |
-| 2 | Player facing | 0-4, direction codes below |
-| 3 | Player HP fraction | 0-1, current HP / maximum HP |
-| 4 | Player MP fraction | 0-1, current MP / maximum MP |
-| 5 | Map ID | Box bounds 0-53; current map emits 53 |
-| 6, 7, 8, 9 | Nearest enemy: distance, direction, HP fraction, MP fraction | 0-198, 0-4, 0-1, 0-1 |
-| 10, 11, 12, 13 | Second enemy: distance, direction, HP fraction, MP fraction | 0-198, 0-4, 0-1, 0-1 |
-| 14, 15, 16, 17 | Third enemy: distance, direction, HP fraction, MP fraction | 0-198, 0-4, 0-1, 0-1 |
-| 18, 19, 20, 21 | Fourth enemy: distance, direction, HP fraction, MP fraction | 0-198, 0-4, 0-1, 0-1 |
-| 22, 23, 24, 25 | Fifth enemy: distance, direction, HP fraction, MP fraction | 0-198, 0-4, 0-1, 0-1 |
+| 0-1 | Absolute player X, Y | 0-99 |
+| 2 | Player facing | 0-4 |
+| 3-4 | Player HP, MP fractions | 0-1 |
+| 5 | Map ID | 0-53; emits 53 |
+| 6-45 | Ten enemies, four values each: Manhattan distance, direction, HP fraction, MP fraction | 0-198, 0-4, 0-1, 0-1 |
+| 46-47 | Nearest enemy: signed dx, dy | -99 to 99 each |
+| 48-49 | Second enemy: signed dx, dy | -99 to 99 each |
+| 50-51 | Third enemy: signed dx, dy | -99 to 99 each |
+| 52-53 | Fourth enemy: signed dx, dy | -99 to 99 each |
+| 54-55 | Fifth enemy: signed dx, dy | -99 to 99 each |
 
-Direction codes are **up = 0, down = 1, left = 2, right = 3, idle = 4**.
-Player direction is its facing; enemy direction points from the player toward
-that enemy, not the enemy's facing. It selects the axis with the larger absolute
-coordinate difference, choosing the Y axis on a tie. Equal positions give idle.
-These observation codes differ from the C# server direction codes.
+`dx = enemy.x - player.x`, `dy = enemy.y - player.y`: positive X is right,
+positive Y is down. The policy divides offsets by 99, preserving their sign
+and mapping them to [-1, 1]. Other features retain division by their Box upper
+bound. Both feed-forward PPO and recurrent PPO consume this combined contract.
 
-Enemy distance is **Manhattan distance**, `abs(enemy.x - player.x) +
-abs(enemy.y - player.y)`. Living monsters are sorted by that distance, then
-entity ID, and only the first five are encoded. Slots are re-ranked every
-observation; they do not track persistent enemy identities. The current simulator
-has **no visibility or casting-range filter** for these slots: a distant living
-enemy can still appear. This observation distance is separate from spell
-eligibility and targeting rules.
+Direction codes: **up=0, down=1, left=2, right=3, idle=4**. Enemy direction
+selects the dominant offset axis (Y wins ties), not the enemy's facing.
+Living monsters are sorted by Manhattan distance, then entity ID. Slots rerank
+on every observation; they are not persistent identities. There is no visibility
+or casting-range filter. Spell targeting remains separate and unchanged.
+Each missing four-value slot and corresponding dx/dy pair is zero-padded;
+there is no separate presence flag. Read its HP slot to distinguish padding.
+HP/MP fractions are clamped to [0, 1]; zero maximum gives zero fraction.
 
-Missing enemy slots are four zeros; there is no separate presence flag. HP/MP
-fractions are clamped to `[0, 1]`, with zero returned when the maximum is zero
-(Innies therefore have MP fraction zero). The base array contains no enemy IDs,
-enemy X/Y coordinates, total enemy count, cooldown timers, or terrain grid.
-The policy divides each feature by its Box upper bound: X/Y by 99, directions
-by 4, map ID by 53, and distances by 198; fractions remain unchanged. Direction
-codes are scalar inputs, not one-hot vectors.
-
-**Observable history:** the Gym environment retains this 26-value contract.
-The recurrent trainer/evaluator append 24 features, giving a separately versioned
-50-value policy input (`mystic-local-terrain-50-v3`), implemented in `history.py`.
-Start a fresh recurrent run: older 46/51-input recurrent and eight-action checkpoints are rejected.
+**Observable history:** the recurrent trainer/evaluator append 24 features,
+giving an 80-value policy input
+(`mystic-ten-enemies-relative-five-local-terrain-80-v4`).
 
 | Appended indices | Meaning |
 |---|---|
-| 26–32 | Previous chosen action, one-hot (all zero on reset) |
-| 33–35 | Previous action applied, movement blocked, cooldown rejected |
-| 36–38 | Time since each confirmed spell cast, capped at 10 seconds and divided by 10 seconds |
-| 39–41 | Whether each spell has been successfully cast this episode |
-| 42–43 | Up: normalized free-tile distance, detected flag |
-| 44–45 | Down: normalized free-tile distance, detected flag |
-| 46–47 | Left: normalized free-tile distance, detected flag |
-| 48–49 | Right: normalized free-tile distance, detected flag |
+| 56-62 | Previous chosen action, one-hot (all zero on reset) |
+| 63-65 | Previous action applied, movement blocked, cooldown rejected |
+| 66-68 | Time since confirmed spell cast, capped at 10 seconds / 10 seconds |
+| 69-71 | Whether each spell has been successfully cast this episode |
+| 72-73 | Up: normalized free-tile distance, detected flag |
+| 74-75 | Down: normalized free-tile distance, detected flag |
+| 76-77 | Left: normalized free-tile distance, detected flag |
+| 78-79 | Right: normalized free-tile distance, detected flag |
+
+**Checkpoint compatibility:** start a fresh run. Previous 26-input feed-forward
+and 50-input recurrent checkpoints cannot load into this contract. No automatic
+weight/optimizer migration is provided; preserve their original code revision
+for playback. Increasing observation coverage does not guarantee better results.
+
+**Live ZMQ follow-up:** the live parser has not been changed. Before deploying
+these policies, encode the same ten sorted living entities and five signed
+coordinate pairs, with the same padding, normalization, and history. Confirm
+the payload exposes those entities and coordinates; do not invent unseen data.
+The legacy live 26-value parser is not compatible with these new policies.
 
 History uses past action outcomes; terrain sensors use the known static collision
 map. No exact ready timestamps, full collision grid, or hidden monster IDs enter
@@ -153,7 +155,7 @@ and blocked-movement feedback still report failed attempts into either terrain
 or entities. The range and semantics are included in checkpoint metadata.
 
 These relative sensors transfer across translated local geometry. The original
-26 inputs still include absolute player X/Y and map ID, and training solely on
+56 inputs still include absolute player X/Y and map ID, and training solely on
 map53 can still overfit to it; this change does not claim map generalization.
 
 **Deliberate differences/fixes relative to the server reference:**
@@ -176,7 +178,7 @@ map53 can still overfit to it; this change does not claim map generalization.
   world or claim exact interrupted-trajectory replay.
 
 **Required future live-server work (Phase 8; not implemented here):** port this
-50-value history/sensor contract and model architecture to live training/inference.
+80-value history/sensor contract and model architecture to live training/inference.
 Load the live map's authoritative static collision layer and its dimensions,
 then compute the same four rays at the player's current tile on each observation.
 Static terrain stays fixed in map coordinates; distances relative to the player
@@ -198,7 +200,7 @@ acknowledgements as successful casts or all-zero history. Neither existing
 `PPO_lstm_server.py` nor its live inference script has been modified.
 
 This trainer uses the current `MysticSimEnv` and its full training rules:
-seven actions, 26 observation values, map53 terrain, 1,024 decisions, five-kill
+seven actions, 56 observation values, map53 terrain, 1,024 decisions, five-kill
 win, player-death loss, and the configured damage/kill/collision/cooldown/Y
 rewards. It does not connect to ZMQ or import a live PPO server/automation.
 
@@ -277,8 +279,7 @@ controls the dimensionless policy ratio. `--actor-max-grad-norm 0.5` and
 `--critic-max-grad-norm 0.5` replace the old joint `--max-grad-norm` setting.
 The simulator cooldown-attempt penalty is now -1 (previously -5); damage, kill,
 win/loss, collision and Y rewards are otherwise unchanged. Nothing rewards a
-spell-button press without damage. The 26-value observation and feed-forward
-architecture remain unchanged; LSTM work is deferred.
+spell-button press without damage. The combined 56-value observation is shared by feed-forward and recurrent PPO.
 
 **Start a fresh run after these changes.** Checkpoints now use
 `mystic_sim_ppo_v2` and record the scale, gamma, optional value clip, and separate
@@ -398,12 +399,12 @@ optimizer/schedule/RNG resume, metadata rejection, TensorBoard tags, evaluation
 RNG isolation, and actual GIF creation. See [VALIDATION.md](VALIDATION.md) for
 the measured short CPU/CUDA runs and the bounded two-seed comparison.
 
-The base 26-value MLP observation omits cooldowns, relative terrain and collision history.
+The base 56-value MLP observation omits cooldowns, relative terrain and collision history.
 This feed-forward policy can overfit map53 and cannot directly observe all timing
 state. Successful optimizer updates do not prove combat learning or live parity.
 Use held-out evaluation, damage/kills/survival and invalid-action metrics to assess
 learning; reward magnitude alone is insufficient. The recurrent path above adds
-bounded terrain sensing and action history through its separate 50-value contract.
+bounded terrain sensing and action history through its separate 80-value contract.
 
 
 ## Seven-action change and next actor experiment

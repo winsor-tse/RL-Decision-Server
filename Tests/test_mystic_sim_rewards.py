@@ -444,7 +444,7 @@ class RewardTests(unittest.TestCase):
             check_env(env,skip_render_check=True)
             obs,info=env.reset(seed=8)
             self.assertEqual(env.action_space.n,7)
-            self.assertEqual(obs.shape,(26,))
+            self.assertEqual(obs.shape,(56,))
             self.assertEqual(obs.dtype,np.float32)
             before=deepcopy(env.world)
             for action in (-1,8,True,1.5):

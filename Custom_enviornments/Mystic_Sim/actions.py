@@ -1,6 +1,7 @@
 """Versioned action contracts; legacy orderings must never be inferred by size."""
 from enum import IntEnum
 from numbers import Integral
+from .observation import OBSERVATION_SIZE
 
 
 class Action(IntEnum):
@@ -16,7 +17,7 @@ class Action(IntEnum):
 ACTIONS = ("up", "down", "left", "right",
            "castSpell:1", "castSpell:2", "castSpell:3")
 ACTION_SCHEMA = "mystic-seven-v2"
-OBSERVATION_SCHEMA = "mystic-26-v1"
+OBSERVATION_SCHEMA = "mystic-ten-enemies-relative-five-56-v2"
 DATASET_ID = "mystic/BC-v1"
 LEGACY_LIVE_ACTIONS = ("up", "down", "left", "right", "attack", "castSpell:1", "castSpell:2", "castSpell:3") + ("castSpell:5", "castSpell:6", "castSpell:7")
 LEGACY_BC_ACTIONS = ("up", "left", "right", "down") + LEGACY_LIVE_ACTIONS[4:]
@@ -52,7 +53,7 @@ def remap_legacy_bc(actions):
 def contract_metadata():
     """JSON-safe metadata to embed in new checkpoint/dataset envelopes."""
     return {"action_schema": ACTION_SCHEMA, "actions": list(ACTIONS),
-            "observation_schema": OBSERVATION_SCHEMA, "observation_size": 26}
+            "observation_schema": OBSERVATION_SCHEMA, "observation_size": OBSERVATION_SIZE}
 
 
 def validate_contract(metadata):

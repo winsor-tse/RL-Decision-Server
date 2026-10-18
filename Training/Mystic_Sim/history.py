@@ -5,7 +5,7 @@ contract can be used there. A sent command is not a confirmed successful cast.
 """
 import numpy as np
 
-HISTORY_SCHEMA = 'mystic-local-terrain-50-v3'
+HISTORY_SCHEMA = 'mystic-ten-enemies-relative-five-local-terrain-80-v4'
 SENSOR_RANGE = 4
 SENSOR_DIRECTIONS = (('up', 0, -1), ('down', 0, 1), ('left', -1, 0), ('right', 1, 0))
 HISTORY_FEATURES = ([f'previous_action_{i}' for i in range(7)] +

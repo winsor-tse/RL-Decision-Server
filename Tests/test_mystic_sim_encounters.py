@@ -83,7 +83,7 @@ class EncounterTests(unittest.TestCase):
                          factory=EncounterFactory(EncounterConfig('two', 2, 2)),
                          recurrent=True)
         try:
-            self.assertEqual(batch.observations.shape, (2, 50))
+            self.assertEqual(batch.observations.shape, (2, 80))
             self.assertIsNot(batch.envs[0].world, batch.envs[1].world)
             batch.step(np.array([4, 0]))
             self.assertTrue(all(len(e.world.monsters) == 2 for e in batch.envs))

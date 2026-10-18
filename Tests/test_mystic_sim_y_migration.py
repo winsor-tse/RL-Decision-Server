@@ -3,10 +3,11 @@ from dataclasses import asdict
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import torch
 
 from Training.Mystic_Sim.core import make_env, metadata, PPOConfig, load_checkpoint
-from Training.Mystic_Sim.migrate_y_boundary import migrate, OLD_ENGINE
+from Training.Mystic_Sim.migrate_y_boundary import migrate, OLD_ENGINE, NEW_ENGINE
 
 
 class MigrationTests(unittest.TestCase):
@@ -16,6 +17,11 @@ class MigrationTests(unittest.TestCase):
             current = metadata(env)
         finally:
             env.close()
+        # Exercise the historical migration against its audited target, not the
+        # expanded observation engine. Production migration stays hash-locked.
+        actual = deepcopy(current)
+        current['engine_sha256'] = NEW_ENGINE
+        metadata_patch = patch('Training.Mystic_Sim.migrate_y_boundary.metadata', return_value=current)
         old = deepcopy(current)
         old['engine_sha256'] = OLD_ENGINE
         payload = dict(format='mystic_sim_ppo_v2', metadata=old,
@@ -28,7 +34,12 @@ class MigrationTests(unittest.TestCase):
             original = source.read_bytes()
             with self.assertRaises(ValueError):
                 load_checkpoint(source, current)
-            migrate(source, target)
+            self.assertNotEqual(actual['engine_sha256'], NEW_ENGINE)
+            with self.assertRaisesRegex(ValueError, 'not the audited'):
+                migrate(source, target)
+            self.assertFalse(target.exists())
+            with metadata_patch:
+                migrate(source, target)
             new = load_checkpoint(target, current)
             self.assertTrue(torch.equal(new['agent']['weight'], payload['agent']['weight']))
             for key in ('optimizer', 'rng', 'update', 'global_step', 'episodes', 'wins'):
@@ -38,7 +49,7 @@ class MigrationTests(unittest.TestCase):
                 migrate(source, target)
             payload['metadata']['map_sha256'] = 'wrong'
             torch.save(payload, source)
-            with self.assertRaises(ValueError):
+            with patch('Training.Mystic_Sim.migrate_y_boundary.metadata', return_value=current), self.assertRaises(ValueError):
                 migrate(source, Path(folder)/'invalid.pt')
 
 
