@@ -207,6 +207,32 @@ The existing requirements already include PyTorch, Gymnasium, TensorBoard,
 NumPy, pygame-ce and Pillow; recording needs the last two packages. No FFmpeg
 or additional video package is needed.
 
+## Benchmark CUDA SPS
+
+Run from the repository root to benchmark the recurrent policy and simulator:
+
+```powershell
+.\RL_venv\Scripts\python.exe -m Training.Mystic_Sim.benchmark --device cuda --num-envs 4 --steps 256 --iterations 10 --torch-threads 1
+```
+
+This uses scripted actions and performs **no optimizer updates**, saves no
+checkpoints, and does not start a training run. CUDA must be available in your
+PyTorch installation; the simulator itself still runs on CPU.
+
+The JSON output reports:
+
+- `environment_sps`: simulator transitions per second without policy inference.
+- `optimized.rollout_sps`: transitions per second including recurrent policy
+  inference and bootstrap-value computation.
+- `optimized.recurrent_forward_backward_ms`: average recurrent forward/backward
+  time for a 64-step sequence batch; lower is better.
+
+These are component benchmarks, not end-to-end PPO training SPS. `--steps 256`
+with `--num-envs 4` measures 1,024 transitions per rollout benchmark. Change
+`--num-envs` to compare batch sizes, use `--device cpu` for a CPU comparison,
+or add `--compare-reference` to compare the optimized and reference recurrent
+implementations. Avoid running training simultaneously when measuring speed.
+
 ## Train
 
 ```powershell
