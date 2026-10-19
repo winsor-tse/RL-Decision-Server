@@ -248,7 +248,27 @@ def load_checkpoint(path, expected_metadata):
     payload = torch.load(path, map_location='cpu', weights_only=True)
     if not isinstance(payload, dict) or payload.get('format') != 'mystic_sim_ppo_v2':
         raise ValueError('Expected a Mystic Sim PPO v2 checkpoint; start a new run for scaled critic training')
-    if payload.get('metadata') != expected_metadata:
+    saved_metadata = payload.get('metadata')
+    compatible = saved_metadata == expected_metadata
+    if not compatible and isinstance(saved_metadata, dict):
+        # Historical checkpoints hash raw bytes. Git's LF/CRLF conversion must
+        # not prevent portable playback. Accept only hashes reproduced from
+        # this exact local source; keep every other metadata check strict.
+        import inspect
+        source = Path(inspect.getfile(MysticSimEnv)).parent
+        files = [(p.name.encode(), p.read_bytes()) for p in sorted(source.glob('*.py'))
+                 if p.name != 'viewer.py']
+        variants = {
+            hashlib.sha256(b''.join(name + transform(data) for name, data in files)).hexdigest()
+            for transform in (lambda b: b, lambda b: b.replace(b'\r\n', b'\n'),
+                              lambda b: b.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'))
+        }
+        equivalent = dict(saved_metadata)
+        equivalent['engine_sha256'] = expected_metadata.get('engine_sha256')
+        compatible = (saved_metadata.get('engine_sha256') in variants
+                      and expected_metadata.get('engine_sha256') in variants
+                      and equivalent == expected_metadata)
+    if not compatible:
         raise ValueError('Checkpoint simulator configuration, map, mechanics, or policy contract is incompatible')
     required = {'agent', 'optimizer', 'ppo_config', 'update', 'global_step', 'rng', 'episodes', 'wins'}
     if not required <= payload.keys():
