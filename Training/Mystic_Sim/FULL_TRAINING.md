@@ -1,9 +1,36 @@
 # Standalone 1v80 LSTM PPO training
 
-This entry point starts fresh on the original map53 full scenario. It needs no
-curriculum config or source checkpoint. One player faces 80 Innies (two per
+This entry point starts fresh or continues a checkpoint on the original map53
+full scenario without a JSON config. One player faces 80 Innies (two per
 original spawn area). The goal remains five kills without dying, with the
 existing 1,024-step cap, Y-boundary rules, rewards, observations and combat.
+
+## Continue a checkpoint for additional transitions
+
+```powershell
+.\Train_Mystic_Full.bat --continue-from "runs/path/to/checkpoints/checkpoint_08.pt" --total-timesteps 1000000 --device cuda
+```
+
+`--total-timesteps` is the **additional** budget when using `--continue-from`,
+rounded up to a complete rollout. This restores weights, optimizer moments and
+training RNG using the existing continuation implementation. Simulator episodes
+and LSTM episode memory start fresh. PPO settings, including learning rate,
+seed and number of environments, default to the checkpoint's saved values.
+To explicitly change the learning rate, add `--learning-rate 0.0001`.
+
+Each continuation creates a new timestamped directory under
+`runs/mystic_sim/full`; optionally specify `--run-dir runs/mystic_sim/full/my_run`.
+It saves ten checkpoints, evaluates both modes, and records GIFs from CP5 by
+default. Add `--validate-only` to check the checkpoint, settings and additional
+budget without training or writing run files.
+
+`--resume` instead finishes the original saved budget and cannot be combined
+with `--continue-from`. The continuation budget must be explicitly supplied.
+Existing compatibility rules still apply: LR, budget, seeds and evaluation
+count may change, but architecture and PPO batching settings must match.
+Annealed runs remain subject to their saved LR horizon; this full launcher
+defaults to a constant learning rate for fresh runs. Use the curriculum runner
+for curriculum checkpoints and scenario changes.
 
 ## Setup for a new checkout
 

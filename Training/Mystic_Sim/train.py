@@ -442,10 +442,13 @@ def main(argv=None, *, defaults=None, record_from_checkpoint=1, run_root=None, f
         options = {'action':argparse.BooleanOptionalAction} if isinstance(default,bool) else {
             'type':float if field.name == 'value_clip_coef' else type(default)}
         if field.name == 'actor_head': options['choices'] = ('linear', 'tanh')
-        parser.add_argument('--'+field.name.replace('_','-'),default=default,**options)
+        parser.add_argument('--'+field.name.replace('_','-'),default=argparse.SUPPRESS,**options)
     parser.add_argument('--device',choices=('auto','cpu','cuda'),default='auto')
     parser.add_argument('--run-dir',type=Path)
-    parser.add_argument('--resume',type=Path,help='Restore saved hyperparameters/optimizer/RNG; fresh simulator episodes')
+    initialization = parser.add_mutually_exclusive_group()
+    initialization.add_argument('--resume',type=Path,help='Resume the original saved budget; fresh simulator episodes')
+    initialization.add_argument('--continue-from',type=Path,
+                                help='Continue weights/optimizer with a new --total-timesteps additional budget')
     parser.add_argument('--record-gameplay',action=argparse.BooleanOptionalAction,default=True)
     parser.add_argument('--record-stride',type=int,default=5,help='Record every N decisions; 5 = one frame per simulated second')
     parser.add_argument('--record-from-checkpoint',type=int,default=record_from_checkpoint)
@@ -456,21 +459,30 @@ def main(argv=None, *, defaults=None, record_from_checkpoint=1, run_root=None, f
     args = parser.parse_args(argv)
     if args.torch_threads < 1: parser.error('--torch-threads must be positive')
     torch.set_num_threads(args.torch_threads)
-    config = PPOConfig(**{field.name:getattr(args,field.name) for field in fields(defaults)})
+    overrides = {field.name: getattr(args, field.name) for field in fields(defaults)
+                 if hasattr(args, field.name)}
+    if args.continue_from and 'total_timesteps' not in overrides:
+        parser.error('--continue-from requires --total-timesteps (additional transitions)')
+    config = PPOConfig(**{**asdict(defaults), **overrides})
     if run_root is not None:
         run_root = Path(run_root).resolve()
         if args.resume is not None: args.resume = (run_root/args.resume).resolve()
+        if args.continue_from is not None: args.continue_from = (run_root/args.continue_from).resolve()
         if args.run_dir is not None: args.run_dir = (run_root/args.run_dir).resolve()
-        elif args.resume is None:
-            args.run_dir = run_root/'runs'/'mystic_sim'/'full'/(
-                datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')+f'_seed{config.seed}_{uuid.uuid4().hex[:6]}')
-    if full_only or args.validate_only:
-        raw = torch.load(args.resume,map_location='cpu',weights_only=True) if args.resume else None
-        if raw:
+    source_path = args.resume or args.continue_from
+    raw = torch.load(source_path,map_location='cpu',weights_only=True) if source_path else None
+    if args.continue_from:
+        config = PPOConfig(**{**asdict(saved_config(raw)), **overrides})
+    if run_root is not None and args.run_dir is None and args.resume is None:
+        args.run_dir = run_root/'runs'/'mystic_sim'/'full'/(
+            datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')+f'_seed{config.seed}_{uuid.uuid4().hex[:6]}')
+    encounter = encounter_from_dict(raw['metadata']['scenario'].get('encounter')) if raw else None
+    if full_only or args.validate_only or args.continue_from:
+        if args.resume:
             config = saved_config(raw)
         encounter = encounter_from_dict(raw['metadata']['scenario'].get('encounter')) if raw else None
         if full_only and encounter is not None:
-            parser.error('This launcher trains the original full scenario; a curriculum checkpoint cannot be resumed here')
+            parser.error('This launcher trains the original full scenario; use curriculum_run for curriculum checkpoints')
         config.validate()
         if args.device=='cuda' and not torch.cuda.is_available():
             parser.error('CUDA requested but unavailable; install CUDA-enabled PyTorch or use --device cpu')
@@ -480,25 +492,33 @@ def main(argv=None, *, defaults=None, record_from_checkpoint=1, run_root=None, f
             parser.error('stop-after-checkpoint must be in 1..10')
         env = encounter_factory(encounter)()
         try:
-            if raw:
+            if args.resume:
                 payload = load_checkpoint(args.resume,metadata(env,recurrent=config.recurrent,actor_head=config.actor_head))
                 if payload['update'] >= config.updates:
                     parser.error('Checkpoint already completed its training budget')
+            if args.continue_from:
+                source = load_stage_checkpoint(args.continue_from,
+                    metadata(env,recurrent=config.recurrent,actor_head=config.actor_head),config)
+                continuation_schedule = stage_schedule(config, source_payload=source)
             env.reset(seed=config.seed)
             report = {'scenario':'full' if encounter is None else encounter.stage_id,
                       'enemy_count':len(env.world.monsters),'kill_goal':env.reward_config.win_kills,
                       'max_episode_steps':env.reward_config.max_episode_steps,
-                      'initialization':'resume' if raw else 'fresh','ppo_config':asdict(config),
+                      'initialization':'continue' if args.continue_from else 'resume' if raw else 'fresh','ppo_config':asdict(config),
                       'actual_timesteps':config.updates*config.batch_size,
                       'run_dir':str(args.run_dir or args.resume.resolve().parent.parent) if args.run_dir or args.resume else None,
                       'record_from_checkpoint':args.record_from_checkpoint,
                       'device':('cuda' if torch.cuda.is_available() else 'cpu') if args.device=='auto' else args.device}
+            if args.continue_from:
+                report['source_checkpoint'] = str(args.continue_from.resolve())
+                report['cumulative_timesteps_after_run'] = continuation_schedule['step_offset'] + config.updates*config.batch_size
         finally:
             env.close()
         print(json.dumps(report,indent=2),flush=True)
         if args.validate_only:
             return report
     return train(config,run_dir=args.run_dir,device=args.device,resume=args.resume,
+          continue_from=args.continue_from,encounter=encounter,
           record_gameplay=args.record_gameplay,record_stride=args.record_stride,
           record_from_checkpoint=args.record_from_checkpoint,evaluate_full_scenario=args.evaluate_full_scenario,
           stop_after_checkpoint=args.stop_after_checkpoint)

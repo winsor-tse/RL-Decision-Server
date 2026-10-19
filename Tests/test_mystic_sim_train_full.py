@@ -13,6 +13,39 @@ from Training.Mystic_Sim.core import PPOConfig
 
 
 class FullTrainingTests(unittest.TestCase):
+    def test_continue_inherits_saved_settings_and_overrides_budget_and_lr(self):
+        config=PPOConfig(recurrent=True,seed=8,total_timesteps=20000,num_envs=2,
+                         learning_rate=.00025,anneal_lr=False)
+        raw={'ppo_config':asdict(config),'metadata':{'scenario':{'encounter':None}},
+             'global_step':20480,'curriculum':{'step_offset':8000000}}
+        with patch('Training.Mystic_Sim.train.torch.load',return_value=raw), patch(
+                'Training.Mystic_Sim.train.load_stage_checkpoint',return_value=raw), patch(
+                'Training.Mystic_Sim.train.train') as train, redirect_stdout(io.StringIO()):
+            report=main(['--continue-from','checkpoint.pt','--total-timesteps','1000000',
+                         '--learning-rate','0.0001','--validate-only','--device','cpu'])
+        train.assert_not_called()
+        self.assertEqual(report['initialization'],'continue')
+        self.assertEqual(report['ppo_config']['seed'],8)
+        self.assertEqual(report['ppo_config']['num_envs'],2)
+        self.assertEqual(report['ppo_config']['learning_rate'],.0001)
+        self.assertEqual(report['ppo_config']['total_timesteps'],1000000)
+        self.assertEqual(report['cumulative_timesteps_after_run'],8020480+report['actual_timesteps'])
+        self.assertFalse(Path(report['run_dir']).exists())
+        # Execute the launcher routing (mocking training), retaining the saved LR.
+        with patch('Training.Mystic_Sim.train.torch.load',return_value=raw), patch(
+                'Training.Mystic_Sim.train.load_stage_checkpoint',return_value=raw), patch(
+                'Training.Mystic_Sim.train.train') as train, redirect_stdout(io.StringIO()):
+            main(['--continue-from','checkpoint.pt','--total-timesteps','1000000','--device','cpu'])
+        self.assertEqual(train.call_args.args[0].learning_rate,.00025)
+        self.assertEqual(train.call_args.kwargs['continue_from'].name,'checkpoint.pt')
+        self.assertIsNone(train.call_args.kwargs['resume'])
+
+    def test_continue_requires_budget_and_excludes_resume(self):
+        for args in [['--continue-from','checkpoint.pt'],
+                     ['--continue-from','checkpoint.pt','--resume','other.pt']]:
+            with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                main(args)
+
     def test_default_preflight_is_full_fresh_without_training(self):
         with patch('Training.Mystic_Sim.train.train') as train, redirect_stdout(io.StringIO()):
             report=main(['--validate-only','--device','cpu'])

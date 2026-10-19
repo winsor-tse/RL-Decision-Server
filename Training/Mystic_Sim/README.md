@@ -235,6 +235,21 @@ with `--num-envs 4` measures 1,024 transitions per rollout benchmark. Change
 or add `--compare-reference` to compare the optimized and reference recurrent
 implementations. Avoid running training simultaneously when measuring speed.
 
+## Continue training without a config
+
+```powershell
+.\Train_Mystic_Full.bat --continue-from "runs/path/to/checkpoints/checkpoint_08.pt" --total-timesteps 1000000 --device cuda
+```
+
+This adds one million transitions (rounded up to a rollout), inherits the
+checkpoint's PPO settings, and retains weights and optimizer moments. Add
+`--learning-rate 0.0001` to override the saved LR. New simulator episodes and
+LSTM episode memory start fresh. A new run directory is created automatically;
+`--run-dir` can name it explicitly. Add `--validate-only` for a dry run.
+`--resume` is different: it finishes the original budget. Existing contract and
+PPO compatibility checks remain enforced. See [FULL_TRAINING.md](FULL_TRAINING.md)
+for details. No JSON config is needed for full-scenario continuation.
+
 ## Train
 
 ```powershell
