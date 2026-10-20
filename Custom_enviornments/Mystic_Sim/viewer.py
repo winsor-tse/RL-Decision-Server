@@ -38,9 +38,8 @@ class PlaySession:
     def step(self, action=None):
         if self.paused or self.env.episode_done:
             return None
-        # The baseline disables melee. Action 4 advances time without a player
-        # mutation, preserving the eight-action training contract for idle frames.
-        _, reward, _, _, self.info = self.env.step(4 if action is None else action)
+        # Manual idle frames advance time outside the seven-action policy.
+        _, reward, _, _, self.info = (self.env.advance_idle() if action is None else self.env.step(action))
         self.total_reward += reward
         if action is not None and not self.info['action_applied']:
             message = self.info['action_failure_reason'].replace('_', ' ')
@@ -89,7 +88,7 @@ class Viewer:
         self.keys = {
             pygame.K_w:0, pygame.K_UP:0, pygame.K_s:1, pygame.K_DOWN:1,
             pygame.K_a:2, pygame.K_LEFT:2, pygame.K_d:3, pygame.K_RIGHT:3,
-            pygame.K_1:5, pygame.K_2:6, pygame.K_3:7, pygame.K_f:4,
+            pygame.K_1:4, pygame.K_2:5, pygame.K_3:6,
         }
 
     def text(self, value, x, y, color=None, font=None):
@@ -151,7 +150,7 @@ class Viewer:
                 # Held spells take priority over held movement. One action per decision.
                 action = next((self.keys[k] for k in (self.pg.K_1,self.pg.K_2,self.pg.K_3,
                     self.pg.K_w,self.pg.K_UP,self.pg.K_s,self.pg.K_DOWN,self.pg.K_a,self.pg.K_LEFT,
-                    self.pg.K_d,self.pg.K_RIGHT,self.pg.K_f) if held[k]),None)
+                    self.pg.K_d,self.pg.K_RIGHT) if held[k]),None)
             info = self.session.step(action)
             self.accumulator -= .2
             if info:
@@ -341,7 +340,7 @@ def main(argv=None):
         viewer=Viewer(pygame,session)
         if args.smoke_test:
             session.paused=False
-            for action in [0,3,6,4,5,7,1,2]*5:
+            for action in [0,3,5,None,4,6,1,2]*5:
                 if session.env.episode_done: break
                 viewer.capture_effects(session.step(action))
                 viewer.draw(.2)

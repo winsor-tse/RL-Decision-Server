@@ -4,6 +4,11 @@ import numpy as np
 
 from .state import Direction
 
+LEGACY_ENEMY_SLOTS = 10
+RELATIVE_ENEMY_SLOTS = 5
+RELATIVE_OFFSET = 6 + 4 * LEGACY_ENEMY_SLOTS
+OBSERVATION_SIZE = RELATIVE_OFFSET + 2 * RELATIVE_ENEMY_SLOTS
+
 
 def euclidean_distance(x1, y1, x2, y2):
     return hypot(x2 - x1, y2 - y1)
@@ -35,12 +40,12 @@ def fraction(value, maximum):
 def nearest_monsters(world):
     p = world.player
     return sorted((m for m in world.monsters.values() if m.alive),
-                  key=lambda m: (observation_distance(p.x, p.y, m.x, m.y), m.entity_id))[:5]
+                  key=lambda m: (observation_distance(p.x, p.y, m.x, m.y), m.entity_id))[:LEGACY_ENEMY_SLOTS]
 
 
 def encode_observation(world):
     p = world.player
-    result = np.zeros(26, dtype=np.float32)
+    result = np.zeros(OBSERVATION_SIZE, dtype=np.float32)
     result[:6] = (p.x, p.y, int(p.facing), fraction(p.hp, p.max_hp),
                   fraction(p.mp, p.max_mp), world.map.map_id)
     for index, monster in enumerate(nearest_monsters(world)):
@@ -49,4 +54,8 @@ def encode_observation(world):
             observation_distance(p.x, p.y, monster.x, monster.y),
             int(direction_from_delta(monster.x - p.x, monster.y - p.y)),
             fraction(monster.hp, monster.max_hp), fraction(monster.mp, monster.max_mp))
+        if index < RELATIVE_ENEMY_SLOTS:
+            # Same ranked entities as slots 1-5 above; no duplicate HP/MP needed.
+            start = RELATIVE_OFFSET + 2 * index
+            result[start:start + 2] = (monster.x - p.x, monster.y - p.y)
     return result

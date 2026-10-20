@@ -179,9 +179,9 @@ class MysticResetTests(unittest.TestCase):
         self.assertEqual([m.entity_id for m in nearest_monsters(w)], [2, 3])
         np.testing.assert_array_equal(obs[:6], [50, 50, 0, 0, 1, 53])
         np.testing.assert_array_equal(obs[6:14], [1, 3, 1, 0, 1, 0, 1, 0])
-        np.testing.assert_array_equal(obs[14:], np.zeros(12))
+        np.testing.assert_array_equal(obs[14:46], np.zeros(32))
         w.monsters.clear()
-        np.testing.assert_array_equal(encode_observation(w)[6:], np.zeros(20))
+        np.testing.assert_array_equal(encode_observation(w)[6:], np.zeros(50))
         for dx, dy, expected in [(0,0,4),(1,0,3),(-1,0,2),(0,-1,0),(0,1,1),(1,1,1),(-1,-1,0)]:
             self.assertEqual(int(direction_from_delta(dx, dy)), expected)
         self.assertEqual([int(direction_from_server(i)) for i in range(4)], [2, 3, 0, 1])
@@ -204,9 +204,9 @@ class MysticResetTests(unittest.TestCase):
             stats = replace(InnieConfig(), max_hp=e["maxHp"], max_mp=e.get("maxMp", 0))
             world.monsters[e["id"]] = MonsterState(e["id"], e["mapX"], e["mapY"], e["hp"], e.get("mp",0),
                 stats, self.map.spawn_boxes[0], 0, 1000, 1000, 1000, 1500)
-        np.testing.assert_array_equal(encode_observation(world), live_encode(payload))
+        np.testing.assert_array_equal(encode_observation(world)[:26], live_encode(payload))
         expected = json.loads((FIXTURES / "observation_expected.json").read_text())
-        self.assertEqual([m.entity_id for m in nearest_monsters(world)], expected["selected_ids"])
+        self.assertEqual([m.entity_id for m in nearest_monsters(world)[:5]], expected["selected_ids"])
 
     def test_config_validation_and_immutability(self):
         cases = [lambda: PlayerConfig(max_hp=0), lambda: PlayerConfig(max_mp=-1),

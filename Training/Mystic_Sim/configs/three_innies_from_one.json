@@ -1,0 +1,8 @@
+{
+  "extends": "curriculum_manual.json",
+  "stage": "three_innies",
+  "continue_from": "runs/mystic_sim/curriculum/one_innie_seed42/checkpoints/checkpoint_08.pt",
+  "runtime": {
+    "run_dir": "runs/mystic_sim/curriculum/{stage}_from_one_cp08_seed{seed}"
+  }
+}

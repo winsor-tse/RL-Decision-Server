@@ -1,6 +1,6 @@
 # Mystic simulator: Phases 0 through 6
 
-> **MAP-SPECIFIC TRAINING WARNING:** The current 26-value observation has absolute
+> **MAP-SPECIFIC TRAINING WARNING:** The current 56-value observation has absolute
 > coordinates and enemy information, but no relative terrain/obstacle states.
 > Collision shaping can teach PPO to memorize map53 and overfit its layout; it
 > does not establish navigation generalization. Before training a generalized
@@ -66,8 +66,8 @@ marks the nearest eligible target. Dead Innies display respawn countdowns.
 Dark terrain is solid: the viewer uses `map53`, which enforces the
 map's blocked-tile layer for players, NPCs, spawn placement, and respawns. The
 outer 0..99 coordinate bounds also remain hard boundaries.
-Melee remains disabled as in the baseline. Idle time uses its nonmutating attack
-action (4) to advance the clock without adding a ninth training action.
+Player melee is not a policy action. The viewer calls `advance_idle()` when no
+key is held; this advances the clock outside the seven-action training contract.
 
 The viewer defaults to **training rules**, using the current environment's
 five-kill goal and 1024-step limit. The panel shows **Steps: current / max**.
@@ -78,7 +78,7 @@ decisions count; paused/render-only frames do not.
 
 For exploration and respawn testing, explicitly select **free play**, which
 overrides the kill and step limits (the panel shows the overridden limit).
-Player death and Y-boundary truncation still end play:
+Player death and Y-boundary failure still end play:
 
 ```powershell
 .\RL_venv\Scripts\python.exe -m Custom_enviornments.Mystic_Sim.viewer --free-play --seed 42
@@ -101,7 +101,7 @@ For a display-free smoke test, including a PNG render:
 
 This package defines contracts, immutable map/configuration data, and seeded reset.
 Importing `Custom_enviornments.Mystic_Sim` registers `YugenSaga/MysticSim-v0`.
-The environment declares eight actions and 26 float32 observation values.
+The environment declares seven actions and 56 float32 observation values.
 `reset()` returns a fully initialized world and observation. `step()` advances
 200 simulated milliseconds, applying movement and dispatching scheduled NPC
 movement/aggro, combat, regeneration, death, and respawn events. Rewards use the
@@ -116,7 +116,7 @@ env = gym.make("YugenSaga/MysticSim-v0")
 observation, info = env.reset(seed=42)
 world = env.unwrapped.world
 assert len(world.monsters) == 80
-assert observation.shape == (26,)
+assert observation.shape == (56,)
 env.close()
 ```
 
@@ -179,10 +179,10 @@ full box retries at the next decision boundary without consuming placement RNG.
 Acid effects now apply their saved tick damage.
 No on-move status effects or chain-aggro groups are active in this baseline.
 
-Action 4 reports `gear_disabled` by default. To enable facing-tile melee, pass
-`ScenarioConfig(gear_enabled=True, gear=GearConfig(weapon_damage=100, attack_ms=1000))`
-as `config`; these example gear values are explicit inputs, not baseline stats.
-Actions 5, 6, and 7 cast Arcane Blast, Acid Cloud, and Tempest Inferno.
+Player attack is no longer a selectable action, even with gear configured.
+Actions 4, 5, and 6 cast Arcane Blast, Acid Cloud, and Tempest Inferno.
+The viewer uses `env.advance_idle()` for manual idle frames; policies cannot
+select idle through `env.step`. NPC melee and combat calculation helpers remain.
 All valid actions still advance time. Invalid actions reject without advancing.
 Episodes truncate after 1024 steps and require reset before another step. Step
 info reports `combat_implemented=True` and `reward_implemented=True`, with
@@ -287,18 +287,18 @@ live entities as needed.
 IDs, balance-cap provenance, event count, and contract metadata. Reset and
 observation encoding perform no file writes, socket calls, rendering, or sleep.
 Runtime observation ranks living monsters by Manhattan distance and entity ID,
-emits five blocks, and zero-pads unused blocks. Mechanics use a separate
+emits ten blocks plus signed offsets for the first five, and zero-pads unused slots. Mechanics use a separate
 Euclidean distance helper; server and observation direction codes are explicitly
 converted. The supplied full-state golden vector is reproduced exactly.
 
 ## Phase 5 rewards and episode rules
 
 `rewards.py` and `diagnostics.py` keep `env.py` focused on the Gym five-tuple.
-The eight-action space and 26-value float32 observation contract are unchanged.
-Default episodes terminate on death or five kills and truncate at 1024 steps.
+The action space is now Discrete(7); the base observation remains 56-value float32.
+Default episodes terminate on death, five kills, or task Y-boundary failure; they truncate at 1024 steps.
 Death takes precedence over a simultaneous kill goal; termination takes
 precedence over a simultaneous time limit. `episode_end_reason` distinguishes
-`player_death`, `kill_goal`, `step_limit`, and `y_boundary` truncation.
+`player_death`, `kill_goal`, `step_limit` truncation, and `y_boundary` termination.
 
 `combat_reward_v1` uses actual damage/death events, including DoT damage and
 overkill capped at remaining HP. Regeneration cannot mask damage taken, and
@@ -310,11 +310,16 @@ moving an enemy outside the observation does not earn a kill reward.
 | `positioning` | Collision/cooldown-attempt penalties plus -100 * (31 - Y) below 31 or -100 * (Y - 85) above 85 |
 | `damage_taken` | -50 * actual player damage / player maximum HP |
 | `damage_dealt` | 25 * sum of actual player damage / each enemy's maximum HP |
-| `terminal` | +200 for reaching five kills; -200 for player death; 0 otherwise |
+| `terminal` | +200 for reaching the kill goal; -200 for player death; -25 once on step-limit truncation; 0 otherwise |
 | `killed` | +10 per confirmed player kill, including kills 1–4 |
 
 The returned reward is exactly the sum of these six components. Weights, kill
 goal, and time limit are configurable through frozen `RewardConfig` fields.
+The simulator-only `timeout_penalty=25` applies to both reward profiles at the
+configured limit (default decision 1024). It is not a premature termination or
+a penalty for lack of visible enemies. Win/death rewards take priority; early
+Y exits retain their existing positioning penalties. Timeout remains a Gym
+truncation, and stepping again requires reset, preventing duplicate charges.
 The default training profile (`combat_reward_v1`, also used by the viewer) uses
 `enemy_damage_weight=25` and `player_damage_weight=50`, up from 1 each. Removing
 10% of one enemy's HP earns +2.5; losing 10% of player HP costs -5. Full enemy
@@ -346,13 +351,13 @@ the three weights remain independently configurable (not automatically linked).
 This
 terminal component is awarded once, in addition to that step's damage, kill,
 and positioning rewards. Death takes priority if the kill goal is reached on
-the same step. Truncation is not a loss and receives no terminal bonus/penalty.
+the same step. Time-limit truncation receives -25 once; boundary failure retains its positioning penalty without an extra death penalty.
 These are simulator-only rules; the legacy profile shares this terminal override.
 The simulator defaults to inclusive `y_bounds=(30, 86)`: reaching Y <= 29 or
-Y >= 87 truncates. The boundary step still receives its positioning penalty
+Y >= 87 terminates as loss (no value bootstrap). The boundary step still receives its positioning penalty
 (-200 at 29 or 87), without a death penalty. Rows 30 and 86 receive -100 and
 continue; rows 31 through 85 receive no Y penalty. Set `y_bounds=None` only to
-explicitly disable Y truncation. These task rules apply only to the simulator.
+explicitly disable Y-boundary termination. These task rules apply only to the simulator.
 
 **Simulator-only collision shaping (both reward profiles):** an attempted player
 move into terrain, an occupied tile, or an outer map boundary receives
@@ -382,12 +387,12 @@ advance normally. Other rejection reasons, movement, melee, and idle decisions
 do not receive this particular penalty. The engine's existing rejection order
 is preserved when more than one condition would prevent a cast.
 
-Cooldowns are in diagnostics, not the current 26-value policy observation.
+Cooldowns are in diagnostics, not the current 56-value policy observation.
 This penalty supplies feedback but does not make cooldown state observable to
 a feed-forward policy. For reliable timing, a future observation contract should
 include normalized remaining slot/family/global cooldowns (and cast affordability),
 or a policy should retain sufficient action history. That contract change and
-retraining are separate work; the current eight actions/26 observations remain.
+retraining are separate work; the current seven actions/56 observations remain.
 
 `legacy_reward_v0` snapshots the live health thresholds,
 distance shaping, signed player HP-delta quirk, and coefficient 25 for enemy
@@ -398,7 +403,7 @@ replaces legacy's inferred fixed -10 blocked-move penalty without double chargin
 Legacy alone retains healing rewards
 and the `hp != 0.5` branch for comparison. Both reward profiles enable
 `legacy_y_penalty_below=31` and `legacy_y_penalty_above=85` by default, applying
-the same Y penalties alongside boundary truncation. Set either threshold to
+the same Y penalties alongside boundary termination. Set either threshold to
 `None` only to explicitly disable that side's shaping.
 
 ```python
@@ -415,16 +420,16 @@ option is introduced; seeded reset is the supported reproducible initialization.
 ## Actions and artifact compatibility
 
 `actions.Action` and `actions.ACTIONS` define the canonical order:
-up, down, left, right, attack, castSpell:1, castSpell:2, castSpell:3.
-The schema is `mystic-eight-v1`; the observation schema is `mystic-26-v1`.
-New eight-action demonstrations use `mystic/BC-v1`.
+up, down, left, right, castSpell:1, castSpell:2, castSpell:3.
+The schema is `mystic-seven-v2`; the observation schema is `mystic-ten-enemies-relative-five-56-v2`.
+New seven-action demonstrations use `mystic/BC-v1`.
 
 Live Mystic and MysticBC still use their legacy 11-action schemas, now imported
 from this central module. Existing trainers/recorders retain their defaults.
 Switching their policy heads and Minari producers is deferred to the plan's
 training migration. Do not label an 11-action dataset as BC-v1.
 
-Future eight-action checkpoint writers must serialize
+Future seven-action checkpoint writers must serialize
 `artifacts.checkpoint_envelope(model.state_dict())`; readers must call
 `artifacts.checkpoint_state(checkpoint)` before loading weights. This rejects
 unversioned legacy weights and mismatched action order, including a BC movement
@@ -479,3 +484,18 @@ before spell calculations.
 
 Phase 3 validation uses Python unit tests and saved numeric expectations. No C#
 compiler, runnable server project, or source files are required to run the tests.
+
+## Expanded enemy observation
+
+The base observation now has 56 values: six player/map fields, ten nearest
+living enemies with [Manhattan distance, coarse direction, HP fraction, MP
+fraction], and signed [dx, dy] for the same first five enemies. Relative offsets
+are enemy minus player coordinates, bounded by [-99, 99] on map53. Missing slots
+are zero-filled. Sorting uses Manhattan distance then entity ID, with no new
+visibility filter. The first 26 fields keep their previous meanings.
+
+Recurrent training appends 24 history/sensor values (80 total). Old 26/50-input
+checkpoints require their original code revision; they cannot resume unchanged.
+The live ZMQ parser still needs the matching expanded encoding before deployment.
+See [the training observation contract](../../Training/Mystic_Sim/README.md)
+for indices, normalization, and live integration requirements.

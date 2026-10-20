@@ -1,0 +1,11 @@
+{
+  "extends": "curriculum_manual.json",
+  "stage": "four_innies_tight",
+  "stages": {
+    "four_innies_tight": {"enemy_count": 4, "kill_goal": 4, "path_distance": [3, 8]}
+  },
+  "continue_from": "runs/mystic_sim/curriculum/timeout25_3v1_seed42/checkpoints/checkpoint_09.pt",
+  "runtime": {
+    "run_dir": "runs/mystic_sim/curriculum/timeout25_4v1_from_3v1_cp09_seed{seed}"
+  }
+}

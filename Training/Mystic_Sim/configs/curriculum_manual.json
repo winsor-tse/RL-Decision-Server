@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "stage": "one_innie",
+  "schedule_timesteps": 2000000,
+  "stages": {
+    "one_innie": {"enemy_count": 1, "kill_goal": 1, "path_distance": [2, 12]},
+    "two_innies": {"enemy_count": 2, "kill_goal": 2, "path_distance": [2, 16]},
+    "three_innies": {"enemy_count": 3, "kill_goal": 3, "path_distance": [2, 20]},
+    "five_innies": {"enemy_count": 5, "kill_goal": 5, "path_distance": [2, 24]},
+    "twenty_innies": {"enemy_count": 20, "kill_goal": 5, "path_distance": [1, 10000]},
+    "forty_innies": {"enemy_count": 40, "kill_goal": 5, "path_distance": [1, 10000]},
+    "full": null
+  },
+  "ppo": {
+    "recurrent": true,
+    "actor_head": "linear",
+    "seed": 42,
+    "total_timesteps": 200000,
+    "num_envs": 4,
+    "num_steps": 256,
+    "num_minibatches": 4,
+    "update_epochs": 4,
+    "learning_rate": 0.00025,
+    "gamma": 0.999,
+    "gae_lambda": 0.95,
+    "clip_coef": 0.2,
+    "reward_scale": 0.01,
+    "value_clip_coef": null,
+    "ent_coef": 0.01,
+    "vf_coef": 0.5,
+    "actor_max_grad_norm": 0.5,
+    "critic_max_grad_norm": 0.5,
+    "target_kl": 0.03,
+    "anneal_lr": false,
+    "eval_episodes": 30,
+    "eval_seed": 20000
+  },
+  "runtime": {
+    "device": "cuda",
+    "run_dir": "runs/mystic_sim/curriculum/{stage}_seed{seed}",
+    "record_gameplay": true,
+    "record_stride": 5,
+    "torch_threads": 1
+  }
+}

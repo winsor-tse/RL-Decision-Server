@@ -22,7 +22,7 @@ class TerrainTests(unittest.TestCase):
                 for entity in (world.player,*world.monsters.values()):
                     self.assertNotIn((entity.x,entity.y),world.map.blocked_cells)
                     self.assertTrue(0 <= entity.x < 100 and 0 <= entity.y < 100)
-                env.step(step%8)
+                env.step(step%7)
                 if env.episode_done:
                     break
 

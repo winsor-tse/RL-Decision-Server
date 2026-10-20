@@ -14,6 +14,9 @@ def build_info(env, *, action=None, applied=None, reason=None, components=None,
     return {
         "seed": int(env.np_random_seed), "profile": env.config.profile,
         "reward_profile": env.reward_config.profile,
+        "encounter": (asdict(env.config.encounter) if env.config.encounter is not None else
+                      {"stage_id": "full", "enemy_count": sum(b.quantity for b in w.map.spawn_boxes),
+                       "kill_goal": env.reward_config.win_kills, "path_distance": None}),
         "simulation_time_ms": w.time_ms, "current_step": w.step_count,
         "kills": w.kills, "selected_target": target_id,
         "selected_entity_ids": [m.entity_id for m in nearest_monsters(w)],

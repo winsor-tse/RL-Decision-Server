@@ -10,15 +10,18 @@ import torch
 from torch import nn
 from torch.distributions import Categorical
 
-from Custom_enviornments.Mystic_Sim.actions import contract_metadata
+from Custom_enviornments.Mystic_Sim.actions import ACTIONS, contract_metadata
 from Custom_enviornments.Mystic_Sim.config import ScenarioConfig
 from Custom_enviornments.Mystic_Sim.env import MysticSimEnv
 from Custom_enviornments.Mystic_Sim.map_loader import DEFAULT_MAP_PATH
 from Custom_enviornments.Mystic_Sim.rewards import COMPONENTS
+from .encounter_diagnostics import EncounterDiagnostics
 
 
 @dataclass
 class PPOConfig:
+    recurrent: bool = False
+    actor_head: str = 'linear'
     seed: int = 1
     total_timesteps: int = 262144
     num_envs: int = 1
@@ -50,6 +53,8 @@ class PPOConfig:
         return math.ceil(self.total_timesteps / self.batch_size)
 
     def validate(self):
+        if self.actor_head not in ('linear', 'tanh'):
+            raise ValueError('actor_head must be linear or tanh')
         for name in ('total_timesteps', 'num_envs', 'num_steps', 'num_minibatches',
                      'update_epochs', 'eval_episodes'):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
@@ -58,6 +63,8 @@ class PPOConfig:
             raise ValueError('Seeds must be nonnegative')
         if self.batch_size % self.num_minibatches or self.batch_size // self.num_minibatches < 2:
             raise ValueError('Batch size must divide evenly into minibatches of at least two samples')
+        if self.recurrent and (self.num_steps % self.num_minibatches or self.num_steps // self.num_minibatches < 2):
+            raise ValueError('Recurrent num_steps must divide into num_minibatches sequences of at least two timesteps')
         if self.updates < 10:
             raise ValueError('Use at least ten PPO updates to produce ten distinct checkpoints')
         for name in ('learning_rate', 'actor_max_grad_norm', 'critic_max_grad_norm', 'clip_coef', 'reward_scale'):
@@ -93,12 +100,23 @@ class SimBatch:
     Step observations are always the final pre-reset observations. Phase 7 may
     replace this adapter with subprocess workers without changing PPO targets.
     """
-    def __init__(self, count, seed, factory=make_env):
+    def __init__(self, count, seed, factory=make_env, recurrent=False, sampling_states=None):
         self.envs = []
         try:
             for _ in range(count):
                 self.envs.append(factory())
-            self.observations = np.stack([e.reset(seed=seed+i)[0] for i, e in enumerate(self.envs)])
+            if sampling_states is not None:
+                if len(sampling_states) != count:
+                    raise ValueError('Sampler checkpoint must match the environment count')
+                for env, state in zip(self.envs, sampling_states):
+                    env.restore_sampling_state(state)
+            self.observations = np.stack([e.reset(seed=None if sampling_states is not None else seed+i)[0]
+                                          for i, e in enumerate(self.envs)])
+            self.encounter_diagnostics = [EncounterDiagnostics(e.world) for e in self.envs]
+            from .history import ObservableHistory
+            self.histories = [ObservableHistory.from_env(e) for e in self.envs] if recurrent else None
+            if self.histories:
+                self.observations = np.stack([h.encode(o) for h, o in zip(self.histories, self.observations)])
         except Exception:
             self.close()
             raise
@@ -106,15 +124,29 @@ class SimBatch:
     def step(self, actions):
         if len(actions) != len(self.envs):
             raise ValueError('One action per environment is required')
+        for tracker, env in zip(self.encounter_diagnostics, self.envs):
+            tracker.before(env.world)
         rows = [e.step(int(a)) for e, a in zip(self.envs, actions)]
+        for tracker, env, row in zip(self.encounter_diagnostics, self.envs, rows):
+            row[4]['combat_navigation'] = tracker.after(env.world, row[4])
         final_obs = np.stack([row[0] for row in rows])
         rewards = np.asarray([row[1] for row in rows], dtype=np.float32)
         terminated = np.asarray([row[2] for row in rows], dtype=bool)
         truncated = np.asarray([row[3] for row in rows], dtype=bool)
         infos = [row[4] for row in rows]
+        if self.histories:
+            for i, history in enumerate(self.histories):
+                history.update_from_info(self.observations[i], int(actions[i]), infos[i],
+                                         self.envs[i].config.timing.step_ms)
+            final_obs = np.stack([h.encode(o) for h, o in zip(self.histories, final_obs)])
         self.observations = final_obs.copy()
         for i in np.flatnonzero(terminated | truncated):
-            self.observations[i] = self.envs[i].reset()[0]
+            reset_obs = self.envs[i].reset()[0]
+            self.encounter_diagnostics[i] = EncounterDiagnostics(self.envs[i].world)
+            if self.histories:
+                self.histories[i].reset()
+                reset_obs = self.histories[i].encode(reset_obs)
+            self.observations[i] = reset_obs
         return final_obs, rewards, terminated, truncated, infos
 
     def close(self):
@@ -133,8 +165,8 @@ class Agent(nn.Module):
     def __init__(self, observation_high):
         super().__init__()
         self.register_buffer('observation_scale', torch.tensor(observation_high, dtype=torch.float32))
-        self.actor = nn.Sequential(layer(26, 128), nn.Tanh(), layer(128, 128), nn.Tanh(), layer(128, 8, .01))
-        self.critic = nn.Sequential(layer(26, 128), nn.Tanh(), layer(128, 128), nn.Tanh(), layer(128, 1, 1))
+        self.actor = nn.Sequential(layer(len(observation_high), 128), nn.Tanh(), layer(128, 128), nn.Tanh(), layer(128, len(ACTIONS), .01))
+        self.critic = nn.Sequential(layer(len(observation_high), 128), nn.Tanh(), layer(128, 128), nn.Tanh(), layer(128, 1, 1))
 
     def normalized(self, obs):
         # Fixed per-feature scaling, checkpointed with the model; no running stats.
@@ -172,10 +204,10 @@ def json_write(path, data):
     temp.replace(path)
 
 
-def metadata(env):
+def metadata(env, recurrent=False, actor_head='linear'):
     import inspect
     source = Path(inspect.getfile(MysticSimEnv)).parent
-    return {
+    result = {
         'backend': 'mystic_sim_python', 'architecture': 'ppo_mlp_128x128_v1',
         'training_schema': 'scaled_returns_separate_gradient_clips_v2',
         'contract': contract_metadata(),
@@ -189,13 +221,54 @@ def metadata(env):
             if p.name != 'viewer.py')).hexdigest(),
         'resume_policy': 'optimizer/counters/RNG restored; fresh simulator episodes, not exact world replay',
     }
+    if recurrent:
+        if actor_head not in ('linear', 'tanh'):
+            raise ValueError('actor_head must be linear or tanh')
+        from .history import HISTORY_SCHEMA, HISTORY_FEATURES, SENSOR_RANGE, observation_high
+        result.update(architecture=('ppo_separate_lstm_128_linear_actor_v2' if actor_head == 'linear'
+                                    else 'ppo_separate_lstm_128_v1'),
+                      history_schema=HISTORY_SCHEMA, history_features=HISTORY_FEATURES,
+                      terrain_sensors={'range_tiles': SENSOR_RANGE, 'directions': ['up', 'down', 'left', 'right'],
+                                       'distance': 'free_tiles_before_blocker_divided_by_range',
+                                       'boundaries_solid': True, 'entities_included': False},
+                      observation_scale=observation_high(env.observation_space.high).tolist())
+        result['contract'] = {**result['contract'], 'observation_schema': HISTORY_SCHEMA,
+                              'observation_size': len(result['observation_scale'])}
+    return result
+
+
+def saved_config(payload):
+    """Old recurrent checkpoints used Tanh; never infer linear from a new default."""
+    values = dict(payload['ppo_config'])
+    values.setdefault('actor_head', 'tanh')
+    return PPOConfig(**values)
 
 
 def load_checkpoint(path, expected_metadata):
     payload = torch.load(path, map_location='cpu', weights_only=True)
     if not isinstance(payload, dict) or payload.get('format') != 'mystic_sim_ppo_v2':
         raise ValueError('Expected a Mystic Sim PPO v2 checkpoint; start a new run for scaled critic training')
-    if payload.get('metadata') != expected_metadata:
+    saved_metadata = payload.get('metadata')
+    compatible = saved_metadata == expected_metadata
+    if not compatible and isinstance(saved_metadata, dict):
+        # Historical checkpoints hash raw bytes. Git's LF/CRLF conversion must
+        # not prevent portable playback. Accept only hashes reproduced from
+        # this exact local source; keep every other metadata check strict.
+        import inspect
+        source = Path(inspect.getfile(MysticSimEnv)).parent
+        files = [(p.name.encode(), p.read_bytes()) for p in sorted(source.glob('*.py'))
+                 if p.name != 'viewer.py']
+        variants = {
+            hashlib.sha256(b''.join(name + transform(data) for name, data in files)).hexdigest()
+            for transform in (lambda b: b, lambda b: b.replace(b'\r\n', b'\n'),
+                              lambda b: b.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'))
+        }
+        equivalent = dict(saved_metadata)
+        equivalent['engine_sha256'] = expected_metadata.get('engine_sha256')
+        compatible = (saved_metadata.get('engine_sha256') in variants
+                      and expected_metadata.get('engine_sha256') in variants
+                      and equivalent == expected_metadata)
+    if not compatible:
         raise ValueError('Checkpoint simulator configuration, map, mechanics, or policy contract is incompatible')
     required = {'agent', 'optimizer', 'ppo_config', 'update', 'global_step', 'rng', 'episodes', 'wins'}
     if not required <= payload.keys():
@@ -210,10 +283,11 @@ def episode_metrics():
 
 
 def accumulate(metrics, action, reward, info):
+    metrics.update(info.get('combat_navigation', {}))
     metrics['episode_return'] += float(reward)
     metrics['length'] += 1
-    metrics['cast_attempts'] += int(action >= 5)
-    metrics['invalid_casts'] += int(action >= 5 and not info['action_applied'])
+    metrics['cast_attempts'] += int(action >= 4)
+    metrics['invalid_casts'] += int(action >= 4 and not info['action_applied'])
     metrics['collisions'] += int(info['collision_kind'] is not None)
     metrics['cooldown_rejections'] += int(info['cooldown_penalty'] < 0)
     for event in info['damage_events']:
