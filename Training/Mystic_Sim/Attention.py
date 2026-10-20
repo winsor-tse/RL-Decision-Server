@@ -4,7 +4,7 @@ This module encodes one player query and a set of enemy keys/values. It is
 non-causal: masks exclude padding, not later enemy slots. Inputs should already
 be normalized by the caller. No slot-position embeddings are used.
 
-This standalone module does not change RecurrentAgent/checkpoint architecture.
+RecurrentAgent uses this through EnemyAttentionEncoder for new recurrent runs.
 Enemy-to-enemy self-attention, if desired, is a separate preceding stage.
 """
 import torch
@@ -76,16 +76,42 @@ class CrossAttention(nn.Module):
         return summary
 
 
-# Integration notes:
-# Current normalized observation: player/map [0:6], enemy blocks [6:46]
-# reshaped to [..., 10, 4], five dx/dy pairs [46:56], history [56:80].
-# Only the first five enemies have exact coordinates. Use coordinate-known
-# flags if combining both formats; never infer exact dx/dy from coarse direction.
-# Enemy HP fraction > 0 identifies valid slots in this simulator.
-# Concatenate the summary with player/history/terrain information before LSTM.
-# Keep actor/critic encoders separate if preserving independent gradient clipping.
-# Policy wiring requires versioned architecture metadata and matching train,
-# evaluation and viewer construction; old flat-encoder weights cannot load as-is.
+class EnemyAttentionEncoder(nn.Module):
+    """Convert normalized 80-feature observations to 512-feature LSTM inputs.
+
+    Each actor/critic owns its own instance. No information is added to the
+    observation: absent coordinates have zero placeholders and a known flag.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.attention = CrossAttention(6, 7, dimensions=64, num_heads=4)
+        # Match the old encoder's hidden width/depth after pooling. Player/map
+        # and all 24 history/sensor features bypass pooling, preserving context.
+        self.fusion = nn.Sequential(nn.Linear(94, 640), nn.ReLU(),
+                                    nn.Linear(640, 640), nn.ReLU(), nn.Linear(640, 512))
+
+    @staticmethod
+    def unpack(observations):
+        # Flatten only leading time/environment axes, preserving their order.
+        flat = observations.reshape(-1, 80)
+        player = flat[:, :6]
+        enemies = flat[:, 6:46].reshape(-1, 10, 4)
+        valid = enemies[:, :, 2] > 0  # Living-enemy HP, not coordinates.
+        offsets = flat.new_zeros((flat.shape[0], 10, 2))
+        offsets[:, :5] = flat[:, 46:56].reshape(-1, 5, 2)
+        known = flat.new_zeros((flat.shape[0], 10, 1))
+        known[:, :5, 0] = valid[:, :5].to(flat.dtype)
+        # distance, direction, HP, MP, dx, dy, coordinates_known
+        entities = torch.cat((enemies, offsets, known), dim=-1)
+        entities = entities.masked_fill(torch.logical_not(valid[..., None]), 0)
+        return player, entities, valid, flat[:, 56:80]
+
+    def forward(self, observations):
+        player, enemies, valid, history = self.unpack(observations)
+        summary = self.attention(player, enemies, valid)
+        fused = self.fusion(torch.cat((player, summary, history), dim=-1))
+        return fused.reshape(*observations.shape[:-1], 512)
 
 
 def demo():

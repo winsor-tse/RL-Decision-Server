@@ -203,9 +203,9 @@ def load_evaluation_agent(path, device='cpu'):
     env = factory()
     try:
         config = saved_config(raw)
-        contract = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head)
+        contract = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder)
         checkpoint = load_checkpoint(path, contract)
-        agent = (RecurrentAgent(contract['observation_scale'], config.actor_head)
+        agent = (RecurrentAgent(contract['observation_scale'], config.actor_head, config.recurrent_encoder)
                  if config.recurrent else Agent(contract['observation_scale'])).to(device)
         agent.load_state_dict(checkpoint['agent'])
     finally:

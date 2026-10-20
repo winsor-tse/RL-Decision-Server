@@ -24,8 +24,8 @@ class RecurrentSpeedTests(unittest.TestCase):
         for head,device in product(('linear','tanh'),devices):
             for reset_mode in ('none','mixed','every'):
                 torch.manual_seed(12)
-                agent=RecurrentAgent([1.]*50,head).to(device)
-                obs=torch.randn(9,3,50,requires_grad=True,device=device)
+                agent=RecurrentAgent([1.]*80,head).to(device)
+                obs=torch.randn(9,3,80,requires_grad=True,device=device)
                 starts=torch.zeros(9,3,dtype=torch.bool,device=device)
                 if reset_mode=='mixed': starts[0,1]=True;starts[3,0]=True;starts[7,2]=True
                 if reset_mode=='every': starts[:]=True
@@ -51,8 +51,8 @@ class RecurrentSpeedTests(unittest.TestCase):
 
     def test_bootstrap_matches_full_forward_without_actor_or_state_mutation(self):
         for device in ['cpu']+(['cuda'] if torch.cuda.is_available() else []):
-            agent=RecurrentAgent([1.]*50).to(device)
-            obs=torch.randn(3,50,device=device)
+            agent=RecurrentAgent([1.]*80).to(device)
+            obs=torch.randn(3,80,device=device)
             state=tuple(torch.randn_like(s) for s in agent.initial_state(3))
             saved=tuple(s.clone() for s in state)
             with torch.no_grad():

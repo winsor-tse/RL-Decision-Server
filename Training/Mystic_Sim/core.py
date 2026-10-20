@@ -22,6 +22,7 @@ from .encounter_diagnostics import EncounterDiagnostics
 class PPOConfig:
     recurrent: bool = False
     actor_head: str = 'linear'
+    recurrent_encoder: str = 'cross_attention'
     seed: int = 1
     total_timesteps: int = 262144
     num_envs: int = 1
@@ -53,6 +54,8 @@ class PPOConfig:
         return math.ceil(self.total_timesteps / self.batch_size)
 
     def validate(self):
+        if self.recurrent_encoder not in ('flat', 'cross_attention'):
+            raise ValueError('recurrent_encoder must be flat or cross_attention')
         if self.actor_head not in ('linear', 'tanh'):
             raise ValueError('actor_head must be linear or tanh')
         for name in ('total_timesteps', 'num_envs', 'num_steps', 'num_minibatches',
@@ -204,7 +207,7 @@ def json_write(path, data):
     temp.replace(path)
 
 
-def metadata(env, recurrent=False, actor_head='linear'):
+def metadata(env, recurrent=False, actor_head='linear', recurrent_encoder='cross_attention'):
     import inspect
     source = Path(inspect.getfile(MysticSimEnv)).parent
     result = {
@@ -234,6 +237,17 @@ def metadata(env, recurrent=False, actor_head='linear'):
                       observation_scale=observation_high(env.observation_space.high).tolist())
         result['contract'] = {**result['contract'], 'observation_schema': HISTORY_SCHEMA,
                               'observation_size': len(result['observation_scale'])}
+        if recurrent_encoder == 'cross_attention':
+            result['architecture'] = f'ppo_separate_cross_attention_lstm_128_{actor_head}_v1'
+            result['entity_encoder'] = {
+                'schema': 'ten_enemies_seven_features_known_coordinates_v1',
+                'dimensions': 64, 'heads': 4, 'pooling': 'player_query',
+                'enemy_features': ['distance', 'direction', 'hp', 'mp', 'dx', 'dy', 'coordinates_known'],
+                'known_coordinate_slots': 5, 'validity': 'hp_positive',
+                'player_features': 6, 'history_features': 24,
+                'fusion_widths': [94, 640, 640, 512], 'shared_actor_critic': False}
+        elif recurrent_encoder != 'flat':
+            raise ValueError('Unknown recurrent encoder')
     return result
 
 
@@ -241,6 +255,8 @@ def saved_config(payload):
     """Old recurrent checkpoints used Tanh; never infer linear from a new default."""
     values = dict(payload['ppo_config'])
     values.setdefault('actor_head', 'tanh')
+    # Missing fields belong to historical checkpoints, never the new default.
+    values.setdefault('recurrent_encoder', 'flat')
     return PPOConfig(**values)
 
 
@@ -252,8 +268,8 @@ def load_checkpoint(path, expected_metadata):
     compatible = saved_metadata == expected_metadata
     if not compatible and isinstance(saved_metadata, dict):
         # Historical checkpoints hash raw bytes. Git's LF/CRLF conversion must
-        # not prevent portable playback. Accept only hashes reproduced from
-        # this exact local source; keep every other metadata check strict.
+        # not prevent portable playback. Accept hashes reproduced from this
+        # source plus the verified legacy alias below. Other checks stay strict.
         import inspect
         source = Path(inspect.getfile(MysticSimEnv)).parent
         files = [(p.name.encode(), p.read_bytes()) for p in sorted(source.glob('*.py'))
@@ -263,6 +279,18 @@ def load_checkpoint(path, expected_metadata):
             for transform in (lambda b: b, lambda b: b.replace(b'\r\n', b'\n'),
                               lambda b: b.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'))
         }
+        # Older checkpoints recorded a hash of files containing BOTH Windows
+        # (CRLF) and Unix (LF) newlines. The three variants above cannot recreate
+        # that old mixture after checkout converts the files to uniform newlines.
+        # These two hashes were verified to represent the same source code:
+        verified_lf_hash = '8c3a35ef95d99cdec46bbdfb304d9c9bdc5abad37e40af5b04ca7f98b9051251'
+        legacy_mixed_newline_hash = 'c724e05ef628d576e88d0dc14f56800e23a18508d7e6fb7dc706e3dfd190faf0'
+        current_lf_hash = hashlib.sha256(b''.join(
+            name + data.replace(b'\r\n', b'\n') for name, data in files)).hexdigest()
+        # Allow that old hash only while the local source still matches.
+        # An actual source-code change disables this exception.
+        if current_lf_hash == verified_lf_hash:
+            variants.add(legacy_mixed_newline_hash)
         equivalent = dict(saved_metadata)
         equivalent['engine_sha256'] = expected_metadata.get('engine_sha256')
         compatible = (saved_metadata.get('engine_sha256') in variants

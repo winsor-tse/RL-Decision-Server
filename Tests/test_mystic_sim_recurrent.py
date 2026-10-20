@@ -28,7 +28,7 @@ class RecurrentTests(unittest.TestCase):
         return RecurrentAgent(observation_high(env.observation_space.high)).to(device)
 
     def test_head_comparison_preserves_critic_and_actor_trunk_initialization(self):
-        high = np.ones(50, dtype=np.float32)
+        high = np.ones(80, dtype=np.float32)
         torch.manual_seed(43)
         linear = RecurrentAgent(high, 'linear')
         torch.manual_seed(43)
@@ -50,7 +50,7 @@ class RecurrentTests(unittest.TestCase):
             PPOConfig(actor_head='bad').validate()
         env = make_env()
         self.addCleanup(env.close)
-        old = metadata(env, recurrent=True, actor_head='tanh')
+        old = metadata(env, recurrent=True, actor_head='tanh', recurrent_encoder='flat')
         self.assertEqual(old['architecture'], 'ppo_separate_lstm_128_v1')
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/'tanh.pt'

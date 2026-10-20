@@ -82,7 +82,9 @@ python -m Training.Mystic_Sim.train_full --validate-only --device cuda
 
 Default settings:
 
-- Fresh LSTM PPO with linear actor head; seed 42.
+- Fresh cross-attention + LSTM PPO with linear actor head; seed 42.
+  Use `--recurrent-encoder flat` for the previous encoder. Continuation inherits
+  the saved architecture; old flat checkpoints are not converted to attention.
 - Three million requested transitions, combined across four environments.
 - 256 rollout steps per environment; four minibatches; four PPO epochs.
 - Constant learning rate 0.00025, gamma 0.999, learning-only reward scale 0.01.
