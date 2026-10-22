@@ -22,6 +22,7 @@ MANIFEST_SCHEMA = 'mystic_live_baseline_v1'
 SOURCE_FILES = (
     'Automation/Bridge/ws_zmq_bridge.py', 'Automation/Bridge/evidence.py',
     'Inference/Mystic_Live/baseline.py', 'Inference/Mystic_Live/PHASE_8A.md',
+    'Inference/Mystic_Live/PHASE_8B.md', 'Tests/fixtures/live/phase8b_sequence.json',
     'Tests/fixtures/live/phase8a_scenarios.json', 'Tests/fixtures/simulation/provenance.json',
     'Custom_enviornments/Config.yaml',
     'Custom_enviornments/BaseEnv.py', 'Custom_enviornments/Test_Env/Mystic.py',
@@ -309,7 +310,7 @@ def build_baseline(*, checkpoint=None, captures=(), extension_dir=None, deployme
     finally:
         reference_env.close()
     source_files = set(SOURCE_FILES)
-    for folder in ('Custom_enviornments/Mystic_Sim', 'Training/Mystic_Sim'):
+    for folder in ('Custom_enviornments/Mystic_Sim', 'Training/Mystic_Sim', 'Inference/Mystic_Live'):
         source_files.update(p.relative_to(root).as_posix() for p in (root / folder).glob('*.py'))
     return dict(schema=MANIFEST_SCHEMA, created_at_utc=datetime.now(timezone.utc).isoformat(),
                 scope='single_episode_frozen_actor_inference', repository=git_identity(root),

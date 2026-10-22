@@ -107,6 +107,11 @@ python -m Training.Mystic_Sim.watch PATH_TO_CHECKPOINT --seed 91000 --smoke-test
 Phase 8A [baseline and bridge evidence tools](../../Inference/Mystic_Live/PHASE_8A.md)
 are implemented. They inventory/capture data only; the inference-driven LIVE
 watch mode below remains TODO, and the deployment checkpoint is unselected.
+Phase 8B [single-run lifecycle and observation-only server](../../Inference/Mystic_Live/PHASE_8B.md)
+are also implemented. Final raw state/history/timing is retained in a detached
+JSON report; live Pygame rendering and checkpoint-driven inference remain later
+integration. A proposed execution-feedback consumer is tested, but the current
+plugin still needs its authoritative feedback producer.
 
 The current launcher watches a local simulator episode. Live-server integration
 is still TODO; the dashboard's SIMULATION badge makes the source explicit.

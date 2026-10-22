@@ -1,1 +1,1 @@
-"""Simulator-policy live integration. Phase 8A provides evidence tools only."""
+"""Live evidence and single-run lifecycle. Actor loading/encoding is later work."""

@@ -15,3 +15,10 @@ no-target and cooldown attempts, death, map change and disconnect. Automated
 tests additionally send the inputs over actual local WebSocket/ZMQ sockets with
 a stub backend, checking that the optional recorder preserves raw messages.
 Neither the fixture nor a stub backend executes game actions.
+
+`phase8b_sequence.json` is a saved synthetic lifecycle sequence: confirmed cast,
+pending tick, blocked move, another chosen spell, death, and an ignored alive
+tick. Its `mystic_live_execution_v1` records exercise the new acknowledgement
+consumer contract; they are not fields currently emitted by the JS plugin or
+proof of game execution. The lifecycle tests replay this sequence and check the
+retained final frame and exact-once history.

@@ -1,0 +1,23 @@
+{
+  "provenance": "synthetic_lifecycle_contract_not_live_game_acknowledgements",
+  "run_id": "synthetic-run",
+  "actor_actions": [4, 0, 5],
+  "ticks": [
+    {"index": 0, "advance_seconds": 0, "expected_move": "castSpell:1"},
+    {"index": 1, "advance_seconds": 0.175, "expected_move": "up", "execution": {
+      "schema": "mystic_live_execution_v1", "runId": "synthetic-run", "actionId": "synthetic-run:1",
+      "requestId": "tick-0", "actionLabel": "castSpell:1", "applied": true,
+      "movementBlocked": false, "cooldownRejected": false, "clockId": "synthetic-server-clock",
+      "attemptedAtMs": 1000, "stateTimeMs": 1175
+    }},
+    {"index": 2, "advance_seconds": 0.1, "expected_move": null},
+    {"index": 3, "advance_seconds": 0.215, "expected_move": "castSpell:2", "execution": {
+      "schema": "mystic_live_execution_v1", "runId": "synthetic-run", "actionId": "synthetic-run:2",
+      "requestId": "tick-1", "actionLabel": "up", "applied": false,
+      "movementBlocked": true, "cooldownRejected": false, "clockId": "synthetic-server-clock",
+      "attemptedAtMs": 1200, "stateTimeMs": 1490
+    }},
+    {"index": 4, "advance_seconds": 0.2, "hp": 0, "expected_move": null, "expected_stop": "player_death"},
+    {"index": 5, "advance_seconds": 0.2, "hp": 9463, "expected_move": null, "expected_stop": "player_death"}
+  ]
+}

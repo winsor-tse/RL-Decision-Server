@@ -156,3 +156,7 @@ compatibility or real-game parity is claimed. The checkpoint remains unselected.
 See [the phase plan](../../Custom_enviornments/MYSTIC_ZMQ_PARITY_PLAN.md) and
 [live watch TODO](../../Training/Mystic_Sim/WATCH_POLICY.md#todo-launch-the-same-watch-ui-from-the-live-server)
 for subsequent single-episode inference work.
+
+Follow-up implemented: [Phase 8B lifecycle and observation-only server](PHASE_8B.md).
+It adds single-run startup/stop and feedback correlation; it does not select a
+deployment checkpoint or claim that the current plugin publishes confirmed outcomes.

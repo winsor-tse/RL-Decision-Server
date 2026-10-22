@@ -1472,9 +1472,11 @@ Exit gate:
 ### Phase 8 - Test the live ZMQ contract, payload differences, and sim-to-game gap
 
 Phase 8A evidence tooling is implemented: [baseline/capture commands and status](../Inference/Mystic_Live/PHASE_8A.md).
+Phase 8B lifecycle is implemented: [observation-only server, bridge and history contract](../Inference/Mystic_Live/PHASE_8B.md).
 The deployment checkpoint remains unselected. Runtime extension/game identity
-and real scripted-game evidence are explicitly unverified; subsequent live
-inference and watch integration remain planned.
+and real scripted-game evidence are explicitly unverified. The live actor encoder,
+authoritative feedback producer, checkpoint loader and watch integration remain
+subsequent work.
 
 **Updated scope: single-episode live inference.** Train and parallelize locally
 in Mystic Sim; deploy a frozen actor to one real player through ZMQ. Each

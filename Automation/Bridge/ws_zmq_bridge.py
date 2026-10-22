@@ -29,6 +29,68 @@ zmq_lock = asyncio.Lock()
 
 zmq_socket: Optional[zmq.asyncio.Socket] = None
 capture: Optional[JsonlCapture] = None
+single_run = False
+bridge_id = uuid.uuid4().hex
+active_connection_id = None
+active_run_id = None
+terminal_reply = None
+
+
+def inert_reply(request_id, *, reason=None):
+    """An inert transport reply is not a selectable policy action."""
+    result = dict(terminal_reply or {})
+    result.update(type='ai_result', requestId=request_id, move=None, reset=False,
+                  actionId=None, serverTime=time.time())
+    if reason:
+        result['idleReason'] = reason
+    return result
+
+
+def latch_terminal(response=None, *, reason=None):
+    global terminal_reply
+    if terminal_reply is None:
+        terminal_reply = dict(response or {}, move=None, reset=False, actionId=None,
+                              stopInference=True)
+        terminal_reply.setdefault('runId', active_run_id)
+        if terminal_reply.get('inferenceStatus') not in ('stopped', 'interrupted'):
+            terminal_reply['inferenceStatus'] = 'interrupted'
+        if not terminal_reply.get('stopReason'):
+            terminal_reply['stopReason'] = reason or 'bridge_interrupted'
+
+
+def single_run_response(response, request_id):
+    """Pin one backend run and suppress malformed/legacy/terminal commands."""
+    global active_run_id
+    from Custom_enviornments.Mystic_Sim.actions import ACTIONS
+    if response.get('requestId') != request_id:
+        latch_terminal(reason='backend_request_mismatch')
+    elif response.get('error'):
+        latch_terminal(reason='backend_timeout' if response['error'] == 'ZeroMQ backend timeout' else 'backend_error')
+    else:
+        run_id = response.get('runId')
+        move = response.get('move')
+        label = ':'.join(move.split(':')[:2]) if isinstance(move, str) and move.startswith('castSpell:') else move
+        valid_move = move is None or (isinstance(label, str) and label in ACTIONS)
+        if move is not None:
+            valid_move = (valid_move and response.get('inferenceStatus') == 'action_pending'
+                          and isinstance(response.get('actionId'), str) and bool(response['actionId']))
+        if (not isinstance(run_id, str) or not run_id or not valid_move or response.get('reset') is not False
+                or response.get('inferenceStatus') not in ('waiting_for_first_valid_state', 'running',
+                                                         'action_pending', 'stopped', 'interrupted')):
+            latch_terminal(reason='incompatible_backend')
+        elif active_run_id is not None and run_id != active_run_id:
+            latch_terminal(dict(runId=active_run_id), reason='backend_run_changed')
+        else:
+            active_run_id = run_id
+            if response.get('stopInference') or response.get('inferenceStatus') in ('stopped', 'interrupted'):
+                latch_terminal(response)
+    return inert_reply(request_id) if terminal_reply is not None else response
+
+
+def bridge_context(connection_id):
+    return dict(schema='mystic_single_run_bridge_v1', bridgeId=bridge_id,
+                connectionId=connection_id, receivedMonotonicNs=time.monotonic_ns(),
+                receivedWallNs=time.time_ns())
 
 
 def record_evidence(event, **fields):
@@ -149,8 +211,11 @@ async def send_to_zmq_backend(message: Dict[str, Any], *, connection_id=None) ->
 
 
 async def handle_websocket(websocket):
+    global active_connection_id
     client = websocket.remote_address
     connection_id = uuid.uuid4().hex
+    if single_run and active_connection_id is None:
+        active_connection_id = connection_id
     record_evidence('client_connected', connection_id=connection_id, remote_address=client)
     logging.info("[JS CONNECTED] Chrome extension client=%s", client)
 
@@ -215,7 +280,21 @@ async def handle_websocket(websocket):
                 }))
                 continue
 
-            response = await send_to_zmq_backend(message, connection_id=connection_id)
+            if single_run and terminal_reply is not None:
+                response = inert_reply(request_id, reason='run_already_ended')
+            elif single_run and connection_id != active_connection_id:
+                response = inert_reply(request_id, reason='foreign_connection')
+            else:
+                forwarded = message
+                if single_run:
+                    # Explicit opt-in only: preserve the legacy bridge envelope
+                    # by default, and overwrite client-supplied context here.
+                    forwarded = dict(message, bridgeContext=bridge_context(connection_id))
+                    if active_run_id is not None:
+                        forwarded['runId'] = active_run_id
+                response = await send_to_zmq_backend(forwarded, connection_id=connection_id)
+                if single_run:
+                    response = single_run_response(response, request_id)
 
             await websocket.send(json.dumps(response))
             record_evidence('client_response_sent', connection_id=connection_id,
@@ -229,19 +308,34 @@ async def handle_websocket(websocket):
         logging.exception("WebSocket handler crashed")
     finally:
         record_evidence('client_disconnected', connection_id=connection_id)
+        if single_run and connection_id == active_connection_id and terminal_reply is None:
+            # Latch before yielding: another connection can never take over this
+            # run while the backend receives the disconnect control event.
+            latch_terminal(reason='client_disconnected')
+            event = dict(type='bridge_event', event='client_disconnected',
+                         requestId=uuid.uuid4().hex, bridgeContext=bridge_context(connection_id))
+            await send_to_zmq_backend(event, connection_id=connection_id)
 
 
 async def main(argv=None):
-    global capture
+    global capture, single_run, active_connection_id, active_run_id, terminal_reply, bridge_id
     parser = argparse.ArgumentParser(description='WebSocket/ZMQ bridge with optional Phase 8A evidence capture.')
     parser.add_argument('--capture', default=os.environ.get('MYSTIC_ZMQ_CAPTURE'),
                         help='New JSONL file; existing files are never overwritten')
     parser.add_argument('--capture-label', help='Operator-provided scenario/run label (not verified execution)')
     parser.add_argument('--capture-max-records', type=int, default=10000)
     parser.add_argument('--capture-max-bytes', type=int, default=64 * 1024 * 1024)
-    parser.add_argument('--capture-actions', choices=('legacy-live', 'sim-seven'), default='legacy-live',
-                        help='Explicit action ordering for index annotations; does not change the backend')
+    parser.add_argument('--capture-actions', choices=('legacy-live', 'sim-seven'),
+                        help='Annotation order; default legacy-live, or sim-seven with --single-run')
+    parser.add_argument('--single-run', action='store_true',
+                        help='Phase 8B adapter mode: connection context, disconnect events and permanent terminal latch')
     args = parser.parse_args(argv)
+    args.capture_actions = args.capture_actions or ('sim-seven' if args.single_run else 'legacy-live')
+    if args.single_run and args.capture_actions != 'sim-seven':
+        parser.error('--single-run uses the sim-seven action contract')
+    single_run = args.single_run
+    active_connection_id, active_run_id, terminal_reply = None, None, None
+    bridge_id = uuid.uuid4().hex
     if min(args.capture_max_records, args.capture_max_bytes) <= 0:
         parser.error('Capture limits must be positive')
     if args.capture:

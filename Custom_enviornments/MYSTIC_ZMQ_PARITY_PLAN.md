@@ -1,7 +1,9 @@
 # Mystic ZMQ and simulation parity plan
 
-Prepared 2026-10-21 from the local implementations. Phase 8A evidence tools are
-implemented; Phases 8B-8H remain planned. No policy/checkpoint contracts changed.
+Prepared 2026-10-21 from the local implementations. Phase 8A evidence tools and
+Phase 8B lifecycle are implemented; Phases 8C-8H remain planned. No simulator
+policy/checkpoint contracts changed. Phase 8B's CLI is observation-only until
+the live encoder, feedback producer and actor loader are integrated.
 
 ## Scope and recommendation
 
@@ -131,6 +133,16 @@ missing-data dependency. Use the example fixture for payload-structure tests,
 with map53-specific values in deployment fixtures.
 
 ### Phase 8B - Correct action history and single-run lifecycle
+
+Implementation and commands: [PHASE_8B.md](../Inference/Mystic_Live/PHASE_8B.md).
+`SingleRun` provides readiness, pending-action correlation, exactly-once confirmed
+history, measured timing and irreversible stop states. The observation-only REP
+server preserves a final state/timing report. The opt-in `--single-run` bridge
+pins the connection and backend run ID, forwards disconnect events and latches
+terminal replies. Tests cover death/reconnect/restart without another episode.
+The proposed execution-feedback consumer is implemented; the current plugin does
+not emit that feedback. Live actor loading/feature encoding and Pygame telemetry
+remain subsequent work; the deployment checkpoint stays unselected.
 
 Address: action/history alignment, variable time, and reliable stopping.
 
