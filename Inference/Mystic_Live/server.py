@@ -1,7 +1,7 @@
-"""Phase 8B REP server: one observation-only lifecycle per explicit launch.
+"""Observation-only REP server: one lifecycle and strict Phase 8C inputs.
 
-No checkpoint is selected or inferred. Real actor loading/encoding belongs to
-8C/8F. Run the matching bridge with --single-run for connection identity/events.
+No checkpoint is selected or inferred. Actor loading belongs to Phase 8F.
+Run the matching bridge with --single-run for connection identity/events.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import time
 import zmq
 
 from .lifecycle import SingleRun
+from .inputs import LivePolicyInputs
 
 
 def decode_message(raw):
@@ -67,7 +68,9 @@ def serve(run, socket, *, stop_event=None, drain_seconds=1., poll_ms=50):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--observe-only', action='store_true', required=True,
-                        help='Required in 8B: observe lifecycle without sending gameplay commands')
+                        help='Observe lifecycle and inputs without sending gameplay commands')
+    parser.add_argument('--input-size', type=int, choices=(56, 80), default=56,
+                        help='80 requires authoritative snapshot clock and confirmed outcomes; no zero-history fallback')
     parser.add_argument('--bind', default='tcp://127.0.0.1:5555')
     parser.add_argument('--startup-timeout', type=float, default=30.)
     parser.add_argument('--idle-timeout', type=float, default=2.)
@@ -78,7 +81,8 @@ def main(argv=None):
     if not 0 < args.drain_seconds <= 5:
         parser.error('--drain-seconds must be in (0, 5]')
     try:
-        run = SingleRun(startup_timeout=args.startup_timeout, idle_timeout=args.idle_timeout,
+        run = SingleRun(input_adapter=LivePolicyInputs(args.input_size),
+                        startup_timeout=args.startup_timeout, idle_timeout=args.idle_timeout,
                         acknowledgement_timeout=args.acknowledgement_timeout)
     except ValueError as error:
         parser.error(str(error))
@@ -98,7 +102,8 @@ def main(argv=None):
     try:
         socket.bind(args.bind)
         print(f'Mystic live lifecycle listening on {args.bind}\nRun: {run.run_id}\n'
-              f'OBSERVATION ONLY / no checkpoint / no gameplay commands\nFinal state: {output}', flush=True)
+              f'OBSERVATION ONLY / no checkpoint / no gameplay commands\n'
+              f'Input contract: {run.input_adapter.schema}\nFinal state: {output}', flush=True)
         serve(run, socket, stop_event=stop_event, drain_seconds=args.drain_seconds)
     except Exception:
         run.stop('transport_error', interrupted=True)

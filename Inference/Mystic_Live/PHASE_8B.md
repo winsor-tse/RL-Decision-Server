@@ -5,9 +5,10 @@ support for connection identity, disconnect notification and terminal latching.
 The deployment checkpoint remains unselected. The runnable server is deliberately
 **observation only**: it exercises the lifecycle against the real payload without
 issuing gameplay commands. A frozen actor can be supplied through the tested
-Python interface; the matching live feature encoder, upstream execution feedback
-and checkpoint loader remain Phase 8C/8F work. No random/scripted actor is exposed
-as a live CLI policy.
+Python interface. [Phase 8C](PHASE_8C.md) now supplies the matching live encoder,
+telemetry specification and capture audit. Authoritative game/extension feedback wiring
+and Phase 8F checkpoint loading remain outstanding. No random/scripted actor is
+exposed as a live CLI policy.
 
 ## Run observation-only mode
 
@@ -97,15 +98,20 @@ seven-action IDs. Data passed for inspection is detached; drawing/reading a
 snapshot never calls the actor or advances memory. The controller has no optimizer,
 reward, rollout buffer, GAE, critic or reset call.
 
+With Phase 8C's explicit `input_adapter`, the first argument is instead the raw
+float32 56/80-vector. The CLI defaults to `--input-size 56`; requesting 80 also
+requires an authoritative observation clock bound to the resulting snapshot.
+
 Each selected command gets a unique `actionId` scoped to `runId`, and retains its
 causing `requestId` and input state. While that action is pending, further ticks
 receive inert replies. A matching confirmed outcome applies once before the next
 decision; changing coordinates or MP is not execution confirmation.
 
 This phase defines/validates the following **new execution-feedback contract**.
-The existing JavaScript payload does not emit it. An authoritative producer and
-the live feature integration must still be supplied in Phase 8C; synthetic tests
-validate the consumer, not actual game acknowledgement semantics.
+The existing JavaScript payload does not emit it. Phase 8C implements the feature
+integration and telemetry validation, but the authoritative game-server producer
+and extension forwarding remain outstanding. Synthetic tests validate the
+Python consumer, not actual game acknowledgement semantics.
 
 ```json
 {
@@ -135,8 +141,9 @@ than allowing another command against invented history.
 Successful-cast ages use confirmed absolute cast times, capped at ten seconds.
 Rejected casts do not reset them. Unseen casts have an explicit seen flag and
 unknown age; before the first acknowledgement, applied/blocked/rejected facts
-are unknown. This is a fact ledger, not a replacement 80-value encoder; converting
-it to the checkpoint's exact observation contract belongs to Phase 8C.
+are unknown. This fact ledger remains distinct from the Phase 8C 80-value encoder,
+which reuses training's explicit episode reset and advancing unseen-age channels
+alongside their zero seen flags. It never fills missing outcomes with zero history.
 
 ## Transport identity and timing
 

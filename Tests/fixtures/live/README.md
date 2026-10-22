@@ -22,3 +22,11 @@ tick. Its `mystic_live_execution_v1` records exercise the new acknowledgement
 consumer contract; they are not fields currently emitted by the JS plugin or
 proof of game execution. The lifecycle tests replay this sequence and check the
 retained final frame and exact-once history.
+
+`phase8c_inputs.json` is a constructed map53 projection with eleven living
+monsters, reversed payload order, distance/ID ties, a numeric string ID, a dead
+monster and an unrelated player. It includes hand-calculated expected 56-value
+features and confirmed action transitions for comparison with training's
+`ObservableHistory`. The fixture is synthetic, not a live capture. Real visible
+entity coverage and authoritative feedback remain unverified. See
+`Inference/Mystic_Live/PHASE_8C.md` for the telemetry/coverage audit commands.

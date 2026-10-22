@@ -155,8 +155,11 @@ simulator-to-live deployment targets one frozen-policy inference episode per
 explicit launch, stopping on death; training stays in the simulator. Phase 8A
 [baseline and optional bridge evidence capture](Inference/Mystic_Live/PHASE_8A.md)
 are available. Phase 8B's [single-run lifecycle and observation-only server](Inference/Mystic_Live/PHASE_8B.md)
-are implemented; the live policy encoder, feedback producer and checkpoint loader
-remain subsequent work. The deployment checkpoint remains unselected.
+are implemented. Phase 8C's [seven-action and 56/80-input adapters](Inference/Mystic_Live/PHASE_8C.md)
+reuse simulator encoding/history/terrain, with strict telemetry validation and a
+capture audit. Authoritative game feedback still needs server/extension wiring
+and real capture validation; checkpoint loading remains subsequent work. The
+deployment checkpoint remains unselected.
 
 ## Running Training
 

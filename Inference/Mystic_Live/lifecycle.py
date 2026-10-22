@@ -1,6 +1,6 @@
 """One explicitly started inference run. No training, resets, or inferred outcomes.
 
-The actor interface is supplied by later policy integration (Phases 8C/8F).
+The actor interface accepts Phase 8C inputs; checkpoint loading is Phase 8F.
 The current JS payload has no execution acknowledgements; missing feedback keeps
 an action pending, then interrupts the run. It never becomes a guessed success.
 """
@@ -14,6 +14,8 @@ import math
 import statistics
 import time
 import uuid
+
+import numpy as np
 
 from Custom_enviornments.Mystic_Sim.actions import ACTIONS
 
@@ -112,17 +114,20 @@ class ConfirmedHistory:
 class SingleRun:
     """Pure controller. actor.initial_state() runs once; actor.choose() never trains.
 
-    choose(world_state, history, memory) returns PolicyChoice. A policy requiring
-    encoded/normalized features must provide its validated encoder separately;
-    this controller does not fabricate the future 56/80-value live contract.
+    choose(input, history, memory) returns PolicyChoice. With input_adapter,
+    input is the raw float32 56/80-vector; the model divides by Box.high once.
+    Without an adapter, the existing raw-world actor interface is retained.
     """
-    def __init__(self, actor=None, *, run_id=None, expected_map=53,
+    def __init__(self, actor=None, *, input_adapter=None, run_id=None, expected_map=53,
                  startup_timeout=30., idle_timeout=2., acknowledgement_timeout=2.,
                  monotonic=time.monotonic, wall_time=time.time):
         if any(not finite_number(v) or v <= 0 for v in
                (startup_timeout, idle_timeout, acknowledgement_timeout)):
             raise ValueError('Run timeouts must be positive finite seconds')
         self.actor = actor
+        self.input_adapter = input_adapter
+        if input_adapter is not None and input_adapter.encoder.map.map_id != expected_map:
+            raise ValueError('Input adapter map must match the run map')
         self.run_id = run_id or uuid.uuid4().hex
         self.expected_map = expected_map
         self.startup_timeout, self.idle_timeout = startup_timeout, idle_timeout
@@ -138,6 +143,8 @@ class SingleRun:
         self.history = ConfirmedHistory()
         self.pending = None
         self.current_state = self.previous_state = self.last_decision = None
+        self.current_base_observation = self.current_policy_input = None
+        self.policy_input_status = 'waiting_for_first_valid_state'
         self.last_timestamp = None
         self.seen_requests = set()
         self.completed_action_ids = set()
@@ -295,7 +302,12 @@ class SingleRun:
         world = message.get('worldState')
         try:
             identity = self._validate_world(world)
+            base = (self.input_adapter.encoder.encode(world)
+                    if self.input_adapter is not None and world['player']['hp'] > 0 else None)
         except ValueError as error:
+            self.policy_input_status = str(error)
+            self.current_policy_input = None
+            self.current_base_observation = None
             if self.initialized or str(error) == 'unsupported_map':
                 if str(error) == 'unsupported_map':
                     self.current_state = deepcopy(world)
@@ -322,8 +334,36 @@ class SingleRun:
             self.receive_intervals.add((now - self.last_received_at) * 1000)
         self.last_timestamp, self.last_received_at = timestamp, now
         self.current_state = deepcopy(world)
+        self.current_base_observation = base.tolist() if base is not None else None
+        self.current_policy_input = None
         if world['player']['hp'] <= 0:
+            self.policy_input_status = 'player_death'
             self.stop('player_death')
+            return self._reply(request_id)
+        completion = None
+        if self.pending is not None:
+            reason = self._accept_acknowledgement(message)
+            if reason:
+                self.policy_input_status = reason
+                return self._reply(request_id, reason=reason)
+            completion = self.history.completed[-1]
+        if self.input_adapter is not None:
+            from .inputs import InputUnavailable
+            try:
+                self.current_policy_input = self.input_adapter.encode(
+                    world, observation_context=message.get('observationContext'), completion=completion)
+                self.policy_input_status = 'ready'
+            except InputUnavailable as error:
+                self.policy_input_status = str(error)
+                return self._reply(request_id, reason=str(error))
+            except ValueError as error:
+                self.policy_input_status = str(error)
+                self._event('policy_input_error', detail=str(error))
+                if self.initialized:
+                    self.stop('invalid_policy_input', interrupted=True)
+                return self._reply(request_id, reason=str(error))
+        self.check_deadlines()
+        if self.terminal:
             return self._reply(request_id)
         if not self.initialized:
             self.player_identity = identity
@@ -339,14 +379,12 @@ class SingleRun:
                 return self._reply(request_id)
             self.state = RunState.RUNNING
             self._event('run_started', observation_only=self.actor is None)
-        if self.pending is not None:
-            reason = self._accept_acknowledgement(message)
-            if reason:
-                return self._reply(request_id, reason=reason)
         if self.actor is None:
             return self._reply(request_id, reason='observation_only')
         try:
-            choice = self.actor.choose(deepcopy(world), deepcopy(self.history.view()), self.memory)
+            policy_input = (np.asarray(self.current_policy_input['values'], dtype=np.float32)
+                            if self.input_adapter is not None else deepcopy(world))
+            choice = self.actor.choose(policy_input, deepcopy(self.history.view()), self.memory)
         except Exception as error:
             self._event('actor_error', detail=str(error))
             self.stop('actor_error', interrupted=True)
@@ -372,7 +410,8 @@ class SingleRun:
         self.last_decision = dict(action_id=action_id, request_id=request_id,
                                   action=choice.action, label=ACTIONS[choice.action],
                                   probabilities=list(choice.probabilities) if choice.probabilities is not None else None,
-                                  input_state=deepcopy(world), history=deepcopy(self.history.view()))
+                                  input_state=deepcopy(world), history=deepcopy(self.history.view()),
+                                  policy_input=deepcopy(self.current_policy_input))
         self.state = RunState.ACTION_PENDING
         self._event('action_selected', action_id=action_id, label=ACTIONS[choice.action])
         return self._reply(request_id, move=ACTIONS[choice.action], action_id=action_id)
@@ -382,6 +421,9 @@ class SingleRun:
                              stop_reason=self.stop_reason, observation_only=self.actor is None,
                              initialized=self.initialized, action_count=self.action_count,
                              current_state=self.current_state, previous_state=self.previous_state,
+                             current_base_observation=self.current_base_observation,
+                             current_policy_input=self.current_policy_input,
+                             policy_input_status=self.policy_input_status,
                              last_decision=self.last_decision, history=self.history.view(),
                              completed_actions=list(self.history.completed),
                              pending_action_id=self.pending.action_id if self.pending else None,

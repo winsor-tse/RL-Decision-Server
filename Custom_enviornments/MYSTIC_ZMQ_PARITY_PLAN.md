@@ -1,9 +1,11 @@
 # Mystic ZMQ and simulation parity plan
 
-Prepared 2026-10-21 from the local implementations. Phase 8A evidence tools and
-Phase 8B lifecycle are implemented; Phases 8C-8H remain planned. No simulator
-policy/checkpoint contracts changed. Phase 8B's CLI is observation-only until
-the live encoder, feedback producer and actor loader are integrated.
+Prepared 2026-10-21 from the local implementations. Phase 8A evidence tools,
+Phase 8B lifecycle and Phase 8C local action/input adapters are implemented.
+Phase 8C's real capture coverage and authoritative server/extension feedback
+wiring remain outstanding; Phases 8D-8H remain planned. No simulator policy or
+checkpoint contracts changed. The CLI remains observation-only until a validated
+feedback producer and actor loader are integrated.
 
 ## Scope and recommendation
 
@@ -176,6 +178,11 @@ or reconnection cannot restart the stopped run. Pending replies remain inert and
 REQ/REP-valid.
 
 ### Phase 8C - Match actions and observable policy inputs
+
+Implementation, telemetry contract and commands: [PHASE_8C.md](../Inference/Mystic_Live/PHASE_8C.md).
+Local 56/80 tensor parity, seven-action handling and telemetry validation are tested.
+Actual game-server feedback wiring and real visibility/correlation captures are
+still required exit evidence; current scripted captures are explicitly synthetic.
 
 Address: 11-versus-7 outputs, 26-versus-56/80 inputs, unavailable history.
 

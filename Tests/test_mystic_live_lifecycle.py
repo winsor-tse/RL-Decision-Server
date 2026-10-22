@@ -348,6 +348,9 @@ class LifecycleTests(unittest.TestCase):
 
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_live80_inputs_and_feedback_survive_websocket_zmq_transport(self):
+        await self.exercise('inputs')
+
     async def test_bridge_latches_death_and_reconnect_cannot_restart_backend(self):
         await self.exercise('death')
 
@@ -358,7 +361,9 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         context = zmq.Context()
         backend = context.socket(zmq.REP)
         port = backend.bind_to_random_port('tcp://127.0.0.1')
-        run = SingleRun(StubActor(), idle_timeout=5)
+        from Inference.Mystic_Live.inputs import LivePolicyInputs, OBSERVATION_CONTEXT_SCHEMA
+        inputs = LivePolicyInputs(80) if stop_kind == 'inputs' else None
+        run = SingleRun(StubActor(), input_adapter=inputs, idle_timeout=5)
         errors = queue.Queue()
         stop = threading.Event()
         def worker():
@@ -381,6 +386,9 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
                     async with websockets.connect(f'ws://127.0.0.1:{ws_port}') as client:
                         first = request(0)
                         first.pop('bridgeContext')
+                        if inputs is not None:
+                            first['observationContext'] = dict(schema=OBSERVATION_CONTEXT_SCHEMA,
+                                clockId='synthetic-server-clock', stateTimeMs=1000)
                         await client.send(json.dumps(first))
                         choice = json.loads(await client.recv())
                         self.assertEqual(choice['move'], 'castSpell:1')
@@ -388,8 +396,17 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
                         pending.pop('bridgeContext')
                         await client.send(json.dumps(pending))
                         self.assertIsNone(json.loads(await client.recv())['move'])
-                        if stop_kind == 'death':
-                            death = request(2, hp=0)
+                        if inputs is not None:
+                            confirmed = acknowledge(request(2), choice, attempted=1000, observed=1175)
+                            confirmed['observationContext'] = dict(schema=OBSERVATION_CONTEXT_SCHEMA,
+                                clockId='synthetic-server-clock', stateTimeMs=1175)
+                            await client.send(json.dumps(confirmed))
+                            self.assertEqual(json.loads(await client.recv())['move'], 'up')
+                            self.assertEqual(run.actor.inputs[-1][0].shape, (80,))
+                            self.assertAlmostEqual(float(run.actor.inputs[-1][0][66]), .0175, places=7)
+                            self.assertEqual(run.snapshot()['current_policy_input']['size'], 80)
+                        if stop_kind in ('death', 'inputs'):
+                            death = request(3 if inputs is not None else 2, hp=0)
                             await client.send(json.dumps(death))
                             reply = json.loads(await client.recv())
                             self.assertEqual(reply['stopReason'], 'player_death')
@@ -405,13 +422,13 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
                             break
                         await asyncio.sleep(.01)
                     self.assertTrue(run.terminal)
-                    self.assertEqual(run.stop_reason, 'player_death' if stop_kind == 'death' else 'client_disconnected')
+                    self.assertEqual(run.stop_reason, 'client_disconnected' if stop_kind == 'disconnect' else 'player_death')
                     final = run.snapshot()
                     async with websockets.connect(f'ws://127.0.0.1:{ws_port}') as client:
                         await client.send(json.dumps(request(6)))
                         self.assertIsNone(json.loads(await client.recv())['move'])
                     self.assertEqual(run.snapshot(), final)
-                    self.assertEqual(run.action_count, 1)
+                    self.assertEqual(run.action_count, 2 if inputs is not None else 1)
                     self.assertEqual(run.actor.starts, 1)
             finally:
                 stop.set()

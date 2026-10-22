@@ -23,6 +23,9 @@ SOURCE_FILES = (
     'Automation/Bridge/ws_zmq_bridge.py', 'Automation/Bridge/evidence.py',
     'Inference/Mystic_Live/baseline.py', 'Inference/Mystic_Live/PHASE_8A.md',
     'Inference/Mystic_Live/PHASE_8B.md', 'Tests/fixtures/live/phase8b_sequence.json',
+    'Inference/Mystic_Live/lifecycle.py', 'Inference/Mystic_Live/server.py',
+    'Inference/Mystic_Live/inputs.py', 'Inference/Mystic_Live/PHASE_8C.md',
+    'Tests/fixtures/live/phase8c_inputs.json',
     'Tests/fixtures/live/phase8a_scenarios.json', 'Tests/fixtures/simulation/provenance.json',
     'Custom_enviornments/Config.yaml',
     'Custom_enviornments/BaseEnv.py', 'Custom_enviornments/Test_Env/Mystic.py',
@@ -259,7 +262,7 @@ def field_matrix(requests, source, *, command_evidence=False):
                            note='No validated producer/acknowledgement contract in the current plugin; raw extra fields are preserved for review.'))
     result.extend((
         dict(field='enemy_relative_offsets', purpose='Five dx/dy pairs', evidence='derived',
-             source='Current player/entity coordinates; encoding parity is Phase 8C'),
+             source='Current player/entity coordinates; Phase 8C reuses the simulator encoder; real capture coverage remains unverified'),
         dict(field='terrain_rays', purpose='Eight recurrent terrain inputs', evidence='derived',
              source='User-confirmed shared map53 static collision layer; existing four-tile sensor algorithm'),
         dict(field='previous_chosen_action', purpose='Seven history one-hot flags',
@@ -374,8 +377,8 @@ def markdown_report(manifest):
               '- Select a deployment checkpoint explicitly when ready.',
               '- Identify the actually loaded extension and game build; absent identity telemetry stays unknown.',
               '- Record required scripted cases through the bridge when a real game is available.',
-              '- Provide validated applied/blocked/cooldown/cast-success feedback for recurrent history (Phase 8C).',
-              '- Implement single-run lifecycle and death stop in Phase 8B; Phase 8A never sends its own actions.',
+              '- Wire the Phase 8C telemetry contract into the authoritative game/extension producer; validate real outcomes and snapshot times.',
+              '- Validate the implemented Phase 8B single-run lifecycle and death stop against the real game; Phase 8A sends no actions.',
               '- Optional reward/kill reporting, reset loops and training are not inference prerequisites.', '']
     return '\n'.join(lines)
 

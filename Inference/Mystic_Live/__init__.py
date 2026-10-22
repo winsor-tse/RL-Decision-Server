@@ -1,1 +1,1 @@
-"""Live evidence and single-run lifecycle. Actor loading/encoding is later work."""
+"""Live evidence, single-run lifecycle and simulator-compatible inputs. No default weights."""
