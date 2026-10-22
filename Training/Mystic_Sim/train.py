@@ -145,7 +145,7 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
     choices = encounter.mixture if isinstance(encounter, MixedEncounter) else ()
     probe = factory()
     try:
-        contract = metadata(probe, recurrent=config.recurrent, actor_head=config.actor_head)
+        contract = metadata(probe, recurrent=config.recurrent, actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder)
         observation_high = np.asarray(contract['observation_scale'], dtype=np.float32)
     finally:
         probe.close()
@@ -183,7 +183,7 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
     torch.manual_seed(config.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    agent = (RecurrentAgent(observation_high, config.actor_head) if config.recurrent
+    agent = (RecurrentAgent(observation_high, config.actor_head, config.recurrent_encoder) if config.recurrent
              else Agent(observation_high)).to(resolved_device)
     optimizer = torch.optim.Adam(agent.parameters(), lr=config.learning_rate, eps=1e-5)
     episodes, wins = (payload['episodes'],payload['wins']) if payload else (0,0)
@@ -442,6 +442,7 @@ def main(argv=None, *, defaults=None, record_from_checkpoint=1, run_root=None, f
         options = {'action':argparse.BooleanOptionalAction} if isinstance(default,bool) else {
             'type':float if field.name == 'value_clip_coef' else type(default)}
         if field.name == 'actor_head': options['choices'] = ('linear', 'tanh')
+        if field.name == 'recurrent_encoder': options['choices'] = ('flat', 'cross_attention')
         parser.add_argument('--'+field.name.replace('_','-'),default=argparse.SUPPRESS,**options)
     parser.add_argument('--device',choices=('auto','cpu','cuda'),default='auto')
     parser.add_argument('--run-dir',type=Path)
@@ -493,12 +494,12 @@ def main(argv=None, *, defaults=None, record_from_checkpoint=1, run_root=None, f
         env = encounter_factory(encounter)()
         try:
             if args.resume:
-                payload = load_checkpoint(args.resume,metadata(env,recurrent=config.recurrent,actor_head=config.actor_head))
+                payload = load_checkpoint(args.resume,metadata(env,recurrent=config.recurrent,actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder))
                 if payload['update'] >= config.updates:
                     parser.error('Checkpoint already completed its training budget')
             if args.continue_from:
                 source = load_stage_checkpoint(args.continue_from,
-                    metadata(env,recurrent=config.recurrent,actor_head=config.actor_head),config)
+                    metadata(env,recurrent=config.recurrent,actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder),config)
                 continuation_schedule = stage_schedule(config, source_payload=source)
             env.reset(seed=config.seed)
             report = {'scenario':'full' if encounter is None else encounter.stage_id,

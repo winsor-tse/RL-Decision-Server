@@ -78,7 +78,8 @@ def main(argv=None):
             env = factory()
             try:
                 target = metadata(env, recurrent=bool(getattr(agent, 'recurrent', False)),
-                                  actor_head=getattr(agent, 'actor_head', 'linear'))
+                                  actor_head=getattr(agent, 'actor_head', 'linear'),
+                                  recurrent_encoder=getattr(agent, 'recurrent_encoder', 'flat'))
                 validate_transfer_metadata(source, target)
                 env.reset(seed=seed)
             finally:

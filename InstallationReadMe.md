@@ -279,7 +279,7 @@ override the configured evaluator.
 If Python cannot import a project package, confirm that the editable install completed or run module commands from the repo root:
 
 ```text
-C:\Users\winds\Desktop\YugenSaga\RL Server
+C:\path\to\RL-Decision-Server
 ```
 
 If ZMQ binding fails, check whether another process is already using:

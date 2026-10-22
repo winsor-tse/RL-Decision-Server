@@ -1,8 +1,0 @@
-{
-  "extends": "timeout25_10v1_goal5_from_cp07_lr1e4.json",
-  "stage": "twenty_innies_goal5",
-  "continue_from": "runs/mystic_sim/curriculum/timeout25_10v1_goal5_from_cp07_lr1e4_seed42/checkpoints/checkpoint_09.pt",
-  "runtime": {
-    "run_dir": "runs/mystic_sim/curriculum/timeout25_20v1_goal5_from_low_lr_cp09_seed{seed}"
-  }
-}

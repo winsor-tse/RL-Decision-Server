@@ -28,11 +28,11 @@ def main(argv=None):
     config = saved_config(raw)
     env = checkpoint_factory(raw)()
     try:
-        contract = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head)
+        contract = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder)
         payload = load_checkpoint(args.checkpoint, contract)
     finally:
         env.close()
-    agent = (RecurrentAgent(contract['observation_scale'], config.actor_head)
+    agent = (RecurrentAgent(contract['observation_scale'], config.actor_head, config.recurrent_encoder)
              if config.recurrent else Agent(contract['observation_scale']))
     agent.load_state_dict(payload['agent']); agent.eval()
     report = {'checkpoint': str(args.checkpoint.resolve()), 'training_performed': False, 'stages': {}}
@@ -41,7 +41,7 @@ def main(argv=None):
         factory = encounter_factory(run.encounter)
         env = factory()
         try:
-            target = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head)
+            target = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder)
             validate_transfer_metadata(contract, target)
         finally:
             env.close()

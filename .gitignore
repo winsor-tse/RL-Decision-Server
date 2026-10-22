@@ -8,6 +8,19 @@
 htmlcov/
 
 # Local environments and packaging
+# Local credentials (share only sanitized example files)
+.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+*.p12
+*.pfx
+.aws/
+.ssh/
+credentials.json
+service-account*.json
 .venv/
 venv/
 RL_venv/

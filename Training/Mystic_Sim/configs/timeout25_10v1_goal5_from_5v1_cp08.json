@@ -1,7 +1,0 @@
-{
-  "extends": "timeout25_10v1_goal5.json",
-  "continue_from": "runs/mystic_sim/curriculum/timeout25_5v1_from_4v1_cp10_seed42/checkpoints/checkpoint_08.pt",
-  "runtime": {
-    "run_dir": "runs/mystic_sim/curriculum/timeout25_10v1_goal5_from_5v1_cp08_seed{seed}"
-  }
-}

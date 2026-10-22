@@ -10,18 +10,26 @@ import torch
 from torch import nn
 from torch.distributions import Categorical
 from .core import layer
+from .Attention import EnemyAttentionEncoder
 from Custom_enviornments.Mystic_Sim.actions import ACTIONS
 
 
 class RecurrentBranch(nn.Module):
-    def __init__(self, size, outputs, head_type='tanh'):
+    def __init__(self, size, outputs, head_type='tanh', encoder='flat'):
         super().__init__()
         if head_type not in ('linear', 'tanh'):
             raise ValueError('Unknown recurrent head type')
         self.head_type = head_type
         width = size * 8
-        self.network = nn.Sequential(layer(size, width), nn.ReLU(),
-                                     layer(width, width), nn.ReLU(), layer(width, 512))
+        if encoder == 'cross_attention':
+            if size != 80:
+                raise ValueError('Cross-attention requires the 80-feature Mystic history contract')
+            self.network = EnemyAttentionEncoder()
+        elif encoder == 'flat':
+            self.network = nn.Sequential(layer(size, width), nn.ReLU(),
+                                         layer(width, width), nn.ReLU(), layer(width, 512))
+        else:
+            raise ValueError('Unknown recurrent encoder')
         self.lstm = nn.LSTM(512, 128)
         for name, parameter in self.lstm.named_parameters():
             if 'bias' in name:
@@ -55,14 +63,15 @@ class RecurrentBranch(nn.Module):
 class RecurrentAgent(nn.Module):
     recurrent = True
 
-    def __init__(self, observation_high, actor_head='linear'):
+    def __init__(self, observation_high, actor_head='linear', recurrent_encoder='cross_attention'):
         super().__init__()
         self.register_buffer('observation_scale', torch.tensor(observation_high, dtype=torch.float32))
         self.actor_head = actor_head
+        self.recurrent_encoder = recurrent_encoder
         # Initialize the critic first so matched-seed head comparisons have
         # identical critic and actor trunk initialization despite head size.
-        critic = RecurrentBranch(len(observation_high), 1)
-        self.actor = RecurrentBranch(len(observation_high), len(ACTIONS), actor_head)
+        critic = RecurrentBranch(len(observation_high), 1, encoder=recurrent_encoder)
+        self.actor = RecurrentBranch(len(observation_high), len(ACTIONS), actor_head, recurrent_encoder)
         # Keep actor-first parameter registration for old optimizer checkpoints.
         self.critic = critic
 

@@ -1,6 +1,6 @@
 """Run ONE configured curriculum encounter. Stage changes are always explicit."""
 import argparse
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 import json
 from pathlib import Path
 
@@ -130,13 +130,21 @@ def load_run_config(path, stage=None):
                      Path(source) if source is not None else None)
 
 
+def inherit_checkpoint_encoder(run, config_path, source):
+    """Legacy configs inherit architecture only; explicit choices remain strict."""
+    if source and 'recurrent_encoder' not in read_run_config(config_path).get('ppo', {}):
+        saved = saved_config(torch.load(source, map_location='cpu', weights_only=True))
+        return replace(run, ppo=replace(run.ppo, recurrent_encoder=saved.recurrent_encoder))
+    return run
+
+
 def preflight(run, *, resume=None, continue_from=None):
     """Validate geometry/contracts/budgets without collecting training or updating weights."""
     if resume and continue_from:
         raise ValueError('Choose resume or continue_from, not both')
     env = encounter_factory(run.encounter)()
     try:
-        contract = metadata(env, recurrent=run.ppo.recurrent, actor_head=run.ppo.actor_head)
+        contract = metadata(env, recurrent=run.ppo.recurrent, actor_head=run.ppo.actor_head, recurrent_encoder=run.ppo.recurrent_encoder)
         payload = load_checkpoint(resume, contract) if resume else None
         if payload and asdict(saved_config(payload)) != asdict(run.ppo):
             raise ValueError('Resume config must match saved PPO settings; use continuation for a new budget')
@@ -206,6 +214,9 @@ def main(argv=None):
         return rows
     source = (None if args.resume or args.fresh else
               args.continue_from if args.continue_from is not None else run.continue_from)
+    # Old JSON configurations predate encoder selection. Continue their saved
+    # architecture unless the user explicitly requests one (then validate it).
+    run = inherit_checkpoint_encoder(run, args.config, args.resume or source)
     report = preflight(run, resume=args.resume, continue_from=source)
     report['initialization'] = 'resume' if args.resume else 'continue' if source else 'fresh'
     print(json.dumps(report, indent=2))

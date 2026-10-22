@@ -250,6 +250,50 @@ LSTM episode memory start fresh. A new run directory is created automatically;
 PPO compatibility checks remain enforced. See [FULL_TRAINING.md](FULL_TRAINING.md)
 for details. No JSON config is needed for full-scenario continuation.
 
+## Default recurrent policy: cross-attention + LSTM
+
+Fresh recurrent runs now default to `--recurrent-encoder cross_attention`.
+`Train_Mystic_Full.bat` enables recurrent PPO automatically:
+
+```powershell
+.\Train_Mystic_Full.bat --device cuda --total-timesteps 3000000 --seed 42
+```
+
+The Gym observation remains 56 values and the recurrent input remains 80.
+After the existing normalization, each enemy becomes a seven-feature token:
+`[distance, direction, HP, MP, dx, dy, coordinates_known]`. The first five
+living slots have known coordinates. Slots 6-10 have zero coordinate placeholders
+and `coordinates_known=0`; zero offsets alone never imply missing coordinates.
+HP > 0 marks a valid enemy. Dead/padded slots are masked, including the empty set.
+No additional world information, self-attention or slot-position embeddings are
+introduced.
+
+The six player/map features supply the query. Ten enemy tokens supply keys and
+values to four attention heads (64 features total, 16 per head). The resulting
+64-feature summary is concatenated with six player/map and 24 history/sensor
+features: 94 -> 640 -> 640 -> 512, with ReLU between the fusion layers, followed
+by the existing 128-unit LSTM. The actor retains its linear seven-logit head;
+the critic retains its two Tanh layers and scalar output. Actor and critic each
+own separate attention, fusion and LSTM parameters for independent clipping.
+No attention weights are detached from the PPO gradient path. Sequence ordering,
+episode resets, truncation bootstrapping and reward scaling are unchanged.
+
+Architecture metadata records the encoder, feature schema, dimensions and heads.
+Existing flat checkpoints still load in evaluation/watch/resume/continuation using
+their original architecture, including checkpoints saved before the encoder flag
+existed. Continuing an old checkpoint does NOT convert it to attention. Start
+fresh for this experiment; forcing an incompatible encoder is rejected.
+For a fresh baseline use `--recurrent-encoder flat`. The flag only affects
+recurrent policies; feed-forward PPO remains available through the train module.
+Existing JSON continuation configs without an encoder field inherit it from the
+source checkpoint in the curriculum CLI. New fresh JSON runs default to attention.
+
+The existing evaluate, compare, watch, checkpoint and TensorBoard workflows apply.
+The SPS benchmark also defaults to the new recurrent architecture. This is an
+architecture experiment, not evidence that attention necessarily improves wins.
+Live deployment must implement the same token packing, masking, normalization,
+history and encoder architecture; no live server code is changed here.
+
 ## Train
 
 ```powershell

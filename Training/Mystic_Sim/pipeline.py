@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from .curriculum_run import load_run_config, preflight
+from .curriculum_run import load_run_config, preflight, inherit_checkpoint_encoder
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -52,6 +52,8 @@ def build_pipeline(config, *, start_stage=None, continue_from=None, resume_check
             raise ValueError('Pipeline run directories must be distinct')
         directories.add(directory)
         stage_resume = resume if index == 0 else None
+        if stage_resume or (source and source.exists()):
+            run = inherit_checkpoint_encoder(run, config_path, stage_resume or source)
         if stage_resume and directory != stage_resume.parent.parent:
             raise ValueError('Resume checkpoint must belong to the configured stage run directory')
         if directory.exists() and any(directory.iterdir()) and not stage_resume:

@@ -103,39 +103,42 @@ class Viewer:
         self.floating.clear()
 
     def events(self):
+        for e in self.pg.event.get():
+            self.handle_event(e)
+
+    def handle_event(self, e):
         p = self.pg
-        for e in p.event.get():
-            if e.type == p.QUIT:
+        if e.type == p.QUIT:
+            self.running = False
+        elif e.type == p.VIDEORESIZE:
+            self.screen = p.display.set_mode((max(1000,e.w),max(760,e.h)),p.RESIZABLE)
+        elif e.type == p.WINDOWFOCUSLOST:
+            self.session.paused = True
+            self.pending = None
+            self.accumulator = 0
+        elif e.type == p.MOUSEWHEEL:
+            self.zoom = max(12,min(44,self.zoom+e.y*2))
+        elif e.type == p.KEYDOWN:
+            if e.key == p.K_ESCAPE:
                 self.running = False
-            elif e.type == p.VIDEORESIZE:
-                self.screen = p.display.set_mode((max(1000,e.w),max(760,e.h)),p.RESIZABLE)
-            elif e.type == p.WINDOWFOCUSLOST:
-                self.session.paused = True
+            elif e.key == p.K_SPACE:
+                self.session.paused = not self.session.paused
                 self.pending = None
                 self.accumulator = 0
-            elif e.type == p.MOUSEWHEEL:
-                self.zoom = max(12,min(44,self.zoom+e.y*2))
-            elif e.type == p.KEYDOWN:
-                if e.key == p.K_ESCAPE:
-                    self.running = False
-                elif e.key == p.K_SPACE:
-                    self.session.paused = not self.session.paused
-                    self.pending = None
-                    self.accumulator = 0
-                elif e.key == p.K_r:
-                    self.restart(new_seed=bool(e.mod & p.KMOD_SHIFT))
-                elif e.key == p.K_TAB:
-                    self.overview = not self.overview
-                elif e.key == p.K_b:
-                    self.show_spawns = not self.show_spawns
-                elif e.key == p.K_c:
-                    self.show_range = not self.show_range
-                elif e.key in (p.K_EQUALS,p.K_PLUS,p.K_MINUS):
-                    speeds = [.25,.5,1.,2.,4.]
-                    index = speeds.index(self.session.speed)+( -1 if e.key == p.K_MINUS else 1)
-                    self.session.speed = speeds[max(0,min(4,index))]
-                elif e.key in self.keys and not self.session.paused:
-                    self.pending = self.keys[e.key]
+            elif e.key == p.K_r:
+                self.restart(new_seed=bool(e.mod & p.KMOD_SHIFT))
+            elif e.key == p.K_TAB:
+                self.overview = not self.overview
+            elif e.key == p.K_b:
+                self.show_spawns = not self.show_spawns
+            elif e.key == p.K_c:
+                self.show_range = not self.show_range
+            elif e.key in (p.K_EQUALS,p.K_PLUS,p.K_MINUS):
+                speeds = [.25,.5,1.,2.,4.]
+                index = speeds.index(self.session.speed)+( -1 if e.key == p.K_MINUS else 1)
+                self.session.speed = speeds[max(0,min(4,index))]
+            elif e.key in self.keys and not self.session.paused:
+                self.pending = self.keys[e.key]
 
     def advance(self, seconds):
         if self.session.paused or self.session.env.episode_done:
