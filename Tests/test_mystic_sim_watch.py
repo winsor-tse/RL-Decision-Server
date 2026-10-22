@@ -1,8 +1,10 @@
 """Frozen policy viewer must match evaluation, including recurrent history/reset."""
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, redirect_stderr
 from dataclasses import replace
 import io
 import unittest
+from pathlib import Path
+import tempfile
 
 import torch
 
@@ -11,10 +13,35 @@ from Custom_enviornments.Mystic_Sim.env import MysticSimEnv
 from Training.Mystic_Sim.core import metadata
 from Training.Mystic_Sim.recurrent import RecurrentAgent
 from Training.Mystic_Sim.evaluate import evaluate
-from Training.Mystic_Sim.watch import PolicySession
+from Training.Mystic_Sim.watch import PolicySession, parse_watch_args
 
 
 class WatchTests(unittest.TestCase):
+    def test_checkpoint_cli_forms_and_missing_subfolder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            checkpoint = root / 'run with spaces/checkpoints/checkpoint_09.pt'
+            checkpoint.parent.mkdir(parents=True)
+            checkpoint.touch()
+            relative = checkpoint.relative_to(root).as_posix()
+            for argv in ([relative, '--seed', '2000'],
+                         ['--seed', '2000', '--checkpoint', relative],
+                         ['--seed', '2000', 'checkpoint', relative],
+                         ['checkpoint', '--seed', '2000', relative],
+                         ['--seed', '2000', '--checkpoint', str(checkpoint)]):
+                args = parse_watch_args(argv, root=root)
+                self.assertEqual(args.checkpoint, checkpoint.resolve())
+                self.assertEqual(args.seed, 2000)
+            with redirect_stdout(io.StringIO()) as output:
+                args = parse_watch_args(['run with spaces/checkpoint_09.pt'], root=root)
+            self.assertEqual(args.checkpoint, checkpoint.resolve())
+            self.assertIn('checkpoints subfolder', output.getvalue())
+            for argv in ([], ['missing.pt'], [relative, '--checkpoint', relative],
+                         [relative, relative], [relative, '--seed', '-1']):
+                with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+                    parse_watch_args(argv, root=root)
+                self.assertEqual(error.exception.code, 2)
+
     def test_evaluation_parity_and_replay(self):
         old_threads = torch.get_num_threads()
         torch.set_num_threads(1)

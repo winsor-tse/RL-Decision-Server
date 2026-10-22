@@ -72,18 +72,49 @@ class PolicyViewer(Viewer):
         super().text(replacements.get(value, value), x, y, color, font)
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('checkpoint', type=Path)
+def parse_watch_args(argv=None, *, root=None):
+    parser = argparse.ArgumentParser(description=__doc__, epilog=(
+        'Example: Watch_Mystic_Policy.bat --checkpoint '
+        'runs/my_run/checkpoints/checkpoint_09.pt --seed 2000 --mode sampled'))
+    parser.add_argument('checkpoint_path', nargs='*', metavar='PATH',
+                        help='Checkpoint file (or use --checkpoint PATH)')
+    parser.add_argument('--checkpoint', type=Path, help='Checkpoint file to watch')
     parser.add_argument('--seed', type=int, default=20000)
     parser.add_argument('--mode', choices=('sampled', 'greedy'), default='sampled')
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cpu')
     parser.add_argument('--smoke-test', action='store_true', help='Render 20 decisions with SDL dummy driver')
-    args = parser.parse_args(argv)
+    args = parser.parse_intermixed_args(argv)
+    paths = args.checkpoint_path
+    # Also accept the natural spelling "checkpoint PATH" used with the BAT.
+    if len(paths) == 2 and paths[0] == 'checkpoint':
+        paths = paths[1:]
+    if len(paths) > 1 or (paths and args.checkpoint is not None):
+        parser.error('Provide one checkpoint: --checkpoint PATH or a positional PATH')
+    if args.checkpoint is None:
+        if not paths:
+            parser.error('A checkpoint is required; use --checkpoint PATH')
+        args.checkpoint = Path(paths[0])
     if args.seed < 0:
         parser.error('--seed must be nonnegative')
-    root = Path(__file__).resolve().parents[2]
+    root = Path(root) if root is not None else Path(__file__).resolve().parents[2]
     checkpoint = (root / args.checkpoint).resolve()
+    if not checkpoint.is_file():
+        # A common typo leaves out the run's checkpoints/ directory. Resolve
+        # only that exact filename, never select a different/latest model.
+        nested = checkpoint.parent / 'checkpoints' / checkpoint.name
+        if nested.is_file():
+            print(f'Using checkpoint from checkpoints subfolder: {nested}', flush=True)
+            checkpoint = nested
+        else:
+            parser.error(f'Checkpoint file not found: {checkpoint}. '
+                         'Saved models are normally in RUN/checkpoints/checkpoint_XX.pt')
+    args.checkpoint = checkpoint
+    return args
+
+
+def main(argv=None):
+    args = parse_watch_args(argv)
+    checkpoint = args.checkpoint
     torch.set_num_threads(1)
     agent, factory, _ = load_evaluation_agent(checkpoint, args.device)
     os.environ.setdefault('PYGAME_HIDE_SUPPORT_PROMPT', '1')

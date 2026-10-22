@@ -22,6 +22,17 @@ python -m Training.Mystic_Sim.watch PATH_TO_CHECKPOINT --seed 91000 --mode sampl
 Relative checkpoint paths resolve against the repository root. The Windows
 launcher uses the active virtual environment, then RL_venv, then .venv.
 
+You can also name the argument explicitly, with options in any order:
+
+```powershell
+.\Watch_Mystic_Policy.bat --seed 2000 --mode sampled --checkpoint "runs/my_run/checkpoints/checkpoint_09.pt"
+```
+
+The positional `PATH` and `checkpoint PATH` forms remain supported. Supply only
+one checkpoint. Quote paths containing spaces. If you omit the `checkpoints/`
+subfolder and that exact file exists there, the viewer prints and uses its
+resolved location. It never substitutes a different checkpoint number.
+
 - Space: start/pause (starts paused).
 - R: reset the entire environment and replay the same seed, resetting LSTM
   hidden states, observation history and policy-sampling RNG.
