@@ -1471,28 +1471,64 @@ Exit gate:
 
 ### Phase 8 - Test the live ZMQ contract, payload differences, and sim-to-game gap
 
+**Updated scope: single-episode live inference.** Train and parallelize locally
+in Mystic Sim; deploy a frozen actor to one real player through ZMQ. Each
+explicit launch normally runs until death or manual stop. There is no automatic
+reset/respawn/episode loop, live optimizer, rollout collection, reward dependency,
+GAE or value bootstrapping. Existing live training entry points are legacy tools,
+not the intended deployment path. The detailed phases in
+[MYSTIC_ZMQ_PARITY_PLAN.md](MYSTIC_ZMQ_PARITY_PLAN.md) and the
+[live watch TODO](../Training/Mystic_Sim/WATCH_POLICY.md#todo-launch-the-same-watch-ui-from-the-live-server)
+apply this reduced scope; reward matching and deeper mechanics comparisons are
+optional diagnostics rather than prerequisites for the first inference episode.
+
+**User-confirmed map and payload references:** the live map is
+[Tests/fixtures/simulation/map53.json](../Tests/fixtures/simulation/map53.json),
+with the same static obstacle layout as the simulator. Reuse this map for live
+terrain rendering, collision geometry and terrain rays; no separate live map
+reconstruction is needed. Its SHA-256 matches `Mystic_Sim/data/map53.json` in
+this checkout. The full ZMQ `worldState` is similar in structure to
+[example_full_state.json](../Tests/fixtures/simulation/example_full_state.json)
+(`timestamp`, `player`, `entities`, coordinates, direction, HP/MP, maximums,
+identity/type and distances). Treat its `map3471`, positions and stats as example
+values; deploy on map53 and populate current state from actual live messages.
+The original payload reference is
+[Simulation/Source-Code/Example_Full_State.txt](../Simulation/Source-Code/Example_Full_State.txt),
+which is byte-identical to the JSON fixture by SHA-256. JavaScript's
+`buildWorldState()` supplies this object under `worldState`; the outer ZMQ
+request also carries `type: "ai_tick"`, `requestId`, `pageUrl` and its own
+`timestamp`. The WebSocket-to-ZMQ bridge forwards that envelope unchanged.
+
 Recurrent policy deployment requires a future live-server implementation of the
-same model and `mystic-local-terrain-50-v3` feature builder. The current live
+same actor and checkpoint-declared feature builder (currently the 80-value
+`mystic-ten-enemies-relative-five-local-terrain-80-v4` recurrent contract). The current live
 LSTM server and inference code are not compatible with these simulator weights.
-Maintain per-session hidden/cell state and causal action history, resetting both
-at episode/reconnect/map boundaries. Add authoritative action acknowledgements,
+Initialize actor hidden/cell state and causal action history once per explicit
+run, starting from a valid living-player state without resetting the game. Stop
+gameplay commands on confirmed death; preserve the final watch frame and require
+an explicit new launch to act again. Timeout, disconnect or unsupported map
+changes stop the run as interrupted, without automatic reconnect/resume. Complete
+pending ZMQ exchanges with inert replies when needed. The critic and its memory
+are unnecessary for action selection. Add authoritative action acknowledgements,
 cast success, blocked movement, cooldown rejection and timestamp alignment to
 the payload adapter. Do not infer successful execution merely from sending a
-command. Verify history features, elapsed cast ages, reset behavior, normalized
+command. Verify history features, elapsed cast ages, start/stop behavior, normalized
 inputs, logits and action mappings against simulator replay fixtures before live
-training or deployment. Current simulator-only unit tests do not validate ZMQ.
+inference deployment. Current simulator-only unit tests do not validate ZMQ.
 
-For live terrain sensors, load the authoritative static map collision layer and
+For live terrain sensors, reuse the confirmed shared map53 collision layer and
 dimensions, and recompute four four-tile cardinal rays at the player's current
 position each observation. Terrain stays fixed in map coordinates; relative
 distances change as the player moves. Match negative-Y up, direction ordering,
 first-blocker occlusion, solid map boundaries, free-tile normalization and
 detection flags. Exclude moving entity occupancy, which remains collision
-feedback. Reload on map change and test movement/teleport/respawn, no-hit,
+feedback. Verify the map on launch and test movement/teleport, no-hit,
 adjacent-wall and exact-range cases against the simulator sensor fixtures.
 
-Primary deliverable: a live-versus-simulator comparison report, with repeatable
-regression cases for each discovered discrepancy. Matching the connected live
+Primary deliverable: a frozen-policy, single-episode live inference entry point
+with optional read-only watch UI, input/action replay checks, and death/interruption
+stop tests. Capture remaining differences for repeatable regression checks.
+Matching the connected live
 version takes precedence over further optimizations to the Phase 7 vector path.
 This is the first phase that implements/tests a simulation-policy live adapter
 or claims live contract compatibility. Phases 6 and 7 establish training and SPS
@@ -1507,20 +1543,23 @@ Before running policy-driven live sessions:
 - Build a payload-difference matrix from real captures and simulator outputs:
   raw field names, nesting, types, missing/null fields, ID representation, coordinate
   and direction conventions, HP/MP units and normalization, map ID, entity
-  ordering, nearest-five selection/padding, and distance semantics. Compare raw
-  payloads separately from the final encoded 26-value observation; equal shape
+  ordering, ten-enemy selection/padding, five relative-offset pairs and distance
+  semantics. Compare raw payloads separately from the final encoded 56/80-value
+  policy observation; equal shape
   does not imply equal meaning.
 - Add mocked ZMQ and saved-payload tests for serialization, action labels,
-  request/response correlation, reset handshakes, missing/malformed fields,
+  request/response correlation, initial-state readiness, death/interruption stops, missing/malformed fields,
   duplicate/stale messages, and timeout/disconnection behavior. Unknown state
   must remain explicit rather than becoming guessed zeros or inferred kills.
 - Run a bounded real connection smoke test after mocked tests pass. If game
   access is unavailable, mark the live part of Phase 8 as unvalidated. Mocked
   transport success is not evidence that the simulator matches the game.
-- Compare live task/reward behavior separately, including legacy HP-delta and
+- Compare optional live task/reward diagnostics separately, including legacy HP-delta and
   enemy-disappearance heuristics. Use comparable outcome metrics when live
   telemetry cannot support simulator-style event rewards. Loading a checkpoint
-  does not restore or roll back live game state.
+  does not restore or roll back live game state. Missing reward or attributed-kill
+  telemetry is not an inference blocker. Do not inherit the simulator's five-kill
+  goal, Y failures or step cap as default live stop conditions.
 
 1. Capture bounded live map-53 sessions at the existing ZMQ boundary. Store raw
    requests/responses, request IDs, action index and label, client/server and
@@ -1531,7 +1570,8 @@ Before running policy-driven live sessions:
 2. Use scripted scenarios before policy-driven sessions: each movement direction,
    occupied cells, rectangular cast edges, nearest-target ties, all three spells,
    insufficient MP, cooldown edges, Acid refresh, partial NPC attack-timer reset,
-   regeneration, kills, and 50-second respawns. Record which expected fields are
+   regeneration, kills, and 50-second NPC respawns for optional deeper mechanics
+   comparison. Player respawn/reset loops are outside inference scope. Record which expected fields are
    directly observed versus inferred or unavailable from the live payload.
 3. Compare two layers separately. First validate ZMQ action serialization and
    live observation parsing against the simulator contract. Then compare combat
@@ -1556,12 +1596,17 @@ Before running policy-driven live sessions:
    and per-caster Acid refresh against the connected version. Preserve old
    evidence when live behavior differs. Terrain collision is always enabled in
    map53; test the actual obstacle layout against the live task.
-7. Evaluate frozen simulator-trained PPO checkpoints through the live ZMQ
-   adapter using deterministic action selection. Record both sides' task and
-   reward profiles, kills, survival, damage, spell success, and action timing.
-   Keep map, class/stats, gear, spawn/task constraints, and episode rules as close
-   as possible; report unavoidable differences. Feed failures back into parity
-   fixtures and simulator retraining before using live fine-tuning to compensate.
+7. Run one explicitly launched frozen-policy inference episode through the live
+   adapter, with the chosen greedy/sampled mode recorded. The optional watch UI
+   displays actual live states, probabilities and previous/current policy inputs
+   from separate telemetry; it does not drive another simulator/policy loop or
+   consume the game's REP stream. Stop on death/manual stop, preserve the final
+   frame, and leave simulator reset/seed/speed/single-step controls disabled in
+   LIVE mode. UI pause freezes inspection, not the game or inference.
+   Record survival, cast outcomes, timing and stop reason; report attributed
+   kills/damage or comparable rewards only when available. Additional runs are
+   separate explicit launches, not an automatic evaluation loop. Feed failures
+   into fixtures and simulator retraining; live fine-tuning is outside this scope.
 8. Re-run the Phase 7 vector benchmarks after parity fixes. Optimize measured
    bottlenecks without changing RNG consumption or event ordering. NumPy batching,
    compiled extensions, and a C++ core remain optional further work; the required
@@ -1577,8 +1622,13 @@ Exit gate:
   tolerances, explicit unknowns, and no unexplained failures on required cases;
 - action/observation compatibility and agreed observable mechanics pass held-out
   live scenarios; unsupported hidden-state claims are excluded;
-- a frozen simulator-trained PPO checkpoint completes bounded live evaluation,
-  with simulator/live outcome differences measured and remaining gaps recorded;
+- a frozen simulator-trained checkpoint runs one live episode and sends no
+  further gameplay commands after death/interruption, even if later alive-player
+  snapshots arrive; another run requires an explicit launch;
+- optional LIVE watch telemetry matches the inference actor's actual inputs,
+  probabilities and selected actions, without adding a competing control loop;
+- training rewards, critic evaluation, automatic episode reset and large
+  multi-episode live evaluation banks are not completion requirements;
 - every confirmed fix has a regression test, and any optimization preserves
   deterministic simulator traces. BC/Minari availability is not an exit gate.
 

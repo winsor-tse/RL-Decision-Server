@@ -17,6 +17,55 @@ Use a separate seven-action live adapter so existing live models retain their
 original contracts. Preserve the current simulator as a versioned baseline;
 change mechanics only when connected-game evidence supports the change.
 
+### Confirmed map and ZMQ payload context
+
+The user confirms that the live map is
+[Tests/fixtures/simulation/map53.json](../Tests/fixtures/simulation/map53.json)
+and is the same as the simulator map, including static obstacles. The fixture
+and [packaged simulator map](Mystic_Sim/data/map53.json) have matching SHA-256
+hashes in this checkout. Treat obstacle-layout parity as established context:
+reuse the existing map loader/collision layer for live rendering and terrain
+rays. No separate obstacle discovery, map reconstruction or alternative live
+map asset is needed for map53.
+
+The full state passed through ZMQ has a structure similar to
+[Tests/fixtures/simulation/example_full_state.json](../Tests/fixtures/simulation/example_full_state.json).
+Use its `timestamp`, `player` and `entities` structure as the raw `worldState`
+parser reference, including IDs/types, map coordinates, direction, HP/MP and
+maximums, and supplied distances. The fixture's `map3471`, player stats and
+entity positions are example values, not the configured map53 run's state.
+Live player/enemy positions and resources are read from each current payload;
+sharing the map does not require stepping an independent local world.
+
+The payload fixture is a byte-identical copy (matching SHA-256) of
+[Simulation/Source-Code/Example_Full_State.txt](../Simulation/Source-Code/Example_Full_State.txt).
+The inspected JavaScript `buildWorldState()` produces this structure, and the
+extension wraps it as `worldState` in an `ai_tick` message with `requestId`,
+`pageUrl` and an outer `timestamp`. The bridge forwards that message unchanged
+to ZMQ. The example file represents the nested world state, not the entire
+request envelope.
+
+### Deployment scope: single-episode live inference
+
+Train and parallelize in the simulator. The new ZMQ path serves a frozen actor
+against one real player, normally for one episode per explicit launch. It does
+not train, collect PPO rollouts, restore optimizers, bootstrap values, or cycle
+episodes. The existing live trainers remain separate legacy entry points.
+
+Start from the first valid living-player state in the configured map, without
+resetting or teleporting the game. Initialize actor memory/history once. Stop
+dispatching gameplay commands on confirmed death or manual stop, preserve the
+final UI state, and require an explicit new launch to run again. Disconnect,
+timeout, or unsupported map changes stop the run as interrupted; automatic
+reconnect/resume and respawn/reset loops are outside this workflow.
+
+The simulator's kill goal, Y failures, step cap, rewards and critic are not live
+inference requirements. Optional evaluation goals/limits and outcome metrics
+must be explicitly enabled; missing optional diagnostics display as unavailable.
+The action/observation contract, actor architecture, recurrent history, outcome
+acknowledgements required by that history, and measured action timing remain
+necessary for existing checkpoint compatibility.
+
 Findings below are established from local code, including the sibling
 `../yugen-battler/yugen-battler/battler.js`. The browser's actually loaded
 extension and connected server version have not been verified. Distinguish
@@ -28,18 +77,18 @@ these code differences from mechanics discrepancies that still need live data.
 |---|---|---|---|---|
 | P0 | Action contract | Mystic defaults to 11 actions: four moves, attack, slots 1/2/3/5/6/7. | Seven: four moves and slots 1/2/3. ID 4 means Arcane Blast rather than attack. | Explicit seven-action live adapter; validate labels and schema before sending commands. |
 | P0 | Observation contract | 26 values, five monsters; distance-only stable sorting preserves payload order on ties. No explicit dead-monster filter in observation parsing. | 56 base values: ten living enemies and signed dx/dy for the first five; distance then entity-ID sorting. Recurrent policies consume 80 values. | Shared, versioned encoding for the new adapter, including filtering, ID handling, padding, signed bounds, and tie rules. |
-| P0 | Recurrent inputs | No confirmed action outcomes, collision reasons, cooldown rejections, or cast acknowledgements in the inspected world-state builder. | Adds 24 history/sensor values, including confirmed outcomes, successful-cast ages, and four local terrain rays. | Add authoritative telemetry and the matching static collision map. Missing required telemetry blocks deployment of the existing 80-input policy. |
-| P0 | Transition alignment | `step(a)` receives a world snapshot, sends action a, then returns that same received snapshot and its reward. | Applies a, advances 200 ms, then returns the resulting observation/reward. | Pair each action with its actual subsequent state. Current live reward can be associated with a different action; blocked-movement shaping is particularly exposed. |
+| P0 | Recurrent inputs | No confirmed action outcomes, collision reasons, cooldown rejections, or cast acknowledgements in the inspected world-state builder. | Adds 24 history/sensor values, including confirmed outcomes, successful-cast ages, and four local terrain rays. | Add required outcome telemetry; reuse the confirmed shared map53 collision layer. Missing required telemetry blocks deployment of the existing 80-input policy. |
+| P0 | Transition alignment | `step(a)` receives a world snapshot, sends action a, then returns that same received snapshot and its reward. | Applies a, advances 200 ms, then returns the resulting observation/reward. | Correlate actions/outcomes for observable history and the Previous state display. Live inference needs no reward-bearing training transitions. |
 | P0 | Decision timing | Browser awaits the response, applies the action, then sleeps 200 ms. Snapshot timestamps use client `Date.now()`. Bridge `serverTime` is Python wall time. | Exact 200 ms simulated decisions and integer event deadlines. | Measure command application and authoritative state times. The browser interval includes response/processing delay; neither existing timestamp is proof of game-server execution time. |
 | P0 | Targeting | Browser ranks by Manhattan distance, favors monsters but can fall back to other entities, and has no 16-X/10-Y eligibility filter in target selection. With no target, all three spell commands are skipped. | Ranks eligible monsters by Euclidean distance then ID inside an inclusive 16-X/10-Y rectangle. Slots 2/3 fall back to self. | Select and validate one execution specification against connected behavior; test ties, rectangle edges, unavailable targets, and self fallback. |
 | P0 | Facing and movement | Browser faces the selected target before casting; replica cast does not update player facing. Browser also mutates local coordinates before authoritative movement confirmation. | Movement checks terrain, occupancy, and bounds synchronously. | Validate cast-facing behavior and distinguish client prediction from accepted movement. Do not count local coordinate changes as movement acknowledgements. |
-| P0 | Reset | Mystic returns the pre-reset snapshot immediately after sending `reset=True`. Browser implements reset by self-casting slot 4. No reset-completion handshake is checked. | Rebuilds a seeded world and returns its new initial observation. | Wait for confirmed task readiness and a fresh post-reset state; reset memory/history then. Do not pair reset activity with a normal policy action. |
-| P1 | Damage and kills | HP-delta rewards; nearby disappeared entities can be treated as kills. Entity reward tracking includes non-current-player entities without the observation's monster-type filter. Healing can yield positive damage-taken reward. | Attributed damage/death events, damage clamped to actual HP removed, no healing reward in the default combat profile. | Use typed identities, authoritative damage/death attribution, and deduplication. Treat disappearance as unknown until confirmed. |
-| P1 | Reward scale and shaping | +10 per inferred kill, -100 on death/map departure, no explicit win bonus; proximity shaping, flat -10 blocked-move penalty, low-HP shaping, incoming HP delta weighted 20. | +10 per confirmed kill, +200 win, -200 death, -25 timeout; default incoming damage weight 50, time cost, escalating blocked-move penalties and cooldown penalty; no proximity reward. | Define a shared task/reward profile for new live training when telemetry supports it. Compare frozen policies through outcome metrics before comparing returns. |
-| P1 | Episode rules | Default 256 steps; truncates at Y < 25; penalizes Y < 31; leaving map53 is a loss. | Default 1024 steps; Y outside inclusive 30..86 terminates as failure; penalties below 31 and above 85. Five kills is the default goal on both paths. | Version the task definition and termination precedence; distinguish task failures from time limits and test PPO bootstrapping. |
+| P0 | Reset | Mystic returns the pre-reset snapshot immediately after sending `reset=True`. Browser implements reset by self-casting slot 4. No reset-completion handshake is checked. | Rebuilds a seeded world and returns its new initial observation. | Bypass the legacy reset mechanism in the new inference entry point. Start on a valid living-player snapshot; stop on death without another episode. |
+| P2 | Damage and kills | HP-delta rewards; nearby disappeared entities can be treated as kills. Entity reward tracking includes non-current-player entities without the observation's monster-type filter. Healing can yield positive damage-taken reward. | Attributed damage/death events, damage clamped to actual HP removed, no healing reward in the default combat profile. | Optional reporting: use attributed events when available, otherwise show unknown. Reward and kill attribution do not gate actor inference. |
+| P2 | Reward scale and shaping | +10 per inferred kill, -100 on death/map departure, no explicit win bonus; proximity shaping, flat -10 blocked-move penalty, low-HP shaping, incoming HP delta weighted 20. | +10 per confirmed kill, +200 win, -200 death, -25 timeout; default incoming damage weight 50, time cost, escalating blocked-move penalties and cooldown penalty; no proximity reward. | Keep rewards in simulator training. Live rewards are optional diagnostics; compare raw returns only under an explicit equivalent evaluation profile. |
+| P1 | Episode rules | Default 256 steps; truncates at Y < 25; penalizes Y < 31; leaving map53 is a loss. | Default 1024 steps; Y outside inclusive 30..86 terminates as failure; penalties below 31 and above 85. Five kills is the default goal on both paths. | Live inference runs until death/manual stop, or interruption. Do not inherit simulator task caps/goals by default. No live PPO bootstrapping is required. |
 | P1 | Model loading | Live LSTM uses a shared embedding/LSTM and Tanh actor head; current evaluator loads that architecture. | Separate actor/critic branches; configurable flat or attention encoder; default linear actor; saved preprocessing scales and architecture metadata. | Load the exact checkpoint architecture and preprocessing. Resizing the live network does not make simulator weights compatible. |
 | P1 | World and mechanics coverage | Visible client registry, actual player equipment/stats, other actors, and hidden server timers. | Fixed level-135 Mystic baseline, gear off, map53, Innie-only population (80 in full scenario), selected status modifiers off. | Match observable task setup; measure remaining mechanics differences. Do not equate client registry visibility with complete server state. |
-| P2 | Throughput and resume | One external game stream; socket recovery does not restore world state. | Many independent seeded worlds; training resume starts fresh episodes. | Keep simulator batching and live session handling separate; live resume resets episode state and memory. |
+| P2 | Throughput and resume | One external game stream; socket recovery does not restore world state. | Many independent seeded worlds; training resume starts fresh episodes. | Parallelize training locally. Live death/interruption ends inference; another run requires an explicit new launch, not training resume. |
 
 The README's historical 15-action list and several integration-plan references
 to 26/50-input policies are stale. Current code and the selected checkpoint's
@@ -54,47 +103,58 @@ Address: uncertain deployed versions, stale documentation, missing captures.
 
 1. Record repository revision and selected checkpoint metadata, architecture,
    feature schema, action ordering, preprocessing, map hash, and task settings.
+   Use the confirmed map53 fixture and example full-state fixture above as the
+   geometry and payload references; obstacle-layout parity is already established.
 2. Identify the actually loaded browser extension and connected game build.
 3. Add optional JSONL capture at the live boundary: session/episode/request IDs,
    raw state, command, selected target, receipt/send/application times and
    authoritative timestamps or outcomes where available. Separate unavailable
    fields from observations. Keep the existing human recorder independent.
 4. Capture scripted moves, blocked moves, each spell, no-target casts, cooldown
-   rejection, kills, map transitions, reset, and disconnect/reconnect.
+   rejection, player death, map transitions, and disconnect. Capture kills/damage
+   attribution for optional metrics when available; reset-loop testing is not
+   required for the single-episode inference entry point.
 5. Produce a field-availability matrix and correct obsolete contract references.
 
 Deliverables: baseline manifest, versioned capture format, capture fixtures,
 and a difference report with observed/inferred/unavailable evidence labels.
 
 Exit: every required input and outcome has a known producer or an explicit
-missing-data dependency. A parser fixture from map3471 is not live map53 proof.
+missing-data dependency. Use the example fixture for payload-structure tests,
+with map53-specific values in deployment fixtures.
 
-### Phase 8B - Correct transitions, reset, and session lifecycle
+### Phase 8B - Correct action history and single-run lifecycle
 
-Address: action/reward misalignment, variable time, pre-reset observations.
+Address: action/history alignment, variable time, and reliable stopping.
 
-1. Introduce a separate live adapter with explicit waiting-for-state,
-   action-pending, waiting-for-result, and reset-pending states. Preserve the
-   ZMQ REQ/REP protocol's required reply sequence while waiting for later state;
-   use an explicit transport idle response where necessary, outside policy IDs.
-2. Define a transition as `(state_t, action_t, result_t+1)`. Correlate commands,
-   authoritative outcomes, and the subsequent eligible snapshot. Request IDs
-   identify exchanges; they alone do not establish execution acknowledgement.
+1. Introduce a separate inference adapter with waiting-for-first-valid-state,
+   running/action-pending, and stopped/interrupted states. Preserve ZMQ REQ/REP
+   ordering, using an explicitly inert transport reply where necessary, outside
+   policy action IDs. Do not call the legacy reset or send its reset spell.
+2. Correlate each action with its input and confirmed outcome for history and
+   Current state / Previous state inspection. There is no PPO transition buffer
+   or live reward requirement. Request IDs identify exchanges; they alone do not
+   establish execution acknowledgement.
 3. Measure elapsed time and jitter. Do not replace missing server timing with a
    claimed fixed 200 ms interval. Decide from measurements whether live scheduling
    can match training or a new timing-tolerant training contract is required.
-4. Wait for a confirmed fresh map53/task-ready state after reset. Clear history,
-   recurrent memory, kill counters, and pending transitions on episode boundaries.
-5. Reject duplicate/stale/cross-session results. On timeout or reconnect,
-   invalidate uncertain transitions and resynchronize without replaying casts.
+4. Initialize actor memory/history once on a valid living-player state. On
+   confirmed death, stop selecting/sending actions before processing another
+   policy decision. Preserve the final frame and stop reason for inspection.
+5. Reject duplicate/stale/cross-run results. Manual stop ends inference; timeout,
+   disconnect, or unsupported map change interrupts it. Do not replay pending
+   casts, automatically reconnect/resume, reset, respawn or start another episode.
+   A new launch explicitly creates fresh actor memory/history.
 6. Keep slow per-tick diagnostic file writes optional in the new adapter and
    measure their contribution to latency.
 
-Deliverables: adapter lifecycle, timing report, transition/reset fixtures.
+Deliverables: single-run inference lifecycle, timing report, action/history and
+death/interruption fixtures.
 
-Exit: scripted successes/failures attach to the correct action exactly once;
-reset returns a post-reset observation; timeout/reconnect tests preserve ZMQ
-ordering and cannot leak one episode's state into another.
+Exit: action outcomes attach exactly once; the first state needs no game reset;
+death/interruption emits no further gameplay commands. A later alive-player tick
+or reconnection cannot restart the stopped run. Pending replies remain inert and
+REQ/REP-valid.
 
 ### Phase 8C - Match actions and observable policy inputs
 
@@ -111,8 +171,10 @@ Address: 11-versus-7 outputs, 26-versus-56/80 inputs, unavailable history.
 4. Extend telemetry upstream for authoritative application/rejection outcomes
    and cast times, then reuse `ObservableHistory`. A client command-send event
    does not mean a successful cast. This dependency may require game-server work.
-5. Load and verify the live static collision layer and compute the same four
-   four-tile terrain rays. Exclude entity occupancy and reload on map changes.
+5. Reuse the confirmed map53 collision layer and existing map loader to compute
+   the same four four-tile terrain rays. Exclude entity occupancy. Check map ID
+   and coordinate conventions at startup; unsupported maps stop as described
+   in 8B. A separate live obstacle-layout investigation is not required.
 6. If authoritative outcomes cannot be provided, use a separately versioned
    observation design and retrain. Existing 80-input weights cannot be deployed
    by substituting zero history or guessed success flags.
@@ -130,8 +192,9 @@ Address: targeting/facing, client prediction, and unmeasured server mechanics.
 1. Reconcile target ranking, eligibility, ties, self fallback, auto-facing, and
    dead/non-monster handling across browser execution and replica. Explicit
    target IDs are already supported by the inspected browser command parser.
-2. Compare authoritative accepted/blocked movement with the actual terrain,
-   occupancy, map bounds, and client correction behavior.
+2. Compare authoritative accepted/blocked movement with the shared map53 terrain,
+   occupancy, map bounds, and client correction behavior. Check coordinate and
+   collision handling; the obstacle geometry itself is already confirmed equal.
 3. Validate spell costs and ordering, 300 ms global cooldown, slot/family
    cooldowns, targeting rectangle, AoE falloff, Acid refresh/tick endpoints,
    regeneration, Innie aggro/movement/attack timing, and 50-second respawn.
@@ -149,28 +212,25 @@ Exit: required deterministic cases have no unexplained divergence; measured
 timing/randomness limits and unresolved hidden state are explicit. Missing
 server timers are not reconstructed as certain state during trace replay.
 
-### Phase 8E - Align task, rewards, and outcome accounting
+### Phase 8E - Optional evaluation diagnostics
 
-Address: incomparable returns, inferred kills, healing artifacts, episode limits.
+Address: understandable live results without requiring training machinery.
 
-1. Add a versioned task profile for map53, five confirmed attributed kills,
-   death/map-change handling, Y bounds and penalties, and time limit. Initially
-   target the simulator's current task for transfer comparisons where feasible.
-2. Deduplicate authoritative damage/death events; distinguish despawn, visibility
-   loss, map departure, and other players' kills from the policy's own kills.
-3. Share default combat reward calculation only when the live event stream can
-   support equivalent attribution. Otherwise label live rewards separately and
-   compare confirmed outcomes; snapshot HP loss cannot recover simultaneous
-   damage and healing exactly.
-4. Test death/fifth-kill/boundary/timeout precedence, one-time terminal rewards,
-   and the training rule: task termination does not bootstrap; external time
-   limits bootstrap from the final observation with pre-reset recurrent memory.
+1. Default live stopping is death/manual stop, with interruptions handled in 8B.
+   Do not inherit the simulator's five-kill goal, Y failures or step cap. Allow
+   an explicitly configured evaluation goal/duration to stop this one run only.
+2. Report survival time, chosen actions, confirmed cast outcomes, latency and stop
+   reason. Add attributed kills/damage when supported; distinguish disappearance
+   and other players' kills from confirmed attributed events.
+3. Rewards, return, terminal bonuses and matching a simulator evaluation profile
+   are optional. Show unavailable quantities as unavailable, never fabricated
+   zeros. No critic targets, GAE or bootstrapping are needed in the live path.
 
-Deliverables: task profile, outcome reducer, reward/end-condition regression cases.
+Deliverables: optional metrics/profile and explicit availability labels.
 
-Exit: matched event streams produce matching outcomes and reward components;
-remaining live limitations are visible. Raw returns are compared only under
-equivalent task and reward profiles.
+Exit: available metrics are correctly labeled and unavailable diagnostics do
+not block inference. This phase is not a prerequisite for 8F or the first live
+run; compare returns only under equivalent explicit task/reward profiles.
 
 ### Phase 8F - Load the exact frozen simulator policy live
 
@@ -183,9 +243,10 @@ Address: incompatible architecture, preprocessing, checkpoint/session handling.
 2. Validate action labels, observation schema, feature order, architecture,
    preprocessing, and map/task requirements before transmitting policy commands.
    Record simulator engine provenance; do not claim the live server has its hash.
-3. Maintain independent actor/critic memory and history per session; reset both
-   on confirmed episode/reconnect/map boundaries. Do not advance memory twice
-   for bootstrap or duplicate observations.
+3. Run the frozen actor in eval/inference mode, with actor memory/history created
+   once per explicit run. The critic and critic memory need not run. Do not
+   restore optimizers, calculate returns, bootstrap values, or advance actor
+   memory for duplicate observations or viewer redraws.
 4. Replay fixed observation sequences through offline and live inference;
    compare normalized inputs, logits, greedy actions, and hidden/cell states.
 
@@ -198,23 +259,25 @@ fail before any game action. Evaluation changes no weights or optimizer state.
 
 Address: the remaining measured gap between simulator and game performance.
 
-1. Start with scripted checks and a bounded frozen-policy session after prior
-   gates pass, then collect a pilot such as ten comparable episodes.
-2. Expand to an agreed held-out bank (for example, 50 episodes per mode where
-   live access permits). Evaluate greedy and sampled behavior separately and
-   report uncertainty; these counts are proposed budgets, not proof thresholds.
+1. Start with scripted checks and one explicitly launched frozen-policy episode
+   after input/execution gates pass. Verify stopping on death/interruption and
+   preserving the watcher's final state.
+2. Additional held-out comparisons are optional separate launches. Record greedy
+   versus sampled mode; do not require a ten/fifty-episode pilot or build an
+   automatic live episode/reset loop to complete inference deployment.
 3. Match map, stats, gear, encounter population, task and duration as far as the
    live game permits. State unavoidable setup differences in each report.
-4. Report confirmed kill/win rate, survival time, attributed damage, cast success,
-   failures by reason, accepted movement, latency and reset reliability. Include
-   reward only with its named profile and equivalent elapsed-time context.
+4. Report survival time, cast outcomes, action failures, accepted movement,
+   latency and stop reason, with attributed damage/kills when available. A
+   single run provides outcomes, not a statistically established win rate.
+   Include reward only under an explicit comparable evaluation profile.
 5. Feed failures into capture, regression, and mechanics fixes. Retrain only when
    mechanics/contracts changed or evidence supports robustness training. Bound
-   any timing/stat randomization by measurements; live fine-tuning follows
-   explicit parity validation rather than hiding adapter defects.
+   any timing/stat randomization by measurements. Retraining happens in the
+   simulator; live fine-tuning is outside this inference-only workflow.
 
 Deliverables: held-out transfer report, remaining ranked discrepancies, and
-evidence-based choice to retain, retrain, or begin limited live fine-tuning.
+evidence-based choice to retain the actor or retrain it in the simulator.
 
 Exit: agreed observable parity tests pass; transfer performance and limitations
 are measured against criteria set before the main evaluation, rather than a
@@ -236,19 +299,28 @@ documented bounded live check. Every remaining unsupported case is recorded.
 
 ## Dependencies and completion order
 
-Execute 8A -> 8B -> 8C -> 8D -> 8E -> 8F -> 8G -> 8H. Model-loader preparation
+Execute 8A -> 8B -> 8C -> required 8D execution checks -> 8F -> 8G -> 8H.
+8E diagnostics and deeper 8D mechanics comparisons are optional follow-up work,
+not dependencies on implementing rewards or reconstructing hidden server state.
+Model-loader preparation
 can begin after checkpoint inventory, but policy-driven live evaluation depends
 on confirmed telemetry, transition handling, execution, and input compatibility.
-Mechanics calibration and task accounting can proceed independently once the
+Mechanics calibration and optional metrics can proceed independently once the
 capture and lifecycle are reliable. Do not let BC/Minari migration, additional
 classes, a C++ rewrite, or a new curriculum block this work.
 
-The first concrete implementation should be capture plus a transition/reset
-test harness. It gives the remaining work trustworthy evidence and avoids
-training against rewards assigned to the wrong action.
+The first concrete implementation should be capture plus a single-run
+action/history/death-stop test harness. It establishes trustworthy policy inputs
+and stop behavior without implementing a live training/reset system. Launching
+the watch UI, its read-only telemetry channel, LIVE controls and final-state
+retention are detailed in [WATCH_POLICY.md](../Training/Mystic_Sim/WATCH_POLICY.md).
 
 ## Local evidence
 
+- User-confirmed shared live map: `../Tests/fixtures/simulation/map53.json`;
+  matches `Mystic_Sim/data/map53.json` by SHA-256 in this checkout.
+- User-supplied ZMQ state structure reference:
+  `../Tests/fixtures/simulation/example_full_state.json` (example values).
 - `Test_Env/Mystic.py`: default actions, receive/send/return order, reset and wins.
 - `Test_Env/Env_conditions.py`: live encoding, HP deltas, disappearance heuristic,
   reward coefficients, map loss and truncation.
