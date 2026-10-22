@@ -1,0 +1,17 @@
+{
+  "provenance": "synthetic_scripted_inputs_not_live_game_evidence",
+  "world_shape_source": "Tests/fixtures/simulation/example_full_state.json",
+  "note": "Map53 example values are constructed for capture/transport checks. Scenario labels are intentions, not authoritative execution outcomes.",
+  "scenarios": [
+    {"label": "movement", "command": "right", "player_x": 50, "hp": 9463},
+    {"label": "blocked_movement", "command": "up", "player_x": 51, "hp": 9463},
+    {"label": "spell_1", "command": "castSpell:1:2", "player_x": 51, "hp": 9463},
+    {"label": "spell_2", "command": "castSpell:2", "player_x": 51, "hp": 9463},
+    {"label": "spell_3", "command": "castSpell:3", "player_x": 51, "hp": 9463},
+    {"label": "no_target", "command": "castSpell:1", "player_x": 51, "hp": 9463, "no_entities": true},
+    {"label": "cooldown_rejection", "command": "castSpell:1", "player_x": 51, "hp": 9463},
+    {"label": "player_death", "command": null, "player_x": 51, "hp": 0},
+    {"label": "map_transition", "command": null, "player_x": 15, "hp": 9463, "map_id": "map3471"},
+    {"label": "disconnect", "connection_event_only": true}
+  ]
+}

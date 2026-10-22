@@ -177,9 +177,10 @@ map53 can still overfit to it; this change does not claim map generalization.
   history/memory; it does not restore a mismatched old hidden state into a reset
   world or claim exact interrupted-trajectory replay.
 
-**Required future live-server work (Phase 8; not implemented here):** port this
-80-value history/sensor contract and model architecture to live training/inference.
-Load the live map's authoritative static collision layer and its dimensions,
+**Live-server work (Phase 8):** [Phase 8A baseline/capture tools](../../Inference/Mystic_Live/PHASE_8A.md)
+are implemented; the live adapter is future work. Port this 80-value history/sensor
+contract and frozen actor to single-episode live inference; keep training in the
+simulator. Reuse the user-confirmed shared map53 collision layer and its dimensions,
 then compute the same four rays at the player's current tile on each observation.
 Static terrain stays fixed in map coordinates; distances relative to the player
 change as the player moves. Use the same collision semantics, four-tile cutoff,
@@ -188,14 +189,15 @@ NPC/player occupancy from terrain rays. Recompute after movement, teleport and
 respawn; reload the collision map on map change. Test translated layouts, adjacent
 walls, range-edge blockers, boundaries and no-hit rays against simulator fixtures.
 Map seven simulator outputs to live labels explicitly: up/down/left/right and spells 1/2/3. Do not reuse old eight-output indices.
-Maintain hidden/cell and history separately per player/session; reset on death,
-respawn/new episode, reconnect, or map/task reset. Map live action order explicitly.
+Initialize actor hidden/cell state and history once per explicit live launch.
+Stop on death/interruption without an automatic respawn/reset/reconnect loop;
+retain the final watch frame. Map live action order explicitly.
 Use authoritative action acknowledgements for successful casts, collision and
 cooldown rejection; sending a command is not confirmation. Measure elapsed time
 from server timestamps and align outcomes with the command that caused them.
 Until these payload fields are available and validated, this policy is not live
 compatible. Test simulator/live replay for feature values, action timing,
-episode resets, hidden states and logits. Do not fall back to treating missing
+single-run start/stop behavior, hidden states and logits. Do not fall back to treating missing
 acknowledgements as successful casts or all-zero history. Neither existing
 `PPO_lstm_server.py` nor its live inference script has been modified.
 
@@ -471,8 +473,9 @@ bounded terrain sensing and action history through its separate 80-value contrac
 The policy action IDs are 0 up, 1 down, 2 left, 3 right, 4 Arcane Blast,
 5 Acid Cloud, 6 Tempest Inferno. Attack was removed, not renamed to wait.
 `advance_idle()` is only for the manual viewer and isolated simulator timing
-tests; PPO cannot select it. The recurrent input loses the attack-history bit,
-so it is now 50 values. Start a fresh run with the new action/observation schemas.
+tests; PPO cannot select it. The current recurrent input is 80 values (56 base
+plus 24 history/sensor features); 50-input checkpoints are historical contracts.
+Start a fresh run when changing action/observation schemas.
 
 Step 1 (linear head and diagnostics) is implemented. Curriculum and reward
 changes remain deferred. The comparison plan is:

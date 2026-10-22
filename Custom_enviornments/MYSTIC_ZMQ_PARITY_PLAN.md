@@ -1,7 +1,7 @@
 # Mystic ZMQ and simulation parity plan
 
-Prepared 2026-10-21 from the local implementations. Status: planning only;
-no runtime behavior or checkpoint contracts changed.
+Prepared 2026-10-21 from the local implementations. Phase 8A evidence tools are
+implemented; Phases 8B-8H remain planned. No policy/checkpoint contracts changed.
 
 ## Scope and recommendation
 
@@ -98,6 +98,13 @@ terminate; older prose describing them as truncations is outdated.
 ## Phased implementation
 
 ### Phase 8A - Freeze the baseline and establish evidence
+
+Implementation and commands: [PHASE_8A.md](../Inference/Mystic_Live/PHASE_8A.md).
+The offline baseline generator, opt-in bridge JSONL capture, synthetic scripted
+fixtures, field matrix and transport tests are implemented. The deployment
+checkpoint remains unselected. Actual loaded extension/game-build identities
+and real scripted-game captures remain unverified external evidence; the tools
+record these gaps explicitly and do not claim live compatibility.
 
 Address: uncertain deployed versions, stale documentation, missing captures.
 

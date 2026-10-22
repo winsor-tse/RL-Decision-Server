@@ -104,6 +104,10 @@ python -m Training.Mystic_Sim.watch PATH_TO_CHECKPOINT --seed 91000 --smoke-test
 
 ## TODO: launch the same watch UI from the live server
 
+Phase 8A [baseline and bridge evidence tools](../../Inference/Mystic_Live/PHASE_8A.md)
+are implemented. They inventory/capture data only; the inference-driven LIVE
+watch mode below remains TODO, and the deployment checkpoint is unselected.
+
 The current launcher watches a local simulator episode. Live-server integration
 is still TODO; the dashboard's SIMULATION badge makes the source explicit.
 `watch_state.py` defines detached `WatchSnapshot` and `PolicyDecision` display
