@@ -14,8 +14,10 @@ per-tick messages and cleans up both processes when inference ends. Load the
 updated game extension and enable its AI loop as with ordinary live inference.
 Supply your own
 checkpoint path. The flag applies only to 80-input policies and is mutually
-exclusive with `--confirmed-feedback`. Greedy remains the default; `--sampled`
-is still available through `RunInference.ps1 -Command`. Run the launcher again
+exclusive with `--confirmed-feedback`. The checkpoint launcher defaults to sampled
+actions. Select explicitly with `-ActionMode sampled` or `-ActionMode greedy`.
+The direct server CLI retains its greedy default and accepts `--sampled`.
+Run the launcher again
 for a new run. Startup timeout now reports absent snapshots or the rejected
 input reason and exits with a failure code. This launcher does not open or log
 into the game for you.

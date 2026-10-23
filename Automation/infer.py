@@ -38,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
     parser.add_argument('--checkpoint', help='Explicit Mystic simulator checkpoint')
+    parser.add_argument('--action-mode', choices=('sampled', 'greedy'), default=None,
+                        help='Checkpoint action selection (default: sampled)')
     parser.add_argument('--assume-sim-parity', action='store_true')
     parser.add_argument('--device', default='cpu')
     parser.add_argument(
@@ -49,6 +51,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error('--checkpoint and --command are mutually exclusive')
     if args.assume_sim_parity and not args.checkpoint:
         parser.error('--assume-sim-parity requires --checkpoint')
+    if args.action_mode is not None and not args.checkpoint:
+        parser.error('--action-mode requires --checkpoint')
 
     config = load_config(args.config)
     if args.checkpoint:
@@ -56,6 +60,8 @@ def main(argv: list[str] | None = None) -> int:
                              '--checkpoint', args.checkpoint, '--device', args.device]
         if args.assume_sim_parity:
             inference_command.append('--assume-sim-parity')
+        if (args.action_mode or 'sampled') == 'sampled':
+            inference_command.append('--sampled')
     else:
         inference_command = resolve_inference_command(config, args.command)
     if 'Inference.Mystic_Live.server' in normalize_command(inference_command):

@@ -2,6 +2,8 @@ param(
     [string]$Config = "Automation\automation_config.yaml",
     [string]$Command = "",
     [string]$Checkpoint = "",
+    [ValidateSet("sampled", "greedy")]
+    [string]$ActionMode = "sampled",
     [switch]$AssumeSimParity,
     [string]$Device = "cpu",
     [string]$LogDirectory = "logs"
@@ -24,7 +26,7 @@ if ($Command) {
     $PythonArguments += @("--command", $Command)
 }
 if ($Checkpoint) {
-    $PythonArguments += @("--checkpoint", $Checkpoint, "--device", $Device)
+    $PythonArguments += @("--checkpoint", $Checkpoint, "--device", $Device, "--action-mode", $ActionMode)
 }
 if ($AssumeSimParity) {
     $PythonArguments += "--assume-sim-parity"
