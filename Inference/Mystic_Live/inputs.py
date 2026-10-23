@@ -21,7 +21,8 @@ from Custom_enviornments.Mystic_Sim.env import MysticSimEnv
 from Custom_enviornments.Mystic_Sim.map_loader import DEFAULT_MAP_PATH
 from Custom_enviornments.Mystic_Sim.observation import encode_observation, nearest_monsters
 from Custom_enviornments.Mystic_Sim.state import Direction
-from Training.Mystic_Sim.history import HISTORY_SCHEMA, ObservableHistory, observation_high
+from Training.Mystic_Sim.history import (HISTORY_SCHEMA, LIVE_HISTORY_SCHEMA, ObservableHistory,
+                                        LiveObservableHistory, observation_high)
 
 from .lifecycle import EXECUTION_SCHEMA, finite_number, map_id
 
@@ -146,16 +147,17 @@ class LivePolicyInputs:
     The authoritative observation context must describe this exact world snapshot.
     """
     def __init__(self, size=56, *, encoder=None):
-        if type(size) is not int or size not in (56, 80):
-            raise ValueError('Live input size must be explicitly 56 or 80')
+        if type(size) is not int or size not in (56, 71, 80):
+            raise ValueError('Live input size must be explicitly 56, 71 or 80')
         self.size = size
+        self.requires_execution_feedback = size == 80
         self.encoder = encoder or LiveObservationEncoder()
         self.high = (self.encoder.space.high.copy() if size == 56
-                     else observation_high(self.encoder.space.high))
-        self.low = (np.concatenate((self.encoder.space.low, np.zeros(24, dtype=np.float32)))
-                    if size == 80 else self.encoder.space.low.copy())
-        self.schema = OBSERVATION_SCHEMA if size == 56 else HISTORY_SCHEMA
-        self.history = ObservableHistory(self.encoder.space.high, blocked_cells=self.encoder.map.blocked_cells)
+                     else observation_high(self.encoder.space.high, 'live' if size == 71 else 'confirmed'))
+        self.low = np.concatenate((self.encoder.space.low, np.zeros(size - 56, dtype=np.float32)))
+        self.schema = {56: OBSERVATION_SCHEMA, 71: LIVE_HISTORY_SCHEMA, 80: HISTORY_SCHEMA}[size]
+        history_type = LiveObservableHistory if size == 71 else ObservableHistory
+        self.history = history_type(self.encoder.space.high, blocked_cells=self.encoder.map.blocked_cells)
         self.clock_id = self.state_time_ms = None
         self.completed_ids = set()
 
@@ -163,6 +165,8 @@ class LivePolicyInputs:
         base = self.encoder.encode(world)
         if self.size == 56:
             values = base
+        elif self.size == 71:
+            values = self.history.encode(base)
         else:
             context = validate_observation_context(observation_context)
             stamp = context['stateTimeMs']
@@ -187,6 +191,10 @@ class LivePolicyInputs:
                     preprocessing=PREPROCESSING, size=self.size,
                     source_snapshot_timestamp=world.get('timestamp'),
                     observation_context=deepcopy(observation_context))
+
+    def record_action(self, action):
+        if self.size == 71:
+            self.history.record_action(action)
 
     def _advance(self, completion, context):
         ack = completion.get('acknowledgement') if isinstance(completion, dict) else None

@@ -1,5 +1,7 @@
 # Phase 8A: freeze the baseline and establish evidence
 
+**Review 2026-10-22:** This is local implementation status, not verified live-server compatibility. See the [compatibility audit](LIVE_COMPATIBILITY_REVIEW.md) for reproduced blockers and required corrections.
+
 Phase 8A implements an offline baseline inventory and optional bridge capture.
 It does not run a policy, train, change action selection, start/reset a game, or
 implement the single-episode inference lifecycle from Phase 8B. The deployment

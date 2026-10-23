@@ -72,7 +72,10 @@ def single_run_response(response, request_id):
         label = ':'.join(move.split(':')[:2]) if isinstance(move, str) and move.startswith('castSpell:') else move
         valid_move = move is None or (isinstance(label, str) and label in ACTIONS)
         if move is not None:
-            valid_move = (valid_move and response.get('inferenceStatus') == 'action_pending'
+            progression = response.get('progression', 'confirmed_feedback')
+            expected_status = {'confirmed_feedback': 'action_pending', 'snapshot': 'running'}.get(progression)
+            valid_move = (valid_move and expected_status is not None
+                          and response.get('inferenceStatus') == expected_status
                           and isinstance(response.get('actionId'), str) and bool(response['actionId']))
         if (not isinstance(run_id, str) or not run_id or not valid_move or response.get('reset') is not False
                 or response.get('inferenceStatus') not in ('waiting_for_first_valid_state', 'running',

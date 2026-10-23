@@ -1,5 +1,7 @@
 # Phase 8B: action history and a single live run
 
+**Review 2026-10-22:** This is local implementation status, not verified live-server compatibility. See the [compatibility audit](LIVE_COMPATIBILITY_REVIEW.md) for reproduced blockers and required corrections.
+
 Implemented: a separate single-run controller, a REP server, and opt-in bridge
 support for connection identity, disconnect notification and terminal latching.
 The deployment checkpoint remains unselected. The runnable server is deliberately

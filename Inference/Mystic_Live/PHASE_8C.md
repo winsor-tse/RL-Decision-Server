@@ -1,5 +1,11 @@
 # Phase 8C: actions and observable policy inputs
 
+**2026-10-23 update:** [Step 3](STEP_3.md) adds explicit browser commands and an
+opt-in 71-input recurrent contract. The original 56/80 contracts below are
+preserved; the CLI now loads checkpoints. Original implementation notes follow.
+
+**Review 2026-10-22:** This is local implementation status, not verified live-server compatibility. See the [compatibility audit](LIVE_COMPATIBILITY_REVIEW.md) for reproduced blockers and required corrections.
+
 Implemented locally: the seven-action adapter, strict 56/80-value input streams,
 saved-payload parity tests, an authoritative telemetry specification, and a capture audit.
 The deployment checkpoint remains **unselected**. The CLI remains observation

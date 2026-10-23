@@ -7,6 +7,7 @@ runs the local simulation only.
 """
 from Custom_enviornments.Mystic_Sim.viewer import Viewer
 from .watch_state import ACTION_NAMES, FEATURE_NAMES
+from .history import LIVE_HISTORY_FEATURES
 
 
 class PolicyViewer(Viewer):
@@ -179,6 +180,13 @@ class PolicyViewer(Viewer):
         h = state.history
         previous = next((ACTION_NAMES[i] for i, value in enumerate(h[:7]) if value), 'None / reset')
         y = self.line('Previous chosen action', previous, y)
+        if len(h) == 15:
+            y = self.note('Chosen commands only; execution outcomes are not policy inputs.', y)
+            y = self.section('Local terrain / four-tile rays', y + 8)
+            for i, name in enumerate(('Up', 'Down', 'Left', 'Right')):
+                free, detected = h[7 + 2*i:9 + 2*i]
+                y = self.line(name, f'{free * 4:g} free / blocker' if detected else '4+ free / clear', y)
+            return y
         for label, value in zip(('Applied', 'Movement blocked', 'Cooldown rejected'), h[7:10]):
             y = self.line(label, 'Yes' if value else 'No', y, self.GREEN if value else self.MUTED)
         y = self.section('Confirmed casts / capped ages', y + 8)
@@ -220,14 +228,17 @@ class PolicyViewer(Viewer):
         y = self.section(f'Exact input tensor / {len(state.observation)} values', y)
         y = self.note('Columns: index / feature   |   raw   |   normalized', y)
         x, right = self.inspector_body.x, self.inspector_body.right - 8
+        names = (FEATURE_NAMES[:56] + tuple(LIVE_HISTORY_FEATURES)
+                 if len(state.observation) == 71 else FEATURE_NAMES)
         for index, (value, scaled) in enumerate(zip(state.observation, state.normalized_observation)):
-            if index in (6, 46, 56, 72):
+            terrain_index = 63 if len(state.observation) == 71 else 72
+            if index in (6, 46, 56, terrain_index):
                 title = {6: 'Enemy slots', 46: 'Signed relative offsets',
-                         56: 'Observable history', 72: 'Terrain sensors'}[index]
+                         56: 'Observable history', terrain_index: 'Terrain sensors'}[index]
                 y = self.section(title, y + 4)
             value_text = f'{value:8.3f}  {scaled:7.3f}'
             values_x = right - self.mono.size(value_text)[0]
-            self.fit_text(f'{index:02}  {FEATURE_NAMES[index]}', x, y,
+            self.fit_text(f'{index:02}  {names[index]}', x, y,
                           values_x - x - 16, self.MUTED, self.tiny)
             self.text(value_text, values_x, y, self.TEXT, self.mono)
             y += 23

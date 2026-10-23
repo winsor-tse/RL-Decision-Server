@@ -98,7 +98,7 @@ def checkpoint_identity(path):
         config = saved_config(payload)
         env = checkpoint_factory(payload)()
         expected = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head,
-                            recurrent_encoder=config.recurrent_encoder)
+                            recurrent_encoder=config.recurrent_encoder, history_mode=config.history_mode)
         load_checkpoint(path, expected)
         result.update(local_compatibility='passed', compatibility_error=None)
     except (ValueError, KeyError, TypeError) as error:

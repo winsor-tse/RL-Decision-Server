@@ -104,6 +104,12 @@ python -m Training.Mystic_Sim.watch PATH_TO_CHECKPOINT --seed 91000 --smoke-test
 
 ## TODO: launch the same watch UI from the live server
 
+Deployment priority is now the four-step
+[minimal simulator-to-game plan](../../Custom_enviornments/MYSTIC_ZMQ_PARITY_PLAN.md).
+Preserve the Phase 8A-8C implementation. Actor execution through the existing
+transport comes before this optional UI integration; confirmed execution feedback
+is a requirement of the existing 80-input history mode, not all live policies.
+
 Phase 8A [baseline and bridge evidence tools](../../Inference/Mystic_Live/PHASE_8A.md)
 are implemented. They inventory/capture data only; the inference-driven LIVE
 watch mode below remains TODO, and the deployment checkpoint is unselected.

@@ -28,7 +28,7 @@ def main(argv=None):
     config = saved_config(raw)
     env = checkpoint_factory(raw)()
     try:
-        contract = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder)
+        contract = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder, history_mode=config.history_mode)
         payload = load_checkpoint(args.checkpoint, contract)
     finally:
         env.close()
@@ -41,7 +41,7 @@ def main(argv=None):
         factory = encounter_factory(run.encounter)
         env = factory()
         try:
-            target = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder)
+            target = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder, history_mode=config.history_mode)
             validate_transfer_metadata(contract, target)
         finally:
             env.close()

@@ -348,6 +348,15 @@ class LifecycleTests(unittest.TestCase):
 
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_explicit_targets_and_capability_survive_websocket_zmq(self):
+        await self.exercise('snapshot_commands')
+
+    async def test_snapshot_decisions_without_feedback_over_websocket_zmq(self):
+        await self.exercise('snapshot')
+
+    async def test_snapshot_disconnect_stops_run(self):
+        await self.exercise('snapshot_disconnect')
+
     async def test_live80_inputs_and_feedback_survive_websocket_zmq_transport(self):
         await self.exercise('inputs')
 
@@ -362,8 +371,14 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         backend = context.socket(zmq.REP)
         port = backend.bind_to_random_port('tcp://127.0.0.1')
         from Inference.Mystic_Live.inputs import LivePolicyInputs, OBSERVATION_CONTEXT_SCHEMA
-        inputs = LivePolicyInputs(80) if stop_kind == 'inputs' else None
-        run = SingleRun(StubActor(), input_adapter=inputs, idle_timeout=5)
+        snapshot_mode = stop_kind.startswith('snapshot')
+        command_mode = stop_kind == 'snapshot_commands'
+        from Inference.Mystic_Live.commands import LiveCommands, COMMAND_SCHEMA
+        inputs = LivePolicyInputs(71 if command_mode else 56 if snapshot_mode else 80) if snapshot_mode or stop_kind == 'inputs' else None
+        commands = LiveCommands(inputs.encoder) if command_mode else None
+        run = SingleRun(StubActor(), input_adapter=inputs, idle_timeout=5,
+                        command_adapter=commands,
+                        progression='snapshot' if snapshot_mode else 'confirmed_feedback')
         errors = queue.Queue()
         stop = threading.Event()
         def worker():
@@ -386,17 +401,39 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
                     async with websockets.connect(f'ws://127.0.0.1:{ws_port}') as client:
                         first = request(0)
                         first.pop('bridgeContext')
-                        if inputs is not None:
+                        if command_mode:
+                            first['capabilities'] = [COMMAND_SCHEMA]
+                        if stop_kind == 'inputs':
                             first['observationContext'] = dict(schema=OBSERVATION_CONTEXT_SCHEMA,
                                 clockId='synthetic-server-clock', stateTimeMs=1000)
                         await client.send(json.dumps(first))
                         choice = json.loads(await client.recv())
-                        self.assertEqual(choice['move'], 'castSpell:1')
+                        self.assertEqual(choice['move'], commands.encode(first['worldState'], 4)['move'] if command_mode else 'castSpell:1')
+                        if command_mode:
+                            self.assertEqual(choice['commandSchema'], COMMAND_SCHEMA)
                         pending = request(1)
                         pending.pop('bridgeContext')
+                        if command_mode:
+                            pending['capabilities'] = [COMMAND_SCHEMA]
                         await client.send(json.dumps(pending))
-                        self.assertIsNone(json.loads(await client.recv())['move'])
-                        if inputs is not None:
+                        second_reply = json.loads(await client.recv())
+                        if snapshot_mode:
+                            self.assertEqual(second_reply['move'], 'up')
+                            self.assertEqual(second_reply['inferenceStatus'], 'running')
+                            await client.send(json.dumps(pending))
+                            self.assertIsNone(json.loads(await client.recv())['move'])
+                            third = request(2)
+                            third.pop('bridgeContext')
+                            if command_mode:
+                                third['capabilities'] = [COMMAND_SCHEMA]
+                            await client.send(json.dumps(third))
+                            self.assertEqual(json.loads(await client.recv())['move'],
+                                             commands.encode(third['worldState'], 5)['move'] if command_mode else 'castSpell:2')
+                            self.assertEqual(run.snapshot()['completed_actions'], [])
+                            self.assertIsNone(run.pending)
+                        else:
+                            self.assertIsNone(second_reply['move'])
+                        if stop_kind == 'inputs':
                             confirmed = acknowledge(request(2), choice, attempted=1000, observed=1175)
                             confirmed['observationContext'] = dict(schema=OBSERVATION_CONTEXT_SCHEMA,
                                 clockId='synthetic-server-clock', stateTimeMs=1175)
@@ -405,7 +442,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
                             self.assertEqual(run.actor.inputs[-1][0].shape, (80,))
                             self.assertAlmostEqual(float(run.actor.inputs[-1][0][66]), .0175, places=7)
                             self.assertEqual(run.snapshot()['current_policy_input']['size'], 80)
-                        if stop_kind in ('death', 'inputs'):
+                        if stop_kind in ('death', 'inputs', 'snapshot', 'snapshot_commands'):
                             death = request(3 if inputs is not None else 2, hp=0)
                             await client.send(json.dumps(death))
                             reply = json.loads(await client.recv())
@@ -422,13 +459,13 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
                             break
                         await asyncio.sleep(.01)
                     self.assertTrue(run.terminal)
-                    self.assertEqual(run.stop_reason, 'client_disconnected' if stop_kind == 'disconnect' else 'player_death')
+                    self.assertEqual(run.stop_reason, 'client_disconnected' if stop_kind in ('disconnect', 'snapshot_disconnect') else 'player_death')
                     final = run.snapshot()
                     async with websockets.connect(f'ws://127.0.0.1:{ws_port}') as client:
                         await client.send(json.dumps(request(6)))
                         self.assertIsNone(json.loads(await client.recv())['move'])
                     self.assertEqual(run.snapshot(), final)
-                    self.assertEqual(run.action_count, 2 if inputs is not None else 1)
+                    self.assertEqual(run.action_count, 3 if snapshot_mode else 2 if inputs is not None else 1)
                     self.assertEqual(run.actor.starts, 1)
             finally:
                 stop.set()

@@ -145,7 +145,7 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
     choices = encounter.mixture if isinstance(encounter, MixedEncounter) else ()
     probe = factory()
     try:
-        contract = metadata(probe, recurrent=config.recurrent, actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder)
+        contract = metadata(probe, recurrent=config.recurrent, actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder, history_mode=config.history_mode)
         observation_high = np.asarray(contract['observation_scale'], dtype=np.float32)
     finally:
         probe.close()
@@ -227,7 +227,7 @@ def train(config, *, run_dir=None, device='auto', resume=None, record_gameplay=T
             if key != 'components': writer.add_scalar(f'baseline/{key}', value, global_step)
         # Fresh deterministic episode seeds on resume; simulator world snapshots are not claimed.
         batch = SimBatch(config.num_envs, config.seed + completed*config.num_envs,
-                         factory=factory, recurrent=config.recurrent,
+                         factory=factory, recurrent=config.recurrent, history_mode=config.history_mode,
                          sampling_states=payload.get('scenario_sampler_states') if payload and choices else None)
         running = [episode_metrics() for _ in batch.envs]
         shape = (config.num_steps,config.num_envs)
@@ -442,6 +442,7 @@ def main(argv=None, *, defaults=None, record_from_checkpoint=1, run_root=None, f
         options = {'action':argparse.BooleanOptionalAction} if isinstance(default,bool) else {
             'type':float if field.name == 'value_clip_coef' else type(default)}
         if field.name == 'actor_head': options['choices'] = ('linear', 'tanh')
+        if field.name == 'history_mode': options['choices'] = ('confirmed', 'live')
         if field.name == 'recurrent_encoder': options['choices'] = ('flat', 'cross_attention')
         parser.add_argument('--'+field.name.replace('_','-'),default=argparse.SUPPRESS,**options)
     parser.add_argument('--device',choices=('auto','cpu','cuda'),default='auto')
@@ -494,12 +495,12 @@ def main(argv=None, *, defaults=None, record_from_checkpoint=1, run_root=None, f
         env = encounter_factory(encounter)()
         try:
             if args.resume:
-                payload = load_checkpoint(args.resume,metadata(env,recurrent=config.recurrent,actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder))
+                payload = load_checkpoint(args.resume,metadata(env,recurrent=config.recurrent,actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder, history_mode=config.history_mode))
                 if payload['update'] >= config.updates:
                     parser.error('Checkpoint already completed its training budget')
             if args.continue_from:
                 source = load_stage_checkpoint(args.continue_from,
-                    metadata(env,recurrent=config.recurrent,actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder),config)
+                    metadata(env,recurrent=config.recurrent,actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder, history_mode=config.history_mode),config)
                 continuation_schedule = stage_schedule(config, source_payload=source)
             env.reset(seed=config.seed)
             report = {'scenario':'full' if encounter is None else encounter.stage_id,

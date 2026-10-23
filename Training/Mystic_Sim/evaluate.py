@@ -12,7 +12,7 @@ import torch
 from .core import (Agent, accumulate, episode_metrics, finish_metrics, json_write, saved_config,
                    load_checkpoint, make_env, metadata)
 from Custom_enviornments.Mystic_Sim.actions import ACTIONS
-from .history import ObservableHistory
+from .history import history_class
 from .recurrent import RecurrentAgent
 from .encounter_diagnostics import EncounterDiagnostics, METRICS as ENCOUNTER_METRICS
 
@@ -95,7 +95,7 @@ def evaluate(agent, seeds, *, device='cpu', record_path=None, record_stride=5,
             obs, info = env.reset(seed=seed)
             encounter_diagnostics = EncounterDiagnostics(env.world)
             recurrent = bool(getattr(agent, 'recurrent', False))
-            history = ObservableHistory.from_env(env) if recurrent else None
+            history = history_class(getattr(agent, 'history_mode', 'confirmed')).from_env(env) if recurrent else None
             state = agent.initial_state(1) if recurrent else None
             episode_start = True
             rng = np.random.default_rng(seed + 1000000)
@@ -203,7 +203,7 @@ def load_evaluation_agent(path, device='cpu'):
     env = factory()
     try:
         config = saved_config(raw)
-        contract = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder)
+        contract = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder, history_mode=config.history_mode)
         checkpoint = load_checkpoint(path, contract)
         agent = (RecurrentAgent(contract['observation_scale'], config.actor_head, config.recurrent_encoder)
                  if config.recurrent else Agent(contract['observation_scale'])).to(device)

@@ -1,368 +1,257 @@
-# Mystic ZMQ and simulation parity plan
+﻿# Mystic: minimal simulator-to-game policy deployment plan
 
-Prepared 2026-10-21 from the local implementations. Phase 8A evidence tools,
-Phase 8B lifecycle and Phase 8C local action/input adapters are implemented.
-Phase 8C's real capture coverage and authoritative server/extension feedback
-wiring remain outstanding; Phases 8D-8H remain planned. No simulator policy or
-checkpoint contracts changed. The CLI remains observation-only until a validated
-feedback producer and actor loader are integrated.
+Revised 2026-10-22. This replaces the former Phase 8D-8H deployment roadmap.
+Phase 8A-8C implementation is retained. This document proposes remaining code
+changes; it does not mean those changes or a live run have been completed.
 
-## Scope and recommendation
+## Objective
 
-Compare the live `Test_Env/Mystic.py` WebSocket/ZMQ path with the working
-Python replica in `Mystic_Sim/` and its trainers in `Training/Mystic_Sim/`.
-The separate `Simulation/YugenSimEnv.hpp` is an older C++ scaffold whose step
-does not implement combat. It is not the current Python training replica.
+Load a simulator-trained checkpoint and control one live player through the
+existing browser -> WebSocket bridge -> ZMQ path. Each fresh state produces one
+policy decision and one reply. Train in the simulator; run the frozen actor in
+the game. Start on a living player on map53 and stop on death, manual stop,
+disconnect, or an unsupported map change. No automatic reset or respawn.
 
-Implement this as Phases 8A-8H of the existing `PYTHON_INTEGRATION_PLAN.md`.
-Prioritize correct action/state alignment, observable inputs, and execution
-semantics before further training experiments or performance optimization.
-Use a separate seven-action live adapter so existing live models retain their
-original contracts. Preserve the current simulator as a versioned baseline;
-change mechanics only when connected-game evidence supports the change.
+The runtime is:
 
-### Confirmed map and ZMQ payload context
+`live worldState -> shared observation encoder -> frozen actor -> command reply`
 
-The user confirms that the live map is
-[Tests/fixtures/simulation/map53.json](../Tests/fixtures/simulation/map53.json)
-and is the same as the simulator map, including static obstacles. The fixture
-and [packaged simulator map](Mystic_Sim/data/map53.json) have matching SHA-256
-hashes in this checkout. Treat obstacle-layout parity as established context:
-reuse the existing map loader/collision layer for live rendering and terrain
-rays. No separate obstacle discovery, map reconstruction or alternative live
-map asset is needed for map53.
+The shared map supplies terrain sensors and optional rendering. Do not step an
+independent simulator to predict live HP, enemies, cooldowns, or movement.
 
-The full state passed through ZMQ has a structure similar to
-[Tests/fixtures/simulation/example_full_state.json](../Tests/fixtures/simulation/example_full_state.json).
-Use its `timestamp`, `player` and `entities` structure as the raw `worldState`
-parser reference, including IDs/types, map coordinates, direction, HP/MP and
-maximums, and supplied distances. The fixture's `map3471`, player stats and
-entity positions are example values, not the configured map53 run's state.
-Live player/enemy positions and resources are read from each current payload;
-sharing the map does not require stepping an independent local world.
+## Keep the completed work
 
-The payload fixture is a byte-identical copy (matching SHA-256) of
-[Simulation/Source-Code/Example_Full_State.txt](../Simulation/Source-Code/Example_Full_State.txt).
-The inspected JavaScript `buildWorldState()` produces this structure, and the
-extension wraps it as `worldState` in an `ai_tick` message with `requestId`,
-`pageUrl` and an outer `timestamp`. The bridge forwards that message unchanged
-to ZMQ. The example file represents the nested world state, not the entire
-request envelope.
+**Preserve, then correct:** [the Phase 8A-8C compatibility audit](../Inference/Mystic_Live/LIVE_COMPATIBILITY_REVIEW.md)
+found reproducible live-path blockers despite all 47 local tests passing.
+"Implemented" below means local components exist, not that they work against
+the current server. Include the audit's feedback-inventory corrections, browser
+self-target/stop handling and bridge progression checks in the steps below.
 
-### Deployment scope: single-episode live inference
+- **8A:** baseline/checkpoint inventory, optional bridge captures and evidence
+  tests. See [PHASE_8A.md](../Inference/Mystic_Live/PHASE_8A.md).
+- **8B:** single-run lifecycle, stop behavior, bridge integration, final snapshot,
+  and existing confirmed-feedback mode. See [PHASE_8B.md](../Inference/Mystic_Live/PHASE_8B.md).
+- **8C:** shared 56/80 encoders, seven-action adapter, map loader, terrain sensors,
+  strict history validation and parity tests. See [PHASE_8C.md](../Inference/Mystic_Live/PHASE_8C.md).
 
-Train and parallelize in the simulator. The new ZMQ path serves a frozen actor
-against one real player, normally for one episode per explicit launch. It does
-not train, collect PPO rollouts, restore optimizers, bootstrap values, or cycle
-episodes. The existing live trainers remain separate legacy entry points.
+Preserve these implementations and their strict-mode tests. Extend the lifecycle
+and CLI rather than replacing this stack or modifying the legacy live trainers.
+The phase documents describe the existing implementation, including its current
+limitations; this plan governs new work and supersedes their old phase ordering.
 
-Start from the first valid living-player state in the configured map, without
-resetting or teleporting the game. Initialize actor memory/history once. Stop
-dispatching gameplay commands on confirmed death or manual stop, preserve the
-final UI state, and require an explicit new launch to run again. Disconnect,
-timeout, or unsupported map changes stop the run as interrupted; automatic
-reconnect/resume and respawn/reset loops are outside this workflow.
+Current status: the CLI is observation-only, the actor hook is present, and
+checkpoint loading is already implemented in the simulator evaluator. However,
+SingleRun currently waits for an execution acknowledgement after EVERY action,
+even with 56 inputs. The ordinary extension does not produce this acknowledgement.
+Adding a model loader alone will therefore not produce continuous live inference.
 
-The simulator's kill goal, Y failures, step cap, rewards and critic are not live
-inference requirements. Optional evaluation goals/limits and outcome metrics
-must be explicitly enabled; missing optional diagnostics display as unavailable.
-The action/observation contract, actor architecture, recurrent history, outcome
-acknowledgements required by that history, and measured action timing remain
-necessary for existing checkpoint compatibility.
+## Input compatibility: decide from the checkpoint
 
-Findings below are established from local code, including the sibling
-`../yugen-battler/yugen-battler/battler.js`. The browser's actually loaded
-extension and connected server version have not been verified. Distinguish
-these code differences from mechanics discrepancies that still need live data.
+Inspect the explicitly supplied checkpoint before sending any gameplay command.
+Use its architecture, feature schema/order, normalization and action labels.
+Never select the newest checkpoint implicitly or resize a network to fit it.
 
-## Major differences and their impact
+| Checkpoint | Live requirements | Deployment route |
+| --- | --- | --- |
+| Existing 56-input feedforward policy | Current visible world state | Use the existing encoder and the new snapshot-driven lifecycle mode. No execution-outcome producer is needed. |
+| Existing 80-input recurrent policy | Base state, terrain, prior action, applied/blocked/cooldown flags, successful-cast ages | Retain strict feedback mode. Existing weights need the missing outcome information for matching input semantics. |
+| New recurrent policy using live-available history | A separately versioned shared training/live encoder | Train a new checkpoint with that contract, then use snapshot-driven inference. This is the recommended route when server feedback is unavailable and recurrence is desired. |
 
-| Priority | Area | Current ZMQ/browser path | Python replica | Required response |
-|---|---|---|---|---|
-| P0 | Action contract | Mystic defaults to 11 actions: four moves, attack, slots 1/2/3/5/6/7. | Seven: four moves and slots 1/2/3. ID 4 means Arcane Blast rather than attack. | Explicit seven-action live adapter; validate labels and schema before sending commands. |
-| P0 | Observation contract | 26 values, five monsters; distance-only stable sorting preserves payload order on ties. No explicit dead-monster filter in observation parsing. | 56 base values: ten living enemies and signed dx/dy for the first five; distance then entity-ID sorting. Recurrent policies consume 80 values. | Shared, versioned encoding for the new adapter, including filtering, ID handling, padding, signed bounds, and tie rules. |
-| P0 | Recurrent inputs | No confirmed action outcomes, collision reasons, cooldown rejections, or cast acknowledgements in the inspected world-state builder. | Adds 24 history/sensor values, including confirmed outcomes, successful-cast ages, and four local terrain rays. | Add required outcome telemetry; reuse the confirmed shared map53 collision layer. Missing required telemetry blocks deployment of the existing 80-input policy. |
-| P0 | Transition alignment | `step(a)` receives a world snapshot, sends action a, then returns that same received snapshot and its reward. | Applies a, advances 200 ms, then returns the resulting observation/reward. | Correlate actions/outcomes for observable history and the Previous state display. Live inference needs no reward-bearing training transitions. |
-| P0 | Decision timing | Browser awaits the response, applies the action, then sleeps 200 ms. Snapshot timestamps use client `Date.now()`. Bridge `serverTime` is Python wall time. | Exact 200 ms simulated decisions and integer event deadlines. | Measure command application and authoritative state times. The browser interval includes response/processing delay; neither existing timestamp is proof of game-server execution time. |
-| P0 | Targeting | Browser ranks by Manhattan distance, favors monsters but can fall back to other entities, and has no 16-X/10-Y eligibility filter in target selection. With no target, all three spell commands are skipped. | Ranks eligible monsters by Euclidean distance then ID inside an inclusive 16-X/10-Y rectangle. Slots 2/3 fall back to self. | Select and validate one execution specification against connected behavior; test ties, rectangle edges, unavailable targets, and self fallback. |
-| P0 | Facing and movement | Browser faces the selected target before casting; replica cast does not update player facing. Browser also mutates local coordinates before authoritative movement confirmation. | Movement checks terrain, occupancy, and bounds synchronously. | Validate cast-facing behavior and distinguish client prediction from accepted movement. Do not count local coordinate changes as movement acknowledgements. |
-| P0 | Reset | Mystic returns the pre-reset snapshot immediately after sending `reset=True`. Browser implements reset by self-casting slot 4. No reset-completion handshake is checked. | Rebuilds a seeded world and returns its new initial observation. | Bypass the legacy reset mechanism in the new inference entry point. Start on a valid living-player snapshot; stop on death without another episode. |
-| P2 | Damage and kills | HP-delta rewards; nearby disappeared entities can be treated as kills. Entity reward tracking includes non-current-player entities without the observation's monster-type filter. Healing can yield positive damage-taken reward. | Attributed damage/death events, damage clamped to actual HP removed, no healing reward in the default combat profile. | Optional reporting: use attributed events when available, otherwise show unknown. Reward and kill attribution do not gate actor inference. |
-| P2 | Reward scale and shaping | +10 per inferred kill, -100 on death/map departure, no explicit win bonus; proximity shaping, flat -10 blocked-move penalty, low-HP shaping, incoming HP delta weighted 20. | +10 per confirmed kill, +200 win, -200 death, -25 timeout; default incoming damage weight 50, time cost, escalating blocked-move penalties and cooldown penalty; no proximity reward. | Keep rewards in simulator training. Live rewards are optional diagnostics; compare raw returns only under an explicit equivalent evaluation profile. |
-| P1 | Episode rules | Default 256 steps; truncates at Y < 25; penalizes Y < 31; leaving map53 is a loss. | Default 1024 steps; Y outside inclusive 30..86 terminates as failure; penalties below 31 and above 85. Five kills is the default goal on both paths. | Live inference runs until death/manual stop, or interruption. Do not inherit simulator task caps/goals by default. No live PPO bootstrapping is required. |
-| P1 | Model loading | Live LSTM uses a shared embedding/LSTM and Tanh actor head; current evaluator loads that architecture. | Separate actor/critic branches; configurable flat or attention encoder; default linear actor; saved preprocessing scales and architecture metadata. | Load the exact checkpoint architecture and preprocessing. Resizing the live network does not make simulator weights compatible. |
-| P1 | World and mechanics coverage | Visible client registry, actual player equipment/stats, other actors, and hidden server timers. | Fixed level-135 Mystic baseline, gear off, map53, Innie-only population (80 in full scenario), selected status modifiers off. | Match observable task setup; measure remaining mechanics differences. Do not equate client registry visibility with complete server state. |
-| P2 | Throughput and resume | One external game stream; socket recovery does not restore world state. | Many independent seeded worlds; training resume starts fresh episodes. | Parallelize training locally. Live death/interruption ends inference; another run requires an explicit new launch, not training resume. |
+LSTM hidden/cell state does not itself require execution acknowledgements. The
+existing handcrafted history features do. The map already supplies the eight
+terrain values; it cannot establish whether the server accepted a spell.
 
-The README's historical 15-action list and several integration-plan references
-to 26/50-input policies are stale. Current code and the selected checkpoint's
-metadata must determine the contract. In particular, simulator Y exits currently
-terminate; older prose describing them as truncations is outdated.
+Do not pad 56 features to 80, zero missing outcome features, or represent command
+submission as successful execution. An 80-input checkpoint cannot be promised
+exact deployment on the current payload without resolving this dependency.
 
-## Phased implementation
+## Step 1 - Connect the existing frozen actor loader
 
-### Phase 8A - Freeze the baseline and establish evidence
+Implemented 2026-10-23: `policy.py` reuses the evaluation loader and runs the
+frozen actor only; the CLI accepts explicit checkpoints, greedy/sampled actions
+and device selection. Input size is inferred and conflicting overrides fail.
+See [STEP_1.md](../Inference/Mystic_Live/STEP_1.md) for usage and validation.
+Step 2 now selects snapshot progression for 56-input checkpoints by default.
+`--confirmed-feedback` selects the strict lifecycle, not a telemetry producer.
 
-Implementation and commands: [PHASE_8A.md](../Inference/Mystic_Live/PHASE_8A.md).
-The offline baseline generator, opt-in bridge JSONL capture, synthetic scripted
-fixtures, field matrix and transport tests are implemented. The deployment
-checkpoint remains unselected. Actual loaded extension/game-build identities
-and real scripted-game captures remain unverified external evidence; the tools
-record these gaps explicitly and do not claim live compatibility.
+Code: add `Inference/Mystic_Live/policy.py`; extend `server.py`.
 
-Address: uncertain deployed versions, stale documentation, missing captures.
+1. Reuse `Training/Mystic_Sim/evaluate.py:load_evaluation_agent` and its existing
+   checkpoint validation. Reuse model classes and saved normalization. Loading
+   immutable simulator configuration/map data is fine; no live simulation loop.
+2. Implement the existing `initial_state()` / `choose(...)` actor interface and
+   return `PolicyChoice`. Use eval/inference mode and normalize raw inputs once.
+   For recurrent models, retain actor hidden/cell state between decisions and
+   reset it only at a new run. Do not evaluate the critic per live decision.
+3. Make `--checkpoint PATH` and `--observe-only` mutually exclusive CLI modes.
+   Infer the inference input contract from the checkpoint; reject conflicting
+   overrides. Default to greedy actions; provide an explicit sampled option.
+4. Inspect compatibility before binding/dispatching: actions, schema, scale,
+   supported architecture and map/sensor configuration. Report an unsupported
+   80-input deployment clearly rather than silently launching a stalled run.
+   A strict feedback run may wait for its required initial telemetry as today.
 
-1. Record repository revision and selected checkpoint metadata, architecture,
-   feature schema, action ordering, preprocessing, map hash, and task settings.
-   Use the confirmed map53 fixture and example full-state fixture above as the
-   geometry and payload references; obstacle-layout parity is already established.
-2. Identify the actually loaded browser extension and connected game build.
-3. Add optional JSONL capture at the live boundary: session/episode/request IDs,
-   raw state, command, selected target, receipt/send/application times and
-   authoritative timestamps or outcomes where available. Separate unavailable
-   fields from observations. Keep the existing human recorder independent.
-4. Capture scripted moves, blocked moves, each spell, no-target casts, cooldown
-   rejection, player death, map transitions, and disconnect. Capture kills/damage
-   attribution for optional metrics when available; reset-loop testing is not
-   required for the single-episode inference entry point.
-5. Produce a field-availability matrix and correct obsolete contract references.
+Acceptance: fixed input sequences produce the same normalized inputs, logits,
+actions and recurrent states as the simulator actor within numerical tolerance.
+The loader does not restore optimizers or modify weights. Existing observation
+mode still works.
 
-Deliverables: baseline manifest, versioned capture format, capture fixtures,
-and a difference report with observed/inferred/unavailable evidence labels.
+## Step 2 - Allow continuous decisions from ordinary ZMQ snapshots
 
-Exit: every required input and outcome has a known producer or an explicit
-missing-data dependency. Use the example fixture for payload-structure tests,
-with map53-specific values in deployment fixtures.
+Implemented 2026-10-23. The CLI defaults compatible 56-input policies to snapshot
+mode; existing 80-input policies require explicit confirmed feedback. Direct
+`SingleRun` callers keep the strict default. The bridge accepts explicitly marked
+snapshot commands; issued-command reports keep execution outcomes unknown.
+See [STEP_2.md](../Inference/Mystic_Live/STEP_2.md) for launch and test coverage.
 
-### Phase 8B - Correct action history and single-run lifecycle
+Code: extend `Inference/Mystic_Live/lifecycle.py`, `inputs.py` and `server.py`.
 
-Implementation and commands: [PHASE_8B.md](../Inference/Mystic_Live/PHASE_8B.md).
-`SingleRun` provides readiness, pending-action correlation, exactly-once confirmed
-history, measured timing and irreversible stop states. The observation-only REP
-server preserves a final state/timing report. The opt-in `--single-run` bridge
-pins the connection and backend run ID, forwards disconnect events and latches
-terminal replies. Tests cover death/reconnect/restart without another episode.
-The proposed execution-feedback consumer is implemented; the current plugin does
-not emit that feedback. Live actor loading/feature encoding and Pygame telemetry
-remain subsequent work; the deployment checkpoint stays unselected.
+1. Add explicit snapshot-driven and confirmed-feedback progression modes.
+   Keep the existing strict behavior as the default for existing direct callers;
+   the checkpoint-aware CLI selects a compatible mode explicitly.
+2. In snapshot mode, the next valid fresh request can trigger the next decision
+   without an `execution` record. Record the previous command as sent, with its
+   execution outcome unknown. Do not call the confirmed-history updater or
+   synthesize an acknowledgement. Snapshot mode must reject the existing
+   outcome-dependent 80-input contract.
+3. Preserve stale/duplicate request handling, connection/run ownership, one
+   reply per request, inert replies while waiting, and death/interruption stops.
+   No extra actor call for duplicate observations, diagnostic reads or redraws.
+4. Record actual observed intervals for diagnostics. Retain the existing browser
+   cadence for the initial run; do not require exact server-clock synchronization
+   for a snapshot-only policy. Investigate latency if live behavior warrants it.
 
-Address: action/history alignment, variable time, and reliable stopping.
+Acceptance: an actor handles several ordinary captured/synthetic world-state
+requests in sequence without acknowledgements, produces one command per fresh
+request, and stops before any command on death. Strict-feedback tests still pass.
+Test duplicate requests, disconnect and timeout; distinguish transport progress
+from game execution success.
 
-1. Introduce a separate inference adapter with waiting-for-first-valid-state,
-   running/action-pending, and stopped/interrupted states. Preserve ZMQ REQ/REP
-   ordering, using an explicitly inert transport reply where necessary, outside
-   policy action IDs. Do not call the legacy reset or send its reset spell.
-2. Correlate each action with its input and confirmed outcome for history and
-   Current state / Previous state inspection. There is no PPO transition buffer
-   or live reward requirement. Request IDs identify exchanges; they alone do not
-   establish execution acknowledgement.
-3. Measure elapsed time and jitter. Do not replace missing server timing with a
-   claimed fixed 200 ms interval. Decide from measurements whether live scheduling
-   can match training or a new timing-tolerant training contract is required.
-4. Initialize actor memory/history once on a valid living-player state. On
-   confirmed death, stop selecting/sending actions before processing another
-   policy decision. Preserve the final frame and stop reason for inspection.
-5. Reject duplicate/stale/cross-run results. Manual stop ends inference; timeout,
-   disconnect, or unsupported map change interrupts it. Do not replay pending
-   casts, automatically reconnect/resume, reset, respawn or start another episode.
-   A new launch explicitly creates fresh actor memory/history.
-6. Keep slow per-tick diagnostic file writes optional in the new adapter and
-   measure their contribution to latency.
+## Step 3 - Resolve only the missing inputs and command semantics
 
-Deliverables: single-run inference lifecycle, timing report, action/history and
-death/interruption fixtures.
+Implemented locally 2026-10-23: explicit targeting/no-target handling, browser
+self-casts and stop-generation checks, capability forwarding, and an opt-in
+71-input recurrent training/live contract. Checkpoint selection stays entirely
+in the user's CLI. See [STEP_3.md](../Inference/Mystic_Live/STEP_3.md) for commands,
+browser reload instructions and validation limits. Existing 80-input weights
+still need a real outcome producer; they are not converted. No real game episode
+has been run, and no production checkpoint was trained or selected.
 
-Exit: action outcomes attach exactly once; the first state needs no game reset;
-death/interruption emits no further gameplay commands. A later alive-player tick
-or reconnection cannot restart the stopped run. Pending replies remain inert and
-REQ/REP-valid.
+### If deploying an existing 80-input checkpoint
 
-### Phase 8C - Match actions and observable policy inputs
+Keep the current strict adapter. Wire a real accepted/rejected-action producer
+and its forwarding through the game/extension, then verify it against the input
+contract. The existing Phase 8C telemetry protocol is one concrete supported
+implementation. Server-clock fields are requirements of that adapter, not of all
+policy inference. Any simpler replacement still needs a tested mapping to the
+same history semantics and a coherent time basis for cast ages.
 
-Implementation, telemetry contract and commands: [PHASE_8C.md](../Inference/Mystic_Live/PHASE_8C.md).
-Local 56/80 tensor parity, seven-action handling and telemetry validation are tested.
-Actual game-server feedback wiring and real visibility/correlation captures are
-still required exit evidence; current scripted captures are explicitly synthetic.
+Do not make server instrumentation a prerequisite for the 56-input route.
+If server changes are unavailable, this route remains blocked; use a compatible
+56-input checkpoint or the new recurrent contract below. Merely detecting this
+blocker is not completion of deployment.
 
-Address: 11-versus-7 outputs, 26-versus-56/80 inputs, unavailable history.
+### If recurrence is needed without server instrumentation
 
-1. Use the shared seven-action labels and a pure encoder for the new adapter.
-   Keep the legacy live encoder and models explicitly selectable.
-2. Match monster filtering, typed ID normalization, Manhattan observation
-   distance, direction, ID tie-breaking, ten slots, five aligned dx/dy pairs,
-   HP/MP fractions, map ID parsing, zero padding, dtype and signed Box bounds.
-3. Verify that real captures expose enough enemies and their coordinates.
-   Normal absence uses padding; missing required telemetry is an error rather
-   than invented unseen enemies or guessed feature values.
-4. Extend telemetry upstream for authoritative application/rejection outcomes
-   and cast times, then reuse `ObservableHistory`. A client command-send event
-   does not mean a successful cast. This dependency may require game-server work.
-5. Reuse the confirmed map53 collision layer and existing map loader to compute
-   the same four four-tile terrain rays. Exclude entity occupancy. Check map ID
-   and coordinate conventions at startup; unsupported maps stop as described
-   in 8B. A separate live obstacle-layout investigation is not required.
-6. If authoritative outcomes cannot be provided, use a separately versioned
-   observation design and retrain. Existing 80-input weights cannot be deployed
-   by substituting zero history or guessed success flags.
+Add a new, explicitly named live-observable history contract shared by training
+and inference. A small initial design is the existing 56 base values, eight
+static terrain values, and seven previous-chosen-action flags (71 total).
+Previous action means the chosen/submitted command even if it failed; initial
+flags are zero. No successful-cast ages or rejection flags are included.
 
-Deliverables: shared encoding, telemetry specification, seven-action adapter,
-and saved-payload feature parity tests.
+Implement the encoder in the training history layer and reuse it live. Add an
+opt-in training configuration, checkpoint metadata/schema and loader support.
+Use the existing flat recurrent encoder initially: the current cross-attention
+encoder explicitly requires the old 80-feature layout. Do not change its layout
+or reinterpret old checkpoints. Preserve the existing training defaults and
+legacy 80-input evaluation path.
 
-Exit: equivalent observed states/actions produce matching 56/80-value tensors,
-including history and sensor edges. No required field is silently fabricated.
+Train a new checkpoint with this contract, verify shared encoding and actor
+replay, then deploy it via snapshot mode. Training a new policy is real work;
+renaming metadata or dropping input columns does not convert old weights.
+This branch is required only if the selected deployment route needs it.
 
-### Phase 8D - Align execution and calibrate mechanics
+### For every route: verify the seven commands
 
-Address: targeting/facing, client prediction, and unmeasured server mechanics.
+The action order is `up`, `down`, `left`, `right`, `castSpell:1`,
+`castSpell:2`, `castSpell:3`. Legacy action 4 means attack and must not leak into
+this route.
 
-1. Reconcile target ranking, eligibility, ties, self fallback, auto-facing, and
-   dead/non-monster handling across browser execution and replica. Explicit
-   target IDs are already supported by the inspected browser command parser.
-2. Compare authoritative accepted/blocked movement with the shared map53 terrain,
-   occupancy, map bounds, and client correction behavior. Check coordinate and
-   collision handling; the obstacle geometry itself is already confirmed equal.
-3. Validate spell costs and ordering, 300 ms global cooldown, slot/family
-   cooldowns, targeting rectangle, AoE falloff, Acid refresh/tick endpoints,
-   regeneration, Innie aggro/movement/attack timing, and 50-second respawn.
-4. Match player stats/gear, NPC template/scaling, enabled modifiers and initial
-   encounter setup before attributing differences to formulas.
-5. Use exact comparisons for deterministic cases; define timing tolerances
-   from measured cadence/uncertainty. Compare stochastic branches under
-   controlled rolls or repeated-run distributions, not matching client seeds.
-6. Report the first divergent transition and its evidence. Turn confirmed bugs
-   into regressions; version mechanics changes and preserve baseline traces.
+Reuse simulator targeting rules where observable: eligible living monsters,
+Euclidean ranking, deterministic ID ties, inclusive 16-X/10-Y window and self
+fallback for the appropriate spells. Observation ranking remains Manhattan;
+these are different purposes. Use explicit target IDs supported by the inspected
+browser parser; verify self targeting and no-target behavior in the actual
+extension. Preserve the original wire entity identity when normalizing sort IDs.
+A no-target spell must not accidentally fall back to another browser-selected
+entity. Use an inert command when the simulator action has no executable target.
 
-Deliverables: mechanics comparison report, confirmed fixes, regression fixtures.
+Make targeted changes in the live command adapter and, only where required, the
+sibling browser extension. Keep numeric policy action labels separate from the
+wire command containing its target. Confirm movement directions and casting
+facing behavior with short scripted checks. Fix concrete discrepancies; do not
+block deployment on a complete combat-mechanics audit.
 
-Exit: required deterministic cases have no unexplained divergence; measured
-timing/randomness limits and unresolved hidden state are explicit. Missing
-server timers are not reconstructed as certain state during trace replay.
+Acceptance: all seven commands, targeting ties/edges, no-target and self-fallback
+cases behave as documented. Where extension/server work is needed, name the
+actual changed files and validate forwarding through the bridge.
 
-### Phase 8E - Optional evaluation diagnostics
+## Step 4 - Run one policy episode and document the launch
 
-Address: understandable live results without requiring training machinery.
+Current CLI for a compatible 56/71-input checkpoint and the updated extension:
 
-1. Default live stopping is death/manual stop, with interruptions handled in 8B.
-   Do not inherit the simulator's five-kill goal, Y failures or step cap. Allow
-   an explicitly configured evaluation goal/duration to stop this one run only.
-2. Report survival time, chosen actions, confirmed cast outcomes, latency and stop
-   reason. Add attributed kills/damage when supported; distinguish disappearance
-   and other players' kills from confirmed attributed events.
-3. Rewards, return, terminal bonuses and matching a simulator evaluation profile
-   are optional. Show unavailable quantities as unavailable, never fabricated
-   zeros. No critic targets, GAE or bootstrapping are needed in the live path.
+```powershell
+.\RL_venv\Scripts\python.exe -m Inference.Mystic_Live.server --checkpoint PATH_TO_COMPATIBLE_CHECKPOINT
+.\RL_venv\Scripts\python.exe -m Automation.Bridge.ws_zmq_bridge --single-run
+```
 
-Deliverables: optional metrics/profile and explicit availability labels.
+Run in separate terminals and connect the existing extension. A checkpoint using
+confirmed feedback must explicitly select that mode and have its producer wired;
+ordinary snapshot mode is the simplest deployment path.
 
-Exit: available metrics are correctly labeled and unavailable diagnostics do
-not block inference. This phase is not a prerequisite for 8F or the first live
-run; compare returns only under equivalent explicit task/reward profiles.
+With the existing permanent terminal latch, each new run requires restarting
+both the backend and bridge. Restarting only the policy process is insufficient.
 
-### Phase 8F - Load the exact frozen simulator policy live
+Before contacting the game, test the actor and snapshot lifecycle together over
+local WebSocket/ZMQ with representative payloads. Then launch one real episode.
+Confirm repeated policy commands reach the player, death/manual stop prevents
+further gameplay commands, and final state/stop reason is retained. Record the
+checkpoint, input mode, selected actions and observed timing. Captures are
+optional diagnostics; a full evidence dossier is not a launch requirement.
 
-Address: incompatible architecture, preprocessing, checkpoint/session handling.
+Update the CLI instructions and phase-status notes after the implementation.
+The watch UI may consume detached live snapshots later; rendering must never
+advance actor memory or block the decision loop. UI integration is not a
+prerequisite for proving policy-to-game execution.
 
-1. Add a dedicated inference entry point that reconstructs the selected
-   simulator checkpoint's exact flat/attention encoder, actor head, recurrent
-   branches, and normalization. Reuse its model code and validated loading
-   behavior rather than duplicating the legacy live LSTM.
-2. Validate action labels, observation schema, feature order, architecture,
-   preprocessing, and map/task requirements before transmitting policy commands.
-   Record simulator engine provenance; do not claim the live server has its hash.
-3. Run the frozen actor in eval/inference mode, with actor memory/history created
-   once per explicit run. The critic and critic memory need not run. Do not
-   restore optimizers, calculate returns, bootstrap values, or advance actor
-   memory for duplicate observations or viewer redraws.
-4. Replay fixed observation sequences through offline and live inference;
-   compare normalized inputs, logits, greedy actions, and hidden/cell states.
+Completion means a selected compatible checkpoint actually controls the player
+through the existing transport and stopping works. Offline tests alone establish
+local readiness, not a completed live run. If game access is unavailable, report
+that boundary and provide the tested launch commands without claiming success.
 
-Deliverables: live evaluation CLI, strict compatibility checks, inference replay.
+## Order and scope
 
-Exit: replay matches within defined numerical tolerance; incompatible models
-fail before any game action. Evaluation changes no weights or optimizer state.
+Implement Steps 1 and 2 first. Complete the selected input route and narrow
+command checks in Step 3, then run Step 4. Preserve Phase 8A-8C code throughout.
+Do not choose or retrain a different policy silently to bypass incompatibility.
 
-### Phase 8G - Measure transfer on held-out live scenarios
+Defer rewards, kill attribution, exhaustive damage/cooldown/regen/NPC/respawn
+calibration, multi-episode studies, simulator performance work and a new watch UI.
+Investigate those only when a concrete live result calls for them. Do not rebuild
+the Gym framework, ZMQ bridge or map system.
 
-Address: the remaining measured gap between simulator and game performance.
+## Local references
 
-1. Start with scripted checks and one explicitly launched frozen-policy episode
-   after input/execution gates pass. Verify stopping on death/interruption and
-   preserving the watcher's final state.
-2. Additional held-out comparisons are optional separate launches. Record greedy
-   versus sampled mode; do not require a ten/fifty-episode pilot or build an
-   automatic live episode/reset loop to complete inference deployment.
-3. Match map, stats, gear, encounter population, task and duration as far as the
-   live game permits. State unavoidable setup differences in each report.
-4. Report survival time, cast outcomes, action failures, accepted movement,
-   latency and stop reason, with attributed damage/kills when available. A
-   single run provides outcomes, not a statistically established win rate.
-   Include reward only under an explicit comparable evaluation profile.
-5. Feed failures into capture, regression, and mechanics fixes. Retrain only when
-   mechanics/contracts changed or evidence supports robustness training. Bound
-   any timing/stat randomization by measurements. Retraining happens in the
-   simulator; live fine-tuning is outside this inference-only workflow.
+- Shared map: `Tests/fixtures/simulation/map53.json` and
+  `Custom_enviornments/Mystic_Sim/data/map53.json` (user-confirmed live layout).
+- Payload shape: `Tests/fixtures/simulation/example_full_state.json`; its example
+  map/player values are not the actual map53 run. It is the nested world state.
+- Existing adapters: `Inference/Mystic_Live/{server,lifecycle,inputs}.py`.
+- Model loading: `Training/Mystic_Sim/evaluate.py:load_evaluation_agent`.
+- History and architecture: `Training/Mystic_Sim/{history,recurrent,core}.py`.
+- Target selection: `Custom_enviornments/Mystic_Sim/targeting.py`.
+- Transport: `Automation/Bridge/ws_zmq_bridge.py` and sibling
+  `../yugen-battler/yugen-battler/battler.js`.
 
-Deliverables: held-out transfer report, remaining ranked discrepancies, and
-evidence-based choice to retain the actor or retrain it in the simulator.
-
-Exit: agreed observable parity tests pass; transfer performance and limitations
-are measured against criteria set before the main evaluation, rather than a
-success percentage chosen after results are known.
-
-### Phase 8H - Make parity repeatable and update the documentation
-
-1. Run feature, lifecycle, inference, reward, and mechanics replay checks as a
-   focused regression suite, retaining held-out captures for final validation.
-2. Keep real-server checks separately invocable; mocked transport success does
-   not establish game fidelity. Mark real checks unvalidated when unavailable.
-3. Update README action counts, current 56/80-value schemas, Y termination rules,
-   launcher usage, artifact compatibility, and the original Phase 8 references.
-4. Rebenchmark simulator throughput after mechanics changes, preserving event
-   ordering/RNG behavior. Optimize only measured regressions.
-
-Exit: a fresh checkout can reproduce offline parity reports and invoke the
-documented bounded live check. Every remaining unsupported case is recorded.
-
-## Dependencies and completion order
-
-Execute 8A -> 8B -> 8C -> required 8D execution checks -> 8F -> 8G -> 8H.
-8E diagnostics and deeper 8D mechanics comparisons are optional follow-up work,
-not dependencies on implementing rewards or reconstructing hidden server state.
-Model-loader preparation
-can begin after checkpoint inventory, but policy-driven live evaluation depends
-on confirmed telemetry, transition handling, execution, and input compatibility.
-Mechanics calibration and optional metrics can proceed independently once the
-capture and lifecycle are reliable. Do not let BC/Minari migration, additional
-classes, a C++ rewrite, or a new curriculum block this work.
-
-The first concrete implementation should be capture plus a single-run
-action/history/death-stop test harness. It establishes trustworthy policy inputs
-and stop behavior without implementing a live training/reset system. Launching
-the watch UI, its read-only telemetry channel, LIVE controls and final-state
-retention are detailed in [WATCH_POLICY.md](../Training/Mystic_Sim/WATCH_POLICY.md).
-
-## Local evidence
-
-- User-confirmed shared live map: `../Tests/fixtures/simulation/map53.json`;
-  matches `Mystic_Sim/data/map53.json` by SHA-256 in this checkout.
-- User-supplied ZMQ state structure reference:
-  `../Tests/fixtures/simulation/example_full_state.json` (example values).
-- `Test_Env/Mystic.py`: default actions, receive/send/return order, reset and wins.
-- `Test_Env/Env_conditions.py`: live encoding, HP deltas, disappearance heuristic,
-  reward coefficients, map loss and truncation.
-- `Config.yaml` and `BaseEnv.py`: 26-input default, 256-step limit, REP transport.
-- `Mystic_Sim/actions.py`, `observation.py`, `env.py`: seven actions and 56 inputs.
-- `../Training/Mystic_Sim/history.py`: 24 appended values, confirmed outcomes,
-  cast ages and static terrain sensors.
-- `Mystic_Sim/targeting.py`, `engine.py`, `movement.py`, `config.py`, `rewards.py`:
-  execution, timing, source-derived baseline, rewards and actual end conditions.
-- `../Training/PPO_lstm_server.py` and `../Training/Mystic_Sim/recurrent.py`:
-  shared live trunk versus separate replica trunks and configurable encoders.
-- `../Training/Mystic_Sim/core.py` and `evaluate.py`: metadata, normalization,
-  checkpoint validation and exact architecture reconstruction.
-- `../Automation/Bridge/ws_zmq_bridge.py`: serialized request stream and socket
-  recovery, without authoritative game execution acknowledgements.
-- Sibling extension `../../yugen-battler/yugen-battler/battler.js`: payload,
-  targeting, predicted movement, auto-facing, reset spell, and loop scheduling.
-- `PYTHON_INTEGRATION_PLAN.md`, existing Phase 8: intended live parity scope;
-  older feature-size references need updating during implementation.
+The source has been inspected; the actually loaded extension/game version and
+real execution remain to be checked during deployment.

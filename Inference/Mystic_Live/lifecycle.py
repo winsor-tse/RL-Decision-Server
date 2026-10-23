@@ -1,8 +1,8 @@
 """One explicitly started inference run. No training, resets, or inferred outcomes.
 
-The actor interface accepts Phase 8C inputs; checkpoint loading is Phase 8F.
-The current JS payload has no execution acknowledgements; missing feedback keeps
-an action pending, then interrupts the run. It never becomes a guessed success.
+The actor interface accepts Phase 8C inputs; policy.py supplies the frozen loader.
+Snapshot mode advances on fresh observations without asserting execution success.
+Confirmed-feedback mode retains strict pending-action correlation.
 """
 from __future__ import annotations
 
@@ -119,6 +119,8 @@ class SingleRun:
     Without an adapter, the existing raw-world actor interface is retained.
     """
     def __init__(self, actor=None, *, input_adapter=None, run_id=None, expected_map=53,
+                 progression='confirmed_feedback',
+                 command_adapter=None,
                  startup_timeout=30., idle_timeout=2., acknowledgement_timeout=2.,
                  monotonic=time.monotonic, wall_time=time.time):
         if any(not finite_number(v) or v <= 0 for v in
@@ -126,6 +128,14 @@ class SingleRun:
             raise ValueError('Run timeouts must be positive finite seconds')
         self.actor = actor
         self.input_adapter = input_adapter
+        if progression not in ('snapshot', 'confirmed_feedback'):
+            raise ValueError('Unknown inference progression mode')
+        if progression == 'snapshot' and (
+                input_adapter is None or getattr(input_adapter, 'requires_execution_feedback', True)):
+            raise ValueError('Snapshot progression requires an outcome-independent input adapter; '
+                             'existing 80-input policies require confirmed feedback')
+        self.progression = progression
+        self.command_adapter = command_adapter
         if input_adapter is not None and input_adapter.encoder.map.map_id != expected_map:
             raise ValueError('Input adapter map must match the run map')
         self.run_id = run_id or uuid.uuid4().hex
@@ -142,6 +152,7 @@ class SingleRun:
         self.initialized = False
         self.history = ConfirmedHistory()
         self.pending = None
+        self.issued_commands = deque(maxlen=128)
         self.current_state = self.previous_state = self.last_decision = None
         self.current_base_observation = self.current_policy_input = None
         self.policy_input_status = 'waiting_for_first_valid_state'
@@ -185,6 +196,7 @@ class SingleRun:
         return dict(type='ai_result', requestId=request_id, move=move, reset=False,
                     serverTime=self.wall_time(), runId=self.run_id, actionId=action_id,
                     inferenceStatus=self.state.value, stopInference=self.terminal,
+                    progression=self.progression,
                     stopReason=self.stop_reason, idleReason=reason)
 
     def _context(self, message):
@@ -340,6 +352,13 @@ class SingleRun:
             self.policy_input_status = 'player_death'
             self.stop('player_death')
             return self._reply(request_id)
+        if self.command_adapter is not None:
+            capabilities = message.get('capabilities')
+            if not isinstance(capabilities, list) or self.command_adapter.required_capability not in capabilities:
+                self.policy_input_status = 'extension_update_required'
+                if self.initialized:
+                    self.stop('extension_capability_lost', interrupted=True)
+                return self._reply(request_id, reason='extension_update_required')
         completion = None
         if self.pending is not None:
             reason = self._accept_acknowledgement(message)
@@ -401,24 +420,45 @@ class SingleRun:
                     or not math.isclose(sum(probs), 1., abs_tol=1e-5)):
                 self.stop('invalid_policy_distribution', interrupted=True)
                 return self._reply(request_id)
+        try:
+            command = (self.command_adapter.encode(world, choice.action) if self.command_adapter
+                       else dict(move=ACTIONS[choice.action]))
+        except ValueError as error:
+            self._event('command_error', detail=str(error))
+            self.stop('invalid_command', interrupted=True)
+            return self._reply(request_id)
+        self.check_deadlines()
+        if self.terminal:
+            return self._reply(request_id)
         self.action_count += 1
         action_id = f'{self.run_id}:{self.action_count}'
         self.previous_state = deepcopy(world)
         self.memory = choice.next_memory
-        self.pending = PendingAction(action_id, request_id, choice.action, ACTIONS[choice.action],
-                                     deepcopy(world), self.monotonic())
+        if self.progression == 'confirmed_feedback':
+            self.pending = PendingAction(action_id, request_id, choice.action, ACTIONS[choice.action],
+                                         deepcopy(world), self.monotonic())
         self.last_decision = dict(action_id=action_id, request_id=request_id,
                                   action=choice.action, label=ACTIONS[choice.action],
                                   probabilities=list(choice.probabilities) if choice.probabilities is not None else None,
                                   input_state=deepcopy(world), history=deepcopy(self.history.view()),
                                   policy_input=deepcopy(self.current_policy_input))
-        self.state = RunState.ACTION_PENDING
+        self.last_decision['command'] = deepcopy(command)
+        if self.input_adapter is not None:
+            self.input_adapter.record_action(choice.action)
+        self.state = (RunState.ACTION_PENDING if self.progression == 'confirmed_feedback'
+                      else RunState.RUNNING)
+        # Issuing a reply is not proof of browser delivery or game acceptance.
+        self.issued_commands.append(dict(action_id=action_id, request_id=request_id,
+                                         action=choice.action, label=ACTIONS[choice.action],
+                                         dispatch_status='reply_issued', execution_outcome=None))
+        self.issued_commands[-1]['command'] = deepcopy(command)
         self._event('action_selected', action_id=action_id, label=ACTIONS[choice.action])
-        return self._reply(request_id, move=ACTIONS[choice.action], action_id=action_id)
+        return dict(self._reply(request_id, action_id=action_id), **command)
 
     def snapshot(self):
         return deepcopy(dict(schema='mystic_live_run_v1', run_id=self.run_id, state=self.state.value,
                              stop_reason=self.stop_reason, observation_only=self.actor is None,
+                             progression=self.progression, issued_commands=list(self.issued_commands),
                              initialized=self.initialized, action_count=self.action_count,
                              current_state=self.current_state, previous_state=self.previous_state,
                              current_base_observation=self.current_base_observation,

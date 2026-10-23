@@ -1471,6 +1471,15 @@ Exit gate:
 
 ### Phase 8 - Test the live ZMQ contract, payload differences, and sim-to-game gap
 
+**2026-10-22 deployment revision:** The four-step
+[minimal simulator-to-game plan](MYSTIC_ZMQ_PARITY_PLAN.md) supersedes the
+remaining deployment ordering and gates below. Preserve Phase 8A-8C code;
+integrate the existing actor loader, add snapshot-driven progression for policies
+without outcome inputs, resolve the selected checkpoint's input requirements,
+and run one live episode. Authoritative feedback is required by the existing
+80-input history mode, not by every policy. The broader comparisons below are
+follow-up work, not prerequisites for snapshot-driven deployment.
+
 Phase 8A evidence tooling is implemented: [baseline/capture commands and status](../Inference/Mystic_Live/PHASE_8A.md).
 Phase 8B lifecycle is implemented: [observation-only server, bridge and history contract](../Inference/Mystic_Live/PHASE_8B.md).
 Phase 8C local action/input adapters are implemented: [56/80 input parity, telemetry specification and coverage audit](../Inference/Mystic_Live/PHASE_8C.md).
