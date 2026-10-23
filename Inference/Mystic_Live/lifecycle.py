@@ -430,6 +430,13 @@ class SingleRun:
         self.check_deadlines()
         if self.terminal:
             return self._reply(request_id)
+        try:
+            if self.input_adapter is not None:
+                self.input_adapter.record_action(choice.action)
+        except ValueError as error:
+            self._event('history_model_error', detail=str(error))
+            self.stop('history_model_error', interrupted=True)
+            return self._reply(request_id)
         self.action_count += 1
         action_id = f'{self.run_id}:{self.action_count}'
         self.previous_state = deepcopy(world)
@@ -443,8 +450,6 @@ class SingleRun:
                                   input_state=deepcopy(world), history=deepcopy(self.history.view()),
                                   policy_input=deepcopy(self.current_policy_input))
         self.last_decision['command'] = deepcopy(command)
-        if self.input_adapter is not None:
-            self.input_adapter.record_action(choice.action)
         self.state = (RunState.ACTION_PENDING if self.progression == 'confirmed_feedback'
                       else RunState.RUNNING)
         # Issuing a reply is not proof of browser delivery or game acceptance.
@@ -452,6 +457,8 @@ class SingleRun:
                                          action=choice.action, label=ACTIONS[choice.action],
                                          dispatch_status='reply_issued', execution_outcome=None))
         self.issued_commands[-1]['command'] = deepcopy(command)
+        if getattr(self.input_adapter, 'history_source', None) == 'simulator_estimated':
+            self.issued_commands[-1]['simulator_estimate'] = deepcopy(self.input_adapter.pending_estimate)
         self._event('action_selected', action_id=action_id, label=ACTIONS[choice.action])
         return dict(self._reply(request_id, action_id=action_id), **command)
 
@@ -459,6 +466,8 @@ class SingleRun:
         return deepcopy(dict(schema='mystic_live_run_v1', run_id=self.run_id, state=self.state.value,
                              stop_reason=self.stop_reason, observation_only=self.actor is None,
                              progression=self.progression, issued_commands=list(self.issued_commands),
+                             history_model=(self.input_adapter.diagnostics()
+                                            if hasattr(self.input_adapter, 'diagnostics') else None),
                              initialized=self.initialized, action_count=self.action_count,
                              current_state=self.current_state, previous_state=self.previous_state,
                              current_base_observation=self.current_base_observation,

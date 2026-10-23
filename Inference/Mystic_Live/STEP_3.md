@@ -89,12 +89,11 @@ Add `--validate-only` to check configuration without training. Loading, resume,
 evaluation and watch support the saved schema. Viewer feature labels distinguish
 the 71-input history from the old 80-input history.
 
-Existing 80-input weights are NOT converted. They still require
-`--confirmed-feedback` plus a real authoritative context/outcome producer and
-forwarding, which are not provided by this extension update. No runnable server
-implementation is available here to install that producer. The supported current-
-payload alternatives are an existing compatible 56-input policy or newly trained
-71-input weights. No fallback model or zero-filled history is substituted.
+Existing 80-input weights are NOT converted. They can now use
+[`--assume-sim-parity`](SIMULATED_FEEDBACK.md) to estimate outcomes and cooldowns
+from simulator rules under the user's explicit one-to-one assumption. Strict
+`--confirmed-feedback` remains available when a real producer exists. No fallback
+model or zero-filled history is substituted, and no producer is fabricated.
 
 ## Validation
 

@@ -47,6 +47,13 @@ Adding a model loader alone will therefore not produce continuous live inference
 
 ## Input compatibility: decide from the checkpoint
 
+**User-approved parity assumption, implemented 2026-10-23:** existing 80-input
+weights may now use `--assume-sim-parity`. The simulator's action eligibility and
+cooldown rules supply explicitly estimated history while every base state comes
+from the live snapshot. See [SIMULATED_FEEDBACK.md](../Inference/Mystic_Live/SIMULATED_FEEDBACK.md).
+This is an alternative to both server instrumentation and retraining; it does not
+claim authoritative outcomes. Cooldowns are assumed ready at launch.
+
 Inspect the explicitly supplied checkpoint before sending any gameplay command.
 Use its architecture, feature schema/order, normalization and action labels.
 Never select the newest checkpoint implicitly or resize a network to fit it.
@@ -54,8 +61,8 @@ Never select the newest checkpoint implicitly or resize a network to fit it.
 | Checkpoint | Live requirements | Deployment route |
 | --- | --- | --- |
 | Existing 56-input feedforward policy | Current visible world state | Use the existing encoder and the new snapshot-driven lifecycle mode. No execution-outcome producer is needed. |
-| Existing 80-input recurrent policy | Base state, terrain, prior action, applied/blocked/cooldown flags, successful-cast ages | Retain strict feedback mode. Existing weights need the missing outcome information for matching input semantics. |
-| New recurrent policy using live-available history | A separately versioned shared training/live encoder | Train a new checkpoint with that contract, then use snapshot-driven inference. This is the recommended route when server feedback is unavailable and recurrence is desired. |
+| Existing 80-input recurrent policy | Base state, terrain, prior action, applied/blocked/cooldown flags, successful-cast ages | Use strict confirmed feedback, or explicitly opt into simulator-estimated history with `--assume-sim-parity`. |
+| New recurrent policy using live-available history | A separately versioned shared training/live encoder | Optional alternative: train a new 71-input checkpoint and use snapshot-driven inference. |
 
 LSTM hidden/cell state does not itself require execution acknowledgements. The
 existing handcrafted history features do. The map already supplies the eight

@@ -182,6 +182,9 @@ class LivePolicyInputs:
                     raise InputUnavailable('awaiting_confirmed_transition')
                 self._advance(completion, context)
             values = self.history.encode(base)
+        return self.describe(values, world, observation_context)
+
+    def describe(self, values, world, observation_context=None):
         if values.dtype != np.float32 or values.shape != (self.size,) or not np.isfinite(values).all():
             raise ValueError('Invalid encoded policy input')
         if np.any(values < self.low) or np.any(values > self.high):

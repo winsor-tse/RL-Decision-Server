@@ -1,6 +1,6 @@
 """Single-run REP server with observation-only or frozen-checkpoint inference.
 
-56-input checkpoints use fresh snapshots; 80-input checkpoints require confirmed feedback.
+56/71-input checkpoints use snapshots; 80-input checkpoints select confirmed or simulated history.
 Run the matching bridge with --single-run for connection identity/events.
 """
 from __future__ import annotations
@@ -73,10 +73,13 @@ def main(argv=None):
     mode.add_argument('--checkpoint', type=Path, help='Explicit simulator checkpoint to load')
     parser.add_argument('--device', default='cpu')
     parser.add_argument('--sampled', action='store_true', help='Sample actions instead of greedy inference')
-    parser.add_argument('--confirmed-feedback', action='store_true',
-                        help='Require external execution feedback (mandatory for existing 80-input checkpoints)')
+    feedback = parser.add_mutually_exclusive_group()
+    feedback.add_argument('--confirmed-feedback', action='store_true',
+                          help='Require authoritative execution feedback for history')
+    feedback.add_argument('--assume-sim-parity', action='store_true',
+                          help='Estimate 80-input history from simulator rules; assumes cooldowns ready at launch')
     parser.add_argument('--input-size', type=int, choices=(56, 71, 80), default=None,
-                        help='80 requires authoritative snapshot clock and confirmed outcomes; no zero-history fallback')
+                        help='Observation mode input size; checkpoint mode infers its size (80 needs an explicit history mode)')
     parser.add_argument('--bind', default='tcp://127.0.0.1:5555')
     parser.add_argument('--startup-timeout', type=float, default=30.)
     parser.add_argument('--idle-timeout', type=float, default=2.)
@@ -86,20 +89,22 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not 0 < args.drain_seconds <= 5:
         parser.error('--drain-seconds must be in (0, 5]')
-    if args.observe_only and (args.sampled or args.confirmed_feedback):
-        parser.error('--sampled and --confirmed-feedback require --checkpoint')
+    if args.observe_only and (args.sampled or args.confirmed_feedback or args.assume_sim_parity):
+        parser.error('--sampled and feedback options require --checkpoint')
     actor = None
     try:
         if args.checkpoint:
             from .policy import FrozenPolicy
-            actor = FrozenPolicy(args.checkpoint, device=args.device, sampled=args.sampled)
+            actor = FrozenPolicy(args.checkpoint, device=args.device, sampled=args.sampled,
+                                 assume_sim_parity=args.assume_sim_parity)
             if args.input_size is not None and args.input_size != actor.input_size:
                 raise ValueError('--input-size conflicts with the checkpoint contract')
         adapter = actor.input_adapter if actor else LivePolicyInputs(args.input_size or 56)
         if actor and adapter.requires_execution_feedback and not args.confirmed_feedback:
             raise ValueError('This 80-input checkpoint requires --confirmed-feedback and an external '
                              'producer of execution outcomes and observationContext; the ordinary browser '
-                             'does not supply them')
+                             'does not supply them. Alternatively select --assume-sim-parity for '
+                             'explicit simulator-estimated history.')
         progression = ('confirmed_feedback' if args.confirmed_feedback or adapter.requires_execution_feedback
                        else 'snapshot')
         from .commands import LiveCommands
@@ -127,6 +132,8 @@ def main(argv=None):
         description = (f'FROZEN ACTOR / {actor.checkpoint} / '
                        f'{"sampled" if actor.sampled else "greedy"} / {run.progression}'
                        if actor else 'OBSERVATION ONLY / no checkpoint / no gameplay commands')
+        if args.assume_sim_parity:
+            description += ' / SIMULATOR-ESTIMATED HISTORY / initial cooldowns assumed ready'
         print(f'Mystic live lifecycle listening on {args.bind}\nRun: {run.run_id}\n'
               f'{description}\n'
               f'Input contract: {run.input_adapter.schema}\nFinal state: {output}', flush=True)
@@ -141,7 +148,8 @@ def main(argv=None):
             snapshot = run.snapshot()
             if actor is not None:
                 snapshot['policy'] = dict(checkpoint=actor.checkpoint, sampled=actor.sampled,
-                                          metadata=actor.metadata, progression=run.progression)
+                                          metadata=actor.metadata, progression=run.progression,
+                                          assume_sim_parity=args.assume_sim_parity)
             json.dump(snapshot, report_file, indent=2, allow_nan=False)
             report_file.write('\n')
         finally:

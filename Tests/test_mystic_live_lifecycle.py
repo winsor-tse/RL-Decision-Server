@@ -348,6 +348,9 @@ class LifecycleTests(unittest.TestCase):
 
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_estimated80_history_over_ordinary_websocket_zmq(self):
+        await self.exercise('snapshot_estimated')
+
     async def test_explicit_targets_and_capability_survive_websocket_zmq(self):
         await self.exercise('snapshot_commands')
 
@@ -372,9 +375,13 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         port = backend.bind_to_random_port('tcp://127.0.0.1')
         from Inference.Mystic_Live.inputs import LivePolicyInputs, OBSERVATION_CONTEXT_SCHEMA
         snapshot_mode = stop_kind.startswith('snapshot')
-        command_mode = stop_kind == 'snapshot_commands'
+        command_mode = stop_kind in ('snapshot_commands', 'snapshot_estimated')
         from Inference.Mystic_Live.commands import LiveCommands, COMMAND_SCHEMA
         inputs = LivePolicyInputs(71 if command_mode else 56 if snapshot_mode else 80) if snapshot_mode or stop_kind == 'inputs' else None
+        if stop_kind == 'snapshot_estimated':
+            from Inference.Mystic_Live.simulated_feedback import SimulatedFeedbackInputs
+            from Custom_enviornments.Mystic_Sim.config import ScenarioConfig
+            inputs = SimulatedFeedbackInputs(ScenarioConfig())
         commands = LiveCommands(inputs.encoder) if command_mode else None
         run = SingleRun(StubActor(), input_adapter=inputs, idle_timeout=5,
                         command_adapter=commands,
@@ -431,6 +438,10 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
                                              commands.encode(third['worldState'], 5)['move'] if command_mode else 'castSpell:2')
                             self.assertEqual(run.snapshot()['completed_actions'], [])
                             self.assertIsNone(run.pending)
+                            if stop_kind == 'snapshot_estimated':
+                                self.assertEqual(run.actor.inputs[-1][0].shape, (80,))
+                                self.assertEqual(run.current_policy_input['history_source'], 'simulator_estimated')
+                                self.assertFalse(run.history.completed)
                         else:
                             self.assertIsNone(second_reply['move'])
                         if stop_kind == 'inputs':
@@ -442,7 +453,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
                             self.assertEqual(run.actor.inputs[-1][0].shape, (80,))
                             self.assertAlmostEqual(float(run.actor.inputs[-1][0][66]), .0175, places=7)
                             self.assertEqual(run.snapshot()['current_policy_input']['size'], 80)
-                        if stop_kind in ('death', 'inputs', 'snapshot', 'snapshot_commands'):
+                        if stop_kind in ('death', 'inputs', 'snapshot', 'snapshot_commands', 'snapshot_estimated'):
                             death = request(3 if inputs is not None else 2, hp=0)
                             await client.send(json.dumps(death))
                             reply = json.loads(await client.recv())

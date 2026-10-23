@@ -34,6 +34,10 @@ inferred, and a conflicting override fails. The final JSON records the selected
 checkpoint path, metadata, sampling choice and progression mode.
 
 **Step 2 enables continuous snapshot inference for compatible 56-input policies.**
+Existing 80-input weights can now opt into
+[`--assume-sim-parity`](SIMULATED_FEEDBACK.md) without retraining. The strict
+confirmed-feedback alternative described below retains its producer requirement.
+
 See [STEP_2.md](STEP_2.md). Existing 80-input checkpoints require explicit
 `--confirmed-feedback`; this flag does not install or emulate a producer. They
 also require authoritative observation context and outcomes as specified in

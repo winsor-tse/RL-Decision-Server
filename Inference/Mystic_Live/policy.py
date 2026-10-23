@@ -13,12 +13,21 @@ from .lifecycle import PolicyChoice
 
 
 class FrozenPolicy:
-    def __init__(self, checkpoint, *, device='cpu', sampled=False):
+    def __init__(self, checkpoint, *, device='cpu', sampled=False, assume_sim_parity=False):
         self.checkpoint = str(Path(checkpoint).resolve())
-        self.agent, _, self.metadata = load_evaluation_agent(self.checkpoint, device)
+        self.agent, factory, self.metadata = load_evaluation_agent(self.checkpoint, device)
         self.recurrent = bool(getattr(self.agent, 'recurrent', False))
         self.input_size = self.metadata['contract']['observation_size']
         self.input_adapter = LivePolicyInputs(self.input_size)
+        if assume_sim_parity:
+            if self.input_size != 80:
+                raise ValueError('--assume-sim-parity is only for existing 80-input policies')
+            from .simulated_feedback import SimulatedFeedbackInputs
+            env = factory()
+            try:
+                self.input_adapter = SimulatedFeedbackInputs(env.config, encoder=self.input_adapter.encoder)
+            finally:
+                env.close()
         self.sampled = sampled
         self._validate_live_contract()
         self.agent.eval().requires_grad_(False)

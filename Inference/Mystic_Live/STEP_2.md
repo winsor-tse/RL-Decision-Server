@@ -15,6 +15,10 @@ supported.
 
 ## Progression and evidence
 
+Update: [`--assume-sim-parity`](SIMULATED_FEEDBACK.md) also allows existing
+80-input policies to progress from snapshots using separately labeled simulator
+estimates. Strict 80-input adapters retain the feedback requirement below.
+
 `SingleRun(..., progression='snapshot', input_adapter=LivePolicyInputs(56))`
 has no pending acknowledgement and never calls the confirmed-history updater.
 Replies identify `progression=snapshot` and stay `running`. The bridge accepts
