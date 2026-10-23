@@ -80,6 +80,11 @@ def serve(run, socket, *, stop_event=None, drain_seconds=1., poll_ms=50):
             # One startup diagnostic; retain the latest reason for timeout output.
             if last_wait_reason is None:
                 print(f'Waiting for usable live input: {reason}', flush=True)
+                if reason == 'extension_update_required':
+                    print('Update battler.js, content-bridge.js and background.js using '
+                          'Automation/Bridge/MYSTIC_EXTENSION.md, then reload the extension '
+                          'and refresh the game page. The bridge is receiving snapshots, '
+                          'but they lack mystic_explicit_target_v1.', flush=True)
             last_wait_reason = reason
 
 
