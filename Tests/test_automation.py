@@ -34,6 +34,7 @@ class AutomationConfigTests(unittest.TestCase):
         self.assertIn('runs/my model.pt', command)
         self.assertIn('--assume-sim-parity', command)
         self.assertIn('--sampled', command)
+        self.assertEqual(command[command.index('--device') + 1], 'cuda')
         self.assertIn('child_ready_signal', configured)
         self.assertNotIn('--single-run', config['bridge_command'])
 
@@ -43,8 +44,10 @@ class AutomationConfigTests(unittest.TestCase):
             with self.subTest(mode=mode), \
                     mock.patch('Automation.infer.load_config', return_value=config), \
                     mock.patch('Automation.infer.run_stack', return_value=0) as stack:
-                inference_main(['--checkpoint', 'model.pt', '--action-mode', mode])
+                inference_main(['--checkpoint', 'model.pt', '--action-mode', mode, '--device', 'cpu'])
                 self.assertEqual('--sampled' in stack.call_args.args[1], mode == 'sampled')
+                command = stack.call_args.args[1]
+                self.assertEqual(command[command.index('--device') + 1], 'cpu')
 
     def test_mystic_custom_command_also_configures_bridge(self):
         config = {'bridge_command': ['python', '-m', 'Automation.Bridge.ws_zmq_bridge']}

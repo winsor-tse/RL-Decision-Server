@@ -5,7 +5,7 @@ param(
     [ValidateSet("sampled", "greedy")]
     [string]$ActionMode = "sampled",
     [switch]$AssumeSimParity,
-    [string]$Device = "cpu",
+    [string]$Device = "cuda",
     [string]$LogDirectory = "logs"
 )
 

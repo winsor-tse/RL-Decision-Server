@@ -41,7 +41,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--action-mode', choices=('sampled', 'greedy'), default=None,
                         help='Checkpoint action selection (default: sampled)')
     parser.add_argument('--assume-sim-parity', action='store_true')
-    parser.add_argument('--device', default='cpu')
+    parser.add_argument('--device', default='cuda',
+                        help='Checkpoint device (default: cuda); use cpu or cuda:N to override')
     parser.add_argument(
         "--command",
         help="Override inference_command with a shell-style command string.",

@@ -16,6 +16,9 @@ Supply your own
 checkpoint path. The flag applies only to 80-input policies and is mutually
 exclusive with `--confirmed-feedback`. The checkpoint launcher defaults to sampled
 actions. Select explicitly with `-ActionMode sampled` or `-ActionMode greedy`.
+The launcher defaults to CUDA; use `-Device cpu` for CPU inference or
+`-Device cuda:1` to select a different GPU. CUDA requires a compatible GPU and
+CUDA-enabled PyTorch installation.
 The direct server CLI retains its greedy default and accepts `--sampled`.
 Run the launcher again
 for a new run. Startup timeout now reports absent snapshots or the rejected
