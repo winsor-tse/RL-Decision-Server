@@ -133,7 +133,7 @@ async def send_to_zmq_backend(message: Dict[str, Any], *, connection_id=None) ->
             reset_zmq_socket()
 
         try:
-            logging.info("Sending to ZeroMQ requestId=%s", request_id)
+            logging.debug("Sending to ZeroMQ requestId=%s", request_id)
 
             await zmq_socket.send_json(message)
             record_evidence('backend_sent', connection_id=connection_id,
@@ -158,7 +158,7 @@ async def send_to_zmq_backend(message: Dict[str, Any], *, connection_id=None) ->
             if request_id and "requestId" not in reply:
                 reply["requestId"] = request_id
 
-            logging.info("Received ZeroMQ reply requestId=%s", request_id)
+            logging.debug("Received ZeroMQ reply requestId=%s", request_id)
 
             return reply
 
@@ -225,7 +225,7 @@ async def handle_websocket(websocket):
     try:
         async for raw_message in websocket:
             received_wall_ns, received_monotonic_ns = time.time_ns(), time.monotonic_ns()
-            logging.info(
+            logging.debug(
                 "[JS MESSAGE] client=%s bytes=%s",
                 client,
                 len(raw_message),
@@ -256,7 +256,7 @@ async def handle_websocket(websocket):
                             bridge_received_monotonic_ns=received_monotonic_ns)
             request_id = message.get("requestId")
             message_type = message.get("type")
-            logging.info(
+            logging.debug(
                 "[JS MESSAGE] type=%r requestId=%r hasWorldState=%s",
                 message_type,
                 request_id,
@@ -332,7 +332,9 @@ async def main(argv=None):
                         help='Annotation order; default legacy-live, or sim-seven with --single-run')
     parser.add_argument('--single-run', action='store_true',
                         help='Phase 8B adapter mode: connection context, disconnect events and permanent terminal latch')
+    parser.add_argument('--verbose', action='store_true', help='Log individual messages and actions')
     args = parser.parse_args(argv)
+    logging.getLogger().setLevel(logging.DEBUG if args.verbose else logging.INFO)
     args.capture_actions = args.capture_actions or ('sim-seven' if args.single_run else 'legacy-live')
     if args.single_run and args.capture_actions != 'sim-seven':
         parser.error('--single-run uses the sim-seven action contract')
@@ -353,10 +355,9 @@ async def main(argv=None):
 
     try:
         reset_zmq_socket()
-        logging.info("WebSocket bridge listening on ws://%s:%s", WS_HOST, WS_PORT)
         logging.info("Forwarding to ZeroMQ backend at %s", ZMQ_BACKEND_URL)
-        logging.info("Waiting for [JS CONNECTED], then [JS MESSAGE] type='ai_tick'.")
         async with websockets.serve(handle_websocket, WS_HOST, WS_PORT):
+            logging.info("WebSocket bridge listening on ws://%s:%s", WS_HOST, WS_PORT)
             await asyncio.Future()
     finally:
         if capture is not None:

@@ -5,14 +5,20 @@ This keeps the existing 80-input checkpoint and feature ordering. No retraining,
 71-input replacement or server feedback producer is required for this mode.
 
 ```powershell
-.\RL_venv\Scripts\python.exe -m Inference.Mystic_Live.server --checkpoint "PATH_TO_CHECKPOINT" --assume-sim-parity
-.\RL_venv\Scripts\python.exe -m Automation.Bridge.ws_zmq_bridge --single-run
+.\RunInference.ps1 -Checkpoint "PATH_TO_CHECKPOINT" -AssumeSimParity
 ```
 
-Run in separate terminals with the updated extension loaded. Supply your own
+The launcher loads the actor, waits for its ZMQ bind, then automatically starts
+the existing bridge with `--single-run`. It logs startup/errors/shutdown without
+per-tick messages and cleans up both processes when inference ends. Load the
+updated game extension and enable its AI loop as with ordinary live inference.
+Supply your own
 checkpoint path. The flag applies only to 80-input policies and is mutually
 exclusive with `--confirmed-feedback`. Greedy remains the default; `--sampled`
-is still available. Restart both processes for a new run.
+is still available through `RunInference.ps1 -Command`. Run the launcher again
+for a new run. Startup timeout now reports absent snapshots or the rejected
+input reason and exits with a failure code. This launcher does not open or log
+into the game for you.
 
 ## How the existing history is produced
 

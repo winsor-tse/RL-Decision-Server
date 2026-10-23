@@ -6,6 +6,16 @@ changes; it does not mean those changes or a live run have been completed.
 
 ## Objective
 
+Live launch with existing 80-input weights and the agreed simulator parity assumption:
+
+```powershell
+.\RunInference.ps1 -Checkpoint "PATH_TO_CHECKPOINT" -AssumeSimParity
+```
+
+This automates actor readiness, the existing single-run bridge, and cleanup.
+Keep the updated game extension loaded and its AI loop enabled. Checkpoint
+selection remains explicit. See [simulator history](../Inference/Mystic_Live/SIMULATED_FEEDBACK.md).
+
 Load a simulator-trained checkpoint and control one live player through the
 existing browser -> WebSocket bridge -> ZMQ path. Each fresh state produces one
 policy decision and one reply. Train in the simulator; run the frozen actor in

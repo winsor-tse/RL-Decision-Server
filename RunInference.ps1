@@ -1,6 +1,9 @@
 param(
     [string]$Config = "Automation\automation_config.yaml",
     [string]$Command = "",
+    [string]$Checkpoint = "",
+    [switch]$AssumeSimParity,
+    [string]$Device = "cpu",
     [string]$LogDirectory = "logs"
 )
 
@@ -19,6 +22,12 @@ $LogPath = Join-Path $LogDirectory "inference_$RunTimestamp.txt"
 $PythonArguments = @("-m", "Automation.infer", "--config", $Config)
 if ($Command) {
     $PythonArguments += @("--command", $Command)
+}
+if ($Checkpoint) {
+    $PythonArguments += @("--checkpoint", $Checkpoint, "--device", $Device)
+}
+if ($AssumeSimParity) {
+    $PythonArguments += "--assume-sim-parity"
 }
 
 function Write-RunLog {
@@ -39,6 +48,7 @@ function Write-RunLog {
 
 $ProcessExitCode = 1
 try {
+    Push-Location -LiteralPath $PSScriptRoot
     & $ProjectPython @PythonArguments 2>&1 | ForEach-Object {
         Write-RunLog $_.ToString()
     }
@@ -50,6 +60,8 @@ try {
     Write-RunLog "PowerShell launcher error:"
     Write-RunLog ($_ | Out-String).TrimEnd()
     $ProcessExitCode = 1
+} finally {
+    Pop-Location
 }
 
 Write-RunLog ("=" * 80)

@@ -33,17 +33,26 @@ def serve(run, socket, *, stop_event=None, drain_seconds=1., poll_ms=50):
     """
     stop_event = stop_event or threading.Event()
     ended_at = None
+    received = 0
+    last_wait_reason = None
+    announced_running = False
     while True:
         if stop_event.is_set():
             run.stop('manual_stop')
         run.check_deadlines()
         if run.terminal and ended_at is None:
             ended_at = time.monotonic()
+            if run.stop_reason == 'startup_timeout':
+                detail = (last_wait_reason or run.policy_input_status) if received else (
+                    'No live snapshots received. Check that the game extension is connected '
+                    'to ws://127.0.0.1:8765 and its AI loop is enabled.')
+                print(f'Startup timed out: {detail}', flush=True)
         if ended_at is not None and time.monotonic() - ended_at >= drain_seconds:
             return run.snapshot()
         if not socket.poll(poll_ms, zmq.POLLIN):
             continue
         raw = socket.recv()
+        received += 1
         request_id = None
         try:
             message = decode_message(raw)
@@ -63,6 +72,15 @@ def serve(run, socket, *, stop_event=None, drain_seconds=1., poll_ms=50):
             run.stop('manual_stop')
             response = run._reply(request_id)
         socket.send_json(response)
+        if response.get('move') is not None and not announced_running:
+            print('Live snapshots accepted; policy actions are flowing.', flush=True)
+            announced_running = True
+        if not announced_running and response.get('idleReason'):
+            reason = response['idleReason']
+            # One startup diagnostic; retain the latest reason for timeout output.
+            if last_wait_reason is None:
+                print(f'Waiting for usable live input: {reason}', flush=True)
+            last_wait_reason = reason
 
 
 def main(argv=None):
@@ -158,7 +176,7 @@ def main(argv=None):
             context.term()
             signal.signal(signal.SIGINT, previous_handler)
         print(f'Run {run.state.value}: {run.stop_reason}. Final state saved: {output}', flush=True)
-    return 0
+    return 1 if run.state.value == 'interrupted' else 0
 
 
 if __name__ == '__main__':
