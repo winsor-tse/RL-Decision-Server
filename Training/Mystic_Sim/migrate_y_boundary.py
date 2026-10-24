@@ -24,7 +24,7 @@ def migrate(source, destination):
     config = saved_config(raw)
     env = checkpoint_factory(raw)()
     try:
-        target = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder)
+        target = metadata(env, recurrent=config.recurrent, actor_head=config.actor_head, recurrent_encoder=config.recurrent_encoder, history_mode=config.history_mode)
     finally:
         env.close()
     if target['engine_sha256'] != NEW_ENGINE:

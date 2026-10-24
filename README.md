@@ -144,12 +144,22 @@ index `8` (`OBS_PLAYER_SIZE + 2`). Player and enemy HP metrics range from
 `Custom_enviornments/Test_Env/Mystic.py` is the active environment used by all
 three training servers and both evaluators.
 
-It exposes 15 discrete actions:
+It exposes 11 discrete actions:
 
 - Movement: `up`, `down`, `left`, `right`
-- Direction: `direction:up`, `direction:down`, `direction:left`, `direction:right`
 - Combat: `attack`
 - Spells: `castSpell:1`, `castSpell:2`, `castSpell:3`, `castSpell:5`, `castSpell:6`, and `castSpell:7`
+
+The Python simulator uses a separate seven-action, 56/80-input contract. New
+simulator-to-live deployment targets one frozen-policy inference episode per
+explicit launch, stopping on death; training stays in the simulator. Phase 8A
+[baseline and optional bridge evidence capture](Inference/Mystic_Live/PHASE_8A.md)
+are available. Phase 8B's [single-run lifecycle and observation-only server](Inference/Mystic_Live/PHASE_8B.md)
+are implemented. Phase 8C's [seven-action and 56/80-input adapters](Inference/Mystic_Live/PHASE_8C.md)
+reuse simulator encoding/history/terrain, with strict telemetry validation and a
+capture audit. Authoritative game feedback still needs server/extension wiring
+and real capture validation; checkpoint loading remains subsequent work. The
+deployment checkpoint remains unselected.
 
 ## Running Training
 

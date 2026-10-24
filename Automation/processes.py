@@ -131,11 +131,11 @@ def wait_until_ready(
         return_code = process.poll()
         if return_code is not None:
             raise RuntimeError(
-                f"Bridge exited with code {return_code} before becoming ready."
+                f"Process exited with code {return_code} before readiness: {ready_signal!r}."
             )
         if time.monotonic() >= deadline:
             raise TimeoutError(
-                f"Bridge did not emit {ready_signal!r} within "
+                f"Process did not emit {ready_signal!r} within "
                 f"{timeout_seconds:g} seconds."
             )
         ready_event.wait(timeout=min(0.1, max(0, deadline - time.monotonic())))
@@ -173,6 +173,11 @@ def run_stack(
     tensorboard_process = None
     child_process = None
     try:
+        # Mystic must finish loading and bind before the bridge accepts ticks.
+        if config.get('child_ready_signal'):
+            child_process = start_process(child_command, capture_output=True)
+            wait_until_ready(child_process, str(config['child_ready_signal']),
+                             float(config.get('child_ready_timeout_seconds', 120)))
         bridge_process = start_process(bridge_command, capture_output=True)
         wait_until_ready(
             bridge_process,
@@ -188,8 +193,11 @@ def run_stack(
                 )
             tensorboard_process = start_process(tensorboard_command)
 
-        print(f"Bridge ready. Starting {child_name}.", flush=True)
-        child_process = start_process(child_command)
+        if child_process is None:
+            print(f"Bridge ready. Starting {child_name}.", flush=True)
+            child_process = start_process(child_command)
+        else:
+            print('Inference and bridge ready. Waiting for live game snapshots.', flush=True)
         return child_process.wait()
     except KeyboardInterrupt:
         child_return_code = wait_for_interrupted_child(

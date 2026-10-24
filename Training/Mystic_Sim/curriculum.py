@@ -86,7 +86,7 @@ def load_stage_checkpoint(path, target_metadata, config):
     env = checkpoint_factory(raw)()
     old_config = saved_config(raw)
     try:
-        source_metadata = metadata(env, recurrent=old_config.recurrent, actor_head=old_config.actor_head, recurrent_encoder=old_config.recurrent_encoder)
+        source_metadata = metadata(env, recurrent=old_config.recurrent, actor_head=old_config.actor_head, recurrent_encoder=old_config.recurrent_encoder, history_mode=old_config.history_mode)
     finally:
         env.close()
     payload = load_checkpoint(path, source_metadata)

@@ -9,7 +9,7 @@ import torch
 from Custom_enviornments.Mystic_Sim.observation import encode_observation
 from Custom_enviornments.Mystic_Sim.viewer import PlaySession
 from .evaluate import load_evaluation_agent
-from .history import ObservableHistory
+from .history import history_class
 from .watch_state import PolicyDecision, snapshot_from_session
 from .watch_dashboard import PolicyViewer
 
@@ -25,7 +25,7 @@ class PolicySession(PlaySession):
 
     def reset(self, new_seed=False):
         super().reset(new_seed)
-        self.history = ObservableHistory.from_env(self.env) if self.recurrent else None
+        self.history = history_class(getattr(self.agent, 'history_mode', 'confirmed')).from_env(self.env) if self.recurrent else None
         self.state = self.agent.initial_state(1) if self.recurrent else None
         self.episode_start = True
         self.rng = np.random.default_rng(self.seed + 1000000)

@@ -4,7 +4,7 @@ import sys
 import unittest
 from unittest import mock
 
-from Automation.infer import resolve_inference_command
+from Automation.infer import main as inference_main, resolve_inference_command
 from Automation.offline_rl import (
     build_evaluation_command,
     build_training_command,
@@ -23,6 +23,70 @@ from Automation.train import resolve_training_command
 
 
 class AutomationConfigTests(unittest.TestCase):
+    def test_mystic_checkpoint_automates_matching_bridge(self):
+        config = {'bridge_command': ['python', '-m', 'Automation.Bridge.ws_zmq_bridge']}
+        with mock.patch('Automation.infer.load_config', return_value=config), \
+                mock.patch('Automation.infer.run_stack', return_value=0) as stack:
+            self.assertEqual(inference_main(['--checkpoint', 'runs/my model.pt',
+                                            '--assume-sim-parity']), 0)
+        configured, command, _ = stack.call_args.args
+        self.assertIn('--single-run', configured['bridge_command'])
+        self.assertIn('runs/my model.pt', command)
+        self.assertIn('--assume-sim-parity', command)
+        self.assertIn('--sampled', command)
+        self.assertEqual(command[command.index('--device') + 1], 'cuda')
+        self.assertIn('child_ready_signal', configured)
+        self.assertNotIn('--single-run', config['bridge_command'])
+
+    def test_checkpoint_action_selection_modes(self):
+        config = {'bridge_command': ['python', '-m', 'Automation.Bridge.ws_zmq_bridge']}
+        for mode in ('sampled', 'greedy'):
+            with self.subTest(mode=mode), \
+                    mock.patch('Automation.infer.load_config', return_value=config), \
+                    mock.patch('Automation.infer.run_stack', return_value=0) as stack:
+                inference_main(['--checkpoint', 'model.pt', '--action-mode', mode, '--device', 'cpu'])
+                self.assertEqual('--sampled' in stack.call_args.args[1], mode == 'sampled')
+                command = stack.call_args.args[1]
+                self.assertEqual(command[command.index('--device') + 1], 'cpu')
+
+    def test_mystic_custom_command_also_configures_bridge(self):
+        config = {'bridge_command': ['python', '-m', 'Automation.Bridge.ws_zmq_bridge']}
+        with mock.patch('Automation.infer.load_config', return_value=config), \
+                mock.patch('Automation.infer.run_stack', return_value=0) as stack:
+            inference_main(['--command', 'python -m Inference.Mystic_Live.server --observe-only'])
+        self.assertIn('--single-run', stack.call_args.args[0]['bridge_command'])
+
+    def test_backend_readiness_precedes_bridge_launch_and_cleanup(self):
+        events = []
+        child, bridge = mock.Mock(), mock.Mock()
+        child.wait.return_value = 0
+        def start(command, **kwargs):
+            events.append(('start', command))
+            return child if command == ['actor'] else bridge
+        def ready(process, signal, timeout):
+            events.append(('ready', signal))
+        with mock.patch('Automation.processes.start_process', side_effect=start), \
+                mock.patch('Automation.processes.wait_until_ready', side_effect=ready), \
+                mock.patch('Automation.processes.terminate_process') as cleanup:
+            self.assertEqual(run_stack({'bridge_command': ['bridge'],
+                                        'child_ready_signal': 'actor ready'},
+                                       ['actor'], 'inference', start_tensorboard=False), 0)
+        self.assertEqual(events[:3], [('start', ['actor']), ('ready', 'actor ready'),
+                                      ('start', ['bridge'])])
+        cleanup.assert_any_call(child, 'inference')
+        cleanup.assert_any_call(bridge, 'bridge')
+
+    def test_failed_actor_does_not_open_bridge(self):
+        child = mock.Mock()
+        with mock.patch('Automation.processes.start_process', return_value=child) as start, \
+                mock.patch('Automation.processes.wait_until_ready', side_effect=RuntimeError('load failed')), \
+                mock.patch('Automation.processes.terminate_process') as cleanup:
+            with self.assertRaisesRegex(RuntimeError, 'load failed'):
+                run_stack({'bridge_command': ['bridge'], 'child_ready_signal': 'ready'},
+                          ['actor'], 'inference', start_tensorboard=False)
+        start.assert_called_once_with(['actor'], capture_output=True)
+        cleanup.assert_any_call(child, 'inference')
+
     def test_awac_offline_routes_options_without_bridge(self):
         with (
             mock.patch('Automation.offline_rl.run_process', return_value=7) as process,

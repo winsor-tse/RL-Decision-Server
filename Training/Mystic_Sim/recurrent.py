@@ -68,6 +68,7 @@ class RecurrentAgent(nn.Module):
         self.register_buffer('observation_scale', torch.tensor(observation_high, dtype=torch.float32))
         self.actor_head = actor_head
         self.recurrent_encoder = recurrent_encoder
+        self.history_mode = 'live' if len(observation_high) == 71 else 'confirmed'
         # Initialize the critic first so matched-seed head comparisons have
         # identical critic and actor trunk initialization despite head size.
         critic = RecurrentBranch(len(observation_high), 1, encoder=recurrent_encoder)

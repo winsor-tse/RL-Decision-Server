@@ -23,6 +23,7 @@ class PPOConfig:
     recurrent: bool = False
     actor_head: str = 'linear'
     recurrent_encoder: str = 'cross_attention'
+    history_mode: str = 'confirmed'
     seed: int = 1
     total_timesteps: int = 262144
     num_envs: int = 1
@@ -54,6 +55,10 @@ class PPOConfig:
         return math.ceil(self.total_timesteps / self.batch_size)
 
     def validate(self):
+        if self.history_mode not in ('confirmed', 'live'):
+            raise ValueError('history_mode must be confirmed or live')
+        if self.history_mode == 'live' and (not self.recurrent or self.recurrent_encoder != 'flat'):
+            raise ValueError('Live history requires --recurrent --recurrent-encoder flat')
         if self.recurrent_encoder not in ('flat', 'cross_attention'):
             raise ValueError('recurrent_encoder must be flat or cross_attention')
         if self.actor_head not in ('linear', 'tanh'):
@@ -103,7 +108,8 @@ class SimBatch:
     Step observations are always the final pre-reset observations. Phase 7 may
     replace this adapter with subprocess workers without changing PPO targets.
     """
-    def __init__(self, count, seed, factory=make_env, recurrent=False, sampling_states=None):
+    def __init__(self, count, seed, factory=make_env, recurrent=False, sampling_states=None,
+                 history_mode='confirmed'):
         self.envs = []
         try:
             for _ in range(count):
@@ -116,8 +122,8 @@ class SimBatch:
             self.observations = np.stack([e.reset(seed=None if sampling_states is not None else seed+i)[0]
                                           for i, e in enumerate(self.envs)])
             self.encounter_diagnostics = [EncounterDiagnostics(e.world) for e in self.envs]
-            from .history import ObservableHistory
-            self.histories = [ObservableHistory.from_env(e) for e in self.envs] if recurrent else None
+            from .history import history_class
+            self.histories = [history_class(history_mode).from_env(e) for e in self.envs] if recurrent else None
             if self.histories:
                 self.observations = np.stack([h.encode(o) for h, o in zip(self.histories, self.observations)])
         except Exception:
@@ -207,7 +213,10 @@ def json_write(path, data):
     temp.replace(path)
 
 
-def metadata(env, recurrent=False, actor_head='linear', recurrent_encoder='cross_attention'):
+def metadata(env, recurrent=False, actor_head='linear', recurrent_encoder='cross_attention', history_mode='confirmed'):
+    if history_mode not in ('confirmed', 'live') or (history_mode == 'live' and
+            (not recurrent or recurrent_encoder != 'flat')):
+        raise ValueError('Live history requires a flat recurrent policy')
     import inspect
     source = Path(inspect.getfile(MysticSimEnv)).parent
     result = {
@@ -228,13 +237,15 @@ def metadata(env, recurrent=False, actor_head='linear', recurrent_encoder='cross
         if actor_head not in ('linear', 'tanh'):
             raise ValueError('actor_head must be linear or tanh')
         from .history import HISTORY_SCHEMA, HISTORY_FEATURES, SENSOR_RANGE, observation_high
+        if history_mode == 'live':
+            from .history import LIVE_HISTORY_SCHEMA as HISTORY_SCHEMA, LIVE_HISTORY_FEATURES as HISTORY_FEATURES
         result.update(architecture=('ppo_separate_lstm_128_linear_actor_v2' if actor_head == 'linear'
                                     else 'ppo_separate_lstm_128_v1'),
                       history_schema=HISTORY_SCHEMA, history_features=HISTORY_FEATURES,
                       terrain_sensors={'range_tiles': SENSOR_RANGE, 'directions': ['up', 'down', 'left', 'right'],
                                        'distance': 'free_tiles_before_blocker_divided_by_range',
                                        'boundaries_solid': True, 'entities_included': False},
-                      observation_scale=observation_high(env.observation_space.high).tolist())
+                      observation_scale=observation_high(env.observation_space.high, history_mode).tolist())
         result['contract'] = {**result['contract'], 'observation_schema': HISTORY_SCHEMA,
                               'observation_size': len(result['observation_scale'])}
         if recurrent_encoder == 'cross_attention':

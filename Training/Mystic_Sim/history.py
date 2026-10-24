@@ -7,6 +7,10 @@ import numpy as np
 
 HISTORY_SCHEMA = 'mystic-ten-enemies-relative-five-local-terrain-80-v4'
 SENSOR_RANGE = 4
+LIVE_HISTORY_SCHEMA = 'mystic-ten-enemies-relative-five-chosen-action-terrain-71-v1'
+LIVE_HISTORY_FEATURES = ([f'previous_chosen_action_{i}' for i in range(7)] +
+                         [f'terrain_{name}_{field}' for name in ('up', 'down', 'left', 'right')
+                          for field in ('free_distance', 'detected')])
 SENSOR_DIRECTIONS = (('up', 0, -1), ('down', 0, 1), ('left', -1, 0), ('right', 1, 0))
 HISTORY_FEATURES = ([f'previous_action_{i}' for i in range(7)] +
                     ['action_applied', 'movement_blocked', 'cooldown_rejected'] +
@@ -37,8 +41,9 @@ def terrain_sensors(x, y, *, width, height, blocked_cells, radius=SENSOR_RANGE):
     return result
 
 
-def observation_high(base):
-    return np.concatenate((base, np.ones(len(HISTORY_FEATURES), dtype=np.float32))).astype(np.float32)
+def observation_high(base, history_mode='confirmed'):
+    features = LIVE_HISTORY_FEATURES if history_mode == 'live' else HISTORY_FEATURES
+    return np.concatenate((base, np.ones(len(features), dtype=np.float32))).astype(np.float32)
 
 
 class ObservableHistory:
@@ -78,3 +83,24 @@ class ObservableHistory:
                     blocked=info['collision_kind'] is not None,
                     cooldown_rejected=info['action_failure_reason'] in
                     ('cooldown', 'family_cooldown', 'global_cooldown'), elapsed_ms=elapsed_ms)
+
+
+class LiveObservableHistory(ObservableHistory):
+    """Previous chosen action, regardless of acceptance, plus static terrain."""
+    def reset(self):
+        self.features = np.zeros(7, dtype=np.float32)
+
+    def record_action(self, action):
+        if type(action) is not int or not 0 <= action < 7:
+            raise ValueError('Expected a seven-action index')
+        self.features[:] = 0
+        self.features[action] = 1
+
+    def update_from_info(self, observation, action, info, elapsed_ms=200):
+        self.record_action(action)
+
+
+def history_class(mode='confirmed'):
+    if mode not in ('confirmed', 'live'):
+        raise ValueError('Unknown history mode')
+    return LiveObservableHistory if mode == 'live' else ObservableHistory

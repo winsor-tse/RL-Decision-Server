@@ -132,9 +132,11 @@ def load_run_config(path, stage=None):
 
 def inherit_checkpoint_encoder(run, config_path, source):
     """Legacy configs inherit architecture only; explicit choices remain strict."""
-    if source and 'recurrent_encoder' not in read_run_config(config_path).get('ppo', {}):
+    if source:
+        explicit = read_run_config(config_path).get('ppo', {})
         saved = saved_config(torch.load(source, map_location='cpu', weights_only=True))
-        return replace(run, ppo=replace(run.ppo, recurrent_encoder=saved.recurrent_encoder))
+        inherited = {key: getattr(saved, key) for key in ('recurrent_encoder', 'history_mode') if key not in explicit}
+        return replace(run, ppo=replace(run.ppo, **inherited))
     return run
 
 
@@ -144,7 +146,7 @@ def preflight(run, *, resume=None, continue_from=None):
         raise ValueError('Choose resume or continue_from, not both')
     env = encounter_factory(run.encounter)()
     try:
-        contract = metadata(env, recurrent=run.ppo.recurrent, actor_head=run.ppo.actor_head, recurrent_encoder=run.ppo.recurrent_encoder)
+        contract = metadata(env, recurrent=run.ppo.recurrent, actor_head=run.ppo.actor_head, recurrent_encoder=run.ppo.recurrent_encoder, history_mode=run.ppo.history_mode)
         payload = load_checkpoint(resume, contract) if resume else None
         if payload and asdict(saved_config(payload)) != asdict(run.ppo):
             raise ValueError('Resume config must match saved PPO settings; use continuation for a new budget')
